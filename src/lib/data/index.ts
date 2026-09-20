@@ -870,6 +870,23 @@ async function cachedListWithDegradedEmptyTtl<T>(
 }
 
 /**
+ * 上一次真的重算 getTechnicalScreen 時的執行摘要（候選池幾檔、成功幾檔、
+ * K線抓不到幾檔），給 /api/cron/warm-cache 回報用。
+ *
+ * 為什麼需要這個：2026-09-20 追「AI 說沒有台股技術指標清單」這個 bug 時，
+ * 外面唯一看得到的訊息是「這份清單是空的」，完全無法分辨到底是「候選池
+ * （searchStocks）本身就是 0 筆」還是「候選池有 120 檔但每一檔的 K 線都抓不
+ * 到」——這兩種是完全不同的根因、要往完全不同的方向修。console.error 在正式
+ * 站當下拿不到，只能靠反覆間接量測猜，浪費很多時間。把這個摘要留下來，之後
+ * 同類問題可以直接看出是哪一段斷掉。
+ */
+const lastTechScreenRun: Record<string, string> = {};
+
+export function getLastTechScreenRun(): Record<string, string> {
+  return { ...lastTechScreenRun };
+}
+
+/**
  * 全市場（成交金額前 N 檔）的「每一檔技術指標實際狀態」快照，專門用來支援
  * 「多重技術指標同時符合」的篩選問題。
  *
@@ -923,7 +940,10 @@ export async function getTechnicalScreen(market: Market): Promise<TechScreenItem
         }
       );
 
-      return results.filter((r): r is TechScreenItem => r !== null);
+      const kept = results.filter((r): r is TechScreenItem => r !== null);
+      lastTechScreenRun[market] =
+        `候選池 ${pool.length} 檔（取前 ${candidates.length}）→ 成功 ${kept.length} 檔、抓不到K線或指標算不出來 ${candidates.length - kept.length} 檔，於 ${new Date().toISOString()}`;
+      return kept;
     }
   );
 }

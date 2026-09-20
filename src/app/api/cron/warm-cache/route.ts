@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChips, getEarnings, getFundamentals, getIndices, getMaterialAnnouncements, getMultiSignalStocks, getTechnicalScreen, searchStocks } from "@/lib/data";
+import { getChips, getEarnings, getFundamentals, getIndices, getLastTechScreenRun, getMaterialAnnouncements, getMultiSignalStocks, getTechnicalScreen, searchStocks } from "@/lib/data";
 import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
@@ -84,7 +84,14 @@ export async function GET(req: NextRequest) {
       warm("earnings", getEarnings(WARM_PROBE_SYMBOL, "TW")),
       warm("announcements", getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW")),
     ]);
-    return NextResponse.json({ ok: true, warmedAt: new Date().toISOString(), outcomes });
+    return NextResponse.json({
+      ok: true,
+      warmedAt: new Date().toISOString(),
+      outcomes,
+      // 只有這次請求真的重算過技術指標篩選時才會有內容（讀到快取就不會重算，
+      // 這個欄位會是空的）——見 getLastTechScreenRun 的說明。
+      techScreenRun: getLastTechScreenRun(),
+    });
   } catch (err) {
     // Same philosophy as the daily-brief cron: a failed warm-up isn't an
     // outage, real visitors still get correct (just possibly slower) data
