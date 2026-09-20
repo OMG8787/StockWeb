@@ -894,20 +894,32 @@ export async function getTechnicalScreen(market: Market): Promise<TechScreenItem
         candidates,
         TECH_SCREEN_CHART_CONCURRENCY,
         async (item): Promise<TechScreenItem | null> => {
-          const chart = await getChart(item.symbol, "3m", item.market);
-          if (!chart) return null;
-          const state = computeIndicatorState(chart.candles, item.price);
-          if (!state) return null;
-          return {
-            symbol: item.symbol,
-            market: item.market,
-            name: item.name,
-            price: item.price,
-            changePercent: item.changePercent,
-            turnover: item.turnover,
-            state,
-            signals: computeSignals(chart.candles, item.price, "3m"),
-          };
+          // 逐檔各自 try/catch：mapWithConcurrency 底下是 Promise.all，任何一檔
+          // 拋例外就會讓「整個市場」的篩選結果一起變成 rejected，呼叫端
+          // （buildTechScreenGrounding 的 .catch(() => [])）再把它吞成空陣列——
+          // 結果就是 120 檔裡只要有 1 檔的 K 線抓取出錯，AI 就會回答「資料裡沒有
+          // 台股的技術指標篩選清單」，而且因為錯誤被吞掉、外面完全看不出原因。
+          // 單一檔抓不到就跳過那一檔（照 getChart 回傳 null 時本來就有的處理），
+          // 才是正確的降級方式。
+          try {
+            const chart = await getChart(item.symbol, "3m", item.market);
+            if (!chart) return null;
+            const state = computeIndicatorState(chart.candles, item.price);
+            if (!state) return null;
+            return {
+              symbol: item.symbol,
+              market: item.market,
+              name: item.name,
+              price: item.price,
+              changePercent: item.changePercent,
+              turnover: item.turnover,
+              state,
+              signals: computeSignals(chart.candles, item.price, "3m"),
+            };
+          } catch (err) {
+            console.error(`[tech-screen] ${item.market} ${item.symbol} 指標計算失敗，跳過這一檔：`, err);
+            return null;
+          }
         }
       );
 
@@ -971,19 +983,27 @@ export async function getVolumeSurgeStocks(market: Market): Promise<VolumeSurgeI
         candidates,
         VOLUME_SURGE_CHART_CONCURRENCY,
         async (item): Promise<VolumeSurgeItem | null> => {
-          const chart = await getChart(item.symbol, "1m", item.market);
-          if (!chart) return null;
-          const streak = computeStreak(chart.candles);
-          return {
-            symbol: item.symbol,
-            market: item.market,
-            name: item.name,
-            price: item.price,
-            changePercent: item.changePercent,
-            volumeRatio: item.volumeRatio,
-            streakDays: streak.days,
-            streakDirection: streak.direction,
-          };
+          // 逐檔容錯，理由同 getTechnicalScreen 裡的說明：一檔出錯不該讓整份
+          // 「價漲量增」清單變成空的，那正是使用者當初回報的「明明有股票卻被
+          // 誤答沒有資料」的表現方式。
+          try {
+            const chart = await getChart(item.symbol, "1m", item.market);
+            if (!chart) return null;
+            const streak = computeStreak(chart.candles);
+            return {
+              symbol: item.symbol,
+              market: item.market,
+              name: item.name,
+              price: item.price,
+              changePercent: item.changePercent,
+              volumeRatio: item.volumeRatio,
+              streakDays: streak.days,
+              streakDirection: streak.direction,
+            };
+          } catch (err) {
+            console.error(`[volume-surge] ${item.market} ${item.symbol} 連漲天數計算失敗，跳過這一檔：`, err);
+            return null;
+          }
         }
       );
 

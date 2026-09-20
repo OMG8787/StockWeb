@@ -45,10 +45,22 @@ export async function GET(req: NextRequest) {
   // upstream — e.g. a TPEx hiccup — never takes the whole warm-up run down
   // with it; real visitors still get correct (just possibly slower) data
   // computed on demand for whichever piece didn't warm successfully.
+  // 每一項的實際結果也會回報在 HTTP 回應裡（不只寫進 console）——2026-09-20 查
+  // 「AI 問答說沒有台股技術指標清單」這個 bug 時，唯一能拿到的線索就是
+  // console.error，而正式站的 serverless log 在排查當下拿不到，只能靠間接量測
+  // 反覆猜測是「算出空的」還是「整個拋錯」。把結果直接回在這支 cron 的回應裡，
+  // 之後同類問題可以一眼看出是哪一項壞掉、壞在哪裡，不用再猜。
+  const outcomes: Record<string, string> = {};
   const warm = (label: string, task: Promise<unknown>) =>
-    task.catch((err) => {
-      console.error(`[cron] warm-cache: ${label} warm-up failed:`, err);
-    });
+    task
+      .then((value) => {
+        outcomes[label] = Array.isArray(value) ? `ok (${value.length} 筆)` : value == null ? "ok (無資料)" : "ok";
+        return value;
+      })
+      .catch((err) => {
+        outcomes[label] = `失敗：${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
+        console.error(`[cron] warm-cache: ${label} warm-up failed:`, err);
+      });
 
   try {
     await Promise.all([
@@ -72,7 +84,7 @@ export async function GET(req: NextRequest) {
       warm("earnings", getEarnings(WARM_PROBE_SYMBOL, "TW")),
       warm("announcements", getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW")),
     ]);
-    return NextResponse.json({ ok: true, warmedAt: new Date().toISOString() });
+    return NextResponse.json({ ok: true, warmedAt: new Date().toISOString(), outcomes });
   } catch (err) {
     // Same philosophy as the daily-brief cron: a failed warm-up isn't an
     // outage, real visitors still get correct (just possibly slower) data
