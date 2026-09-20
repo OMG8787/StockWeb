@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
-import StockChart from "@/components/StockChart";
+import StockChart from "@/components/StockChartLazy";
 import AskAboutButton from "@/components/AskAboutButton";
 import WatchlistButton from "@/components/WatchlistButton";
 import FundamentalsCard from "@/components/FundamentalsCard";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import StockTable from "@/components/StockTable";
 import MarketTabs from "@/components/MarketTabs";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
@@ -124,6 +124,9 @@ function MarketSection({
   const [sortBy, setSortBy] = useState<SortBy>("changePercent");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [items, setItems] = useState<SearchItem[] | null>(null);
+  // Tracks whether the search effect below has ever run — see its own
+  // comment for why the very first run skips the debounce delay.
+  const isFirstRunRef = useRef(true);
   const [sectorOptions, setSectorOptions] = useState<string[]>([]);
 
   useEffect(() => {
@@ -157,13 +160,27 @@ function MarketSection({
     // keystroke, so typing "2330" used to fire four full searches (and
     // typing a price, one per digit) — each one re-filtering the whole
     // universe server-side — with only the last result ever displayed.
+    //
+    // The very first run (page just mounted, nothing typed yet) has nothing
+    // to debounce against — there's no rapid-fire prior request this delay
+    // is protecting against — so it was just adding a flat 250ms of pure
+    // waiting before a first-time visitor ever saw a single result. Skipped
+    // here; every subsequent run (an actual filter change) still debounces
+    // as before.
     const controller = new AbortController();
-    const timer = setTimeout(() => {
+    const isFirstRun = isFirstRunRef.current;
+    isFirstRunRef.current = false;
+    const runSearch = () => {
       fetch(`/api/search?${params.toString()}`, { signal: controller.signal })
         .then((res) => res.json())
         .then((data) => setItems(data.items ?? []))
         .catch(() => {});
-    }, SEARCH_DEBOUNCE_MS);
+    };
+    if (isFirstRun) {
+      runSearch();
+      return () => controller.abort();
+    }
+    const timer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
     return () => {
       clearTimeout(timer);
       controller.abort();
