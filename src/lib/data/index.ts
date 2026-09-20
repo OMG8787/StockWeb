@@ -1,4 +1,4 @@
-import { cached, cachedMap, mapWithConcurrency } from "./cache";
+import { cached, cachedMap, mapWithConcurrency, peekCached, writeCached } from "./cache";
 import type { Candle, ChartRange, ChartResponse, Chips, Earnings, Fundamentals, IndexQuote, Market, MaterialAnnouncement, Quote, SearchItem } from "./types";
 import { US_UNIVERSE, findInUniverse, findSymbolByName, getTwUniverse, UniverseEntry } from "./universe";
 import {
@@ -798,6 +798,9 @@ export interface TechScreenItem {
 // 是 Vercel 免費方案用量吃緊後盤點出來的最大浪費源頭，30分鐘仍然遠比技術指標
 // 交叉訊號實際變化的速度新鮮很多。
 const TECH_SCREEN_TTL_MS = 30 * 60_000;
+// 空結果（一檔都沒算出來）專用的短 TTL——見
+// cachedListWithDegradedEmptyTtl() 的完整說明。
+const TECH_SCREEN_DEGRADED_TTL_MS = 60_000;
 // 掃描範圍：依今日成交金額（＝市場資金實際關注度）由大到小取前 N 檔。
 //
 // 為什麼不沿用 getMultiSignalStocks 那個「當日漲跌幅最大前15檔」的候選池：
@@ -821,6 +824,52 @@ const TECH_SCREEN_CANDIDATE_LIMIT: Record<Market, number> = { TW: 120, US: 60 };
 const TECH_SCREEN_CHART_CONCURRENCY = 20;
 
 /**
+ * `cached()` 的變體：算出來是**空清單**時只給一個很短的 TTL，真的算出資料才
+ * 給正常的長 TTL。
+ *
+ * 2026-09-20 正式站實際踩到的 bug：AI 問答被問「有沒有 MACD 跟 KD 都黃金交叉
+ * 的股票」時，連續 30 分鐘以上都回答「資料裡沒有提供台股的技術指標篩選清單，
+ * 只有美股的」——台股整個區塊憑空消失。根因不是計算太慢或逾時（實測台股前 120
+ * 檔的 3 個月 K 線在併發 20 下只要約 10 秒、120/120 全部成功），而是：
+ * `searchStocks({market:"TW"})` 在某個瞬間因為上游（TWSE/TPEx 報價或清單）
+ * 暫時性降級而回傳 0 筆，`getTechnicalScreen("TW")` 於是算出 `[]`，這個 `[]`
+ * 就被 `cached()` 當成正常結果**整整存活 30 分鐘**。更糟的是每 5 分鐘一次的
+ * warm-cache 排程重新呼叫時只會讀到這份快取的 `[]`，不會重算，所以系統完全
+ * 沒有自我修復的機會，只能乾等 TTL 到期。
+ *
+ * 這跟 universe.ts 早先修過的「TW_UNIVERSE_DEGRADED_TTL_MS」是同一類問題，
+ * 做法也刻意跟那邊一致：用 peekCached/writeCached 自己決定要寫多長的 TTL，
+ * 並自己補一個 single-flight 旗標（`cached()` 內建的去重在這裡用不到，而這兩
+ * 份資料都很昂貴，沒有去重會讓多個同時進來的 cache miss 各自重跑一次全市場
+ * 掃描）。空結果仍然會被短暫快取（而不是完全不快取），是為了避免上游真的掛掉
+ * 時每一個請求都去重打一次全市場掃描。
+ */
+const degradedEmptyInFlight = new Map<string, Promise<unknown[]>>();
+
+async function cachedListWithDegradedEmptyTtl<T>(
+  key: string,
+  ttlMs: number,
+  degradedTtlMs: number,
+  load: () => Promise<T[]>
+): Promise<T[]> {
+  const hit = await peekCached<T[]>(key);
+  if (hit) return hit;
+  const pending = degradedEmptyInFlight.get(key);
+  if (pending) return (await pending) as T[];
+  const promise = (async () => {
+    const value = await load();
+    await writeCached(key, value, value.length > 0 ? ttlMs : degradedTtlMs);
+    return value;
+  })();
+  degradedEmptyInFlight.set(key, promise as Promise<unknown[]>);
+  try {
+    return await promise;
+  } finally {
+    degradedEmptyInFlight.delete(key);
+  }
+}
+
+/**
  * 全市場（成交金額前 N 檔）的「每一檔技術指標實際狀態」快照，專門用來支援
  * 「多重技術指標同時符合」的篩選問題。
  *
@@ -833,33 +882,38 @@ const TECH_SCREEN_CHART_CONCURRENCY = 20;
  *    而不是靠 AI 看著標籤自己猜。
  */
 export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
-  return cached(`tech-screen:${market}:v1`, TECH_SCREEN_TTL_MS, async () => {
-    const pool = await searchStocks({ market, sortBy: "turnover", sortDir: "desc" });
-    const candidates = pool.slice(0, TECH_SCREEN_CANDIDATE_LIMIT[market]);
+  return cachedListWithDegradedEmptyTtl(
+    `tech-screen:${market}:v1`,
+    TECH_SCREEN_TTL_MS,
+    TECH_SCREEN_DEGRADED_TTL_MS,
+    async () => {
+      const pool = await searchStocks({ market, sortBy: "turnover", sortDir: "desc" });
+      const candidates = pool.slice(0, TECH_SCREEN_CANDIDATE_LIMIT[market]);
 
-    const results = await mapWithConcurrency(
-      candidates,
-      TECH_SCREEN_CHART_CONCURRENCY,
-      async (item): Promise<TechScreenItem | null> => {
-        const chart = await getChart(item.symbol, "3m", item.market);
-        if (!chart) return null;
-        const state = computeIndicatorState(chart.candles, item.price);
-        if (!state) return null;
-        return {
-          symbol: item.symbol,
-          market: item.market,
-          name: item.name,
-          price: item.price,
-          changePercent: item.changePercent,
-          turnover: item.turnover,
-          state,
-          signals: computeSignals(chart.candles, item.price, "3m"),
-        };
-      }
-    );
+      const results = await mapWithConcurrency(
+        candidates,
+        TECH_SCREEN_CHART_CONCURRENCY,
+        async (item): Promise<TechScreenItem | null> => {
+          const chart = await getChart(item.symbol, "3m", item.market);
+          if (!chart) return null;
+          const state = computeIndicatorState(chart.candles, item.price);
+          if (!state) return null;
+          return {
+            symbol: item.symbol,
+            market: item.market,
+            name: item.name,
+            price: item.price,
+            changePercent: item.changePercent,
+            turnover: item.turnover,
+            state,
+            signals: computeSignals(chart.candles, item.price, "3m"),
+          };
+        }
+      );
 
-    return results.filter((r): r is TechScreenItem => r !== null);
-  });
+      return results.filter((r): r is TechScreenItem => r !== null);
+    }
+  );
 }
 
 export interface VolumeSurgeItem {
@@ -880,6 +934,11 @@ export interface VolumeSurgeItem {
 // 2026-09-20：拉長到 20 分鐘——一樣是要對候選股逐一抓K線的較貴計算，理由同
 // MOMENTUM_TTL_MS/TECH_SCREEN_TTL_MS 的說明。
 const VOLUME_SURGE_TTL_MS = 20 * 60_000;
+// 空結果專用的短 TTL，理由同 TECH_SCREEN_DEGRADED_TTL_MS：這份清單的候選池
+// 同樣來自 searchStocks，上游暫時性降級時一樣會算出空清單，一旦被當成正常
+// 結果快取 20 分鐘，AI 問「價漲量增、連漲N天」就會在這段期間一律誤答「沒有
+// 資料」——正是這個功能當初被使用者回報的那個 bug 的表現方式。
+const VOLUME_SURGE_DEGRADED_TTL_MS = 60_000;
 // 這裡刻意跟 getMultiSignalStocks 的做法不同：先用完全不用抓K線、成本很低的
 // searchStocks({volumeTrends:["buy-leaning"]})（只靠已經有的報價+近期均量快取）
 // 掃過「整個台股市場」找出真正符合「今日價漲、且量能明顯高於自己均量」的股票，
@@ -900,34 +959,39 @@ const VOLUME_SURGE_CHART_CONCURRENCY = 25;
  * 一種天數門檻或直接說沒有資料。
  */
 export async function getVolumeSurgeStocks(market: Market): Promise<VolumeSurgeItem[]> {
-  return cached(`volume-surge:${market}:v1`, VOLUME_SURGE_TTL_MS, async () => {
-    const pool = await searchStocks({ market, volumeTrends: ["buy-leaning"], sortBy: "turnover", sortDir: "desc" });
-    const candidates = pool.slice(0, VOLUME_SURGE_CANDIDATE_LIMIT);
+  return cachedListWithDegradedEmptyTtl(
+    `volume-surge:${market}:v1`,
+    VOLUME_SURGE_TTL_MS,
+    VOLUME_SURGE_DEGRADED_TTL_MS,
+    async () => {
+      const pool = await searchStocks({ market, volumeTrends: ["buy-leaning"], sortBy: "turnover", sortDir: "desc" });
+      const candidates = pool.slice(0, VOLUME_SURGE_CANDIDATE_LIMIT);
 
-    const results = await mapWithConcurrency(
-      candidates,
-      VOLUME_SURGE_CHART_CONCURRENCY,
-      async (item): Promise<VolumeSurgeItem | null> => {
-        const chart = await getChart(item.symbol, "1m", item.market);
-        if (!chart) return null;
-        const streak = computeStreak(chart.candles);
-        return {
-          symbol: item.symbol,
-          market: item.market,
-          name: item.name,
-          price: item.price,
-          changePercent: item.changePercent,
-          volumeRatio: item.volumeRatio,
-          streakDays: streak.days,
-          streakDirection: streak.direction,
-        };
-      }
-    );
+      const results = await mapWithConcurrency(
+        candidates,
+        VOLUME_SURGE_CHART_CONCURRENCY,
+        async (item): Promise<VolumeSurgeItem | null> => {
+          const chart = await getChart(item.symbol, "1m", item.market);
+          if (!chart) return null;
+          const streak = computeStreak(chart.candles);
+          return {
+            symbol: item.symbol,
+            market: item.market,
+            name: item.name,
+            price: item.price,
+            changePercent: item.changePercent,
+            volumeRatio: item.volumeRatio,
+            streakDays: streak.days,
+            streakDirection: streak.direction,
+          };
+        }
+      );
 
-    return results
-      .filter((r): r is VolumeSurgeItem => r !== null)
-      .sort((a, b) => b.streakDays - a.streakDays);
-  });
+      return results
+        .filter((r): r is VolumeSurgeItem => r !== null)
+        .sort((a, b) => b.streakDays - a.streakDays);
+    }
+  );
 }
 
 export interface ValueScreenItem {

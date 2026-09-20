@@ -149,6 +149,16 @@ async function buildStockGrounding(
     // Bollinger read, same engine as the chart page and /highlights.
     const signals = computeSignals(chart.candles, quote.price, "3m");
     if (signals.length > 0) lines.push(`技術訊號：${signals.map((s) => s.label).join("、")}`);
+    // 上面那行只列「今天有觸發的」訊號，沒觸發的指標整個不會出現——2026-09-20
+    // 正式站實測抓到的缺口：問「聯發科現在的RSI和MACD是什麼狀態?」時，因為當天
+    // MACD 沒有發生交叉，資料裡連一個 MACD 字樣都沒有，AI 就拿當天剛好有觸發的
+    // KD 頂替，回答「RSI 72 超買、KD 黃金交叉」，完全沒提使用者明明問到的 MACD，
+    // 也沒說「MACD 今天沒有交叉」。使用者指名問某個指標時，「今天沒有交叉」本身
+    // 就是一個完整、正確的答案，前提是資料裡要講得出來。這裡補上一行「每個指標
+    // 當下的實際狀態值」（有沒有交叉、K/D/RSI 實際數值、均線排列、MACD 在 0 軸
+    // 哪一側），讓任何被指名問到的指標都有真實數字可以回答，不必靠猜或改答別的。
+    const indicatorLine = describeIndicatorState(computeIndicatorState(chart.candles, quote.price));
+    if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「今天沒有交叉」，不要改用別的指標代答）：${indicatorLine}`);
   } else {
     lines.push("（歷史走勢資料目前無法取得）");
   }
@@ -269,10 +279,31 @@ function isFollowupShape(question: string): boolean {
   return BARE_FOLLOWUP_PATTERN.test(question.trim()) || isShortFollowup(question);
 }
 
+// 2026-09-20 正式站實測抓到的漏接：同一段對話裡問「殖利率高的股票有哪些」AI
+// 正確列出了殖利率排行，但問「有沒有本益比低的股票」卻回答「參考資料裡沒有提供
+// 本益比最低排行」——兩份排行明明是同一個資料區塊（buildMoversGrounding 裡的
+// valueBlocks）一起送進來的。差別只在意圖判斷：「有哪些」在
+// MOVERS_INTENT_PATTERN 裡，「有沒有…的股票」不在，所以後者根本沒有附上任何
+// 篩選資料，AI 如實回答「沒有資料」。
+//
+// 修法比照 conversationWantsTechScreen 的結構：「提到某個排行用的指標」＋「這句
+// 話是在找/篩股票」兩個條件同時成立才算，而不是看到「本益比」就觸發——「本益比
+// 是什麼意思」這種名詞解釋不該被塞一整份全市場排行，而「台積電的本益比多少」
+// 走的是個股資料那條路（這兩個 pattern 只有在問句沒指到任何特定股票時才會被
+// 檢查，見 answerQuestion 裡的 targets.length === 0 前提）。
+const RANKING_METRIC_PATTERN =
+  /本益比|本益比|PE\s*ratio|殖利率|配息|股利|股價淨值比|股价净值比|淨值比|净值比|成交金額|成交金额|成交量|周轉|周转|跌幅|跌最多|跌得最多|跌深|漲幅|涨幅|法人|外資|外资|投信|自營|自营|買超|买超|賣超|卖超|融資|融资|融券/i;
+
 function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
   if (MOVERS_INTENT_PATTERN.test(question)) return true;
+  if (RANKING_METRIC_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
   if (!isFollowupShape(question)) return false;
-  return history.some((turn) => turn.role === "user" && MOVERS_INTENT_PATTERN.test(turn.content));
+  return history.some(
+    (turn) =>
+      turn.role === "user" &&
+      (MOVERS_INTENT_PATTERN.test(turn.content) ||
+        (RANKING_METRIC_PATTERN.test(turn.content) && TECH_SCREEN_VERB_PATTERN.test(turn.content)))
+  );
 }
 
 // 「用技術指標篩股票」的問法。拆成「有提到技術指標」＋「這句話是在找/篩股票」
@@ -654,6 +685,42 @@ async function buildHoldingsGrounding(holdings: HoldingInput[], includeTechnical
     })
   );
   return lines.join("\n");
+}
+
+/**
+ * 把一檔股票「每個技術指標當下的實際狀態」寫成一句話——**沒有觸發交叉的指標
+ * 也一樣要出現**，這正是它跟 computeSignals()（只回傳已觸發的標籤）的分工。
+ * 見呼叫端（個股資料組裝處）註解記錄的那個實測缺口。
+ */
+function describeIndicatorState(state: ReturnType<typeof computeIndicatorState>): string {
+  if (!state) return "";
+  const parts: string[] = [];
+  parts.push(
+    state.macdCross === "golden"
+      ? `MACD：今日黃金交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
+      : state.macdCross === "death"
+        ? `MACD：今日死亡交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
+        : state.macdAboveZero == null
+          ? "MACD：K線根數不足，算不出來"
+          : `MACD：今日沒有發生交叉，MACD線（DIF）目前位於0軸${state.macdAboveZero ? "上方（多方力道相對占優）" : "下方（空方力道相對占優）"}`
+  );
+  parts.push(
+    state.kd
+      ? state.kd.cross === "golden"
+        ? `KD：今日黃金交叉（K值${state.kd.k.toFixed(1)}上穿D值${state.kd.d.toFixed(1)}）`
+        : state.kd.cross === "death"
+          ? `KD：今日死亡交叉（K值${state.kd.k.toFixed(1)}下穿D值${state.kd.d.toFixed(1)}）`
+          : `KD：今日沒有交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
+      : "KD：資料不足"
+  );
+  parts.push(state.rsi != null ? `RSI(14)：${state.rsi.toFixed(0)}` : "RSI：資料不足");
+  if (state.maAlignment) parts.push(`均線：${state.maAlignment === "bullish" ? "多頭排列" : "空頭排列"}`);
+  if (state.aboveMa20 != null) parts.push(`現價${state.aboveMa20 ? "站上" : "跌破"}20日均線`);
+  if (state.streakDirection && state.streakDays >= 1) {
+    parts.push(`連${state.streakDirection === "up" ? "漲" : "跌"}${state.streakDays}天`);
+  }
+  if (state.volumeRatio != null) parts.push(`今日量能約為近20日均量的${state.volumeRatio.toFixed(1)}倍`);
+  return parts.join("；");
 }
 
 /** 單一持股的技術指標描述，格式跟【技術指標篩選】區塊一致，讓 AI 在兩邊看到
@@ -1248,7 +1315,7 @@ export async function answerQuestion(
     "請根據資料回答，不要編造資料中沒有的數字；若資料標示為無法取得，直接說目前查不到，不要繞圈子解釋為什麼查不到。",
     "使用者之前的提問與你的回覆會一併附上作為對話紀錄，回答新問題時請自然承接對話脈絡（例如使用者接著問「那美股呢」時，要記得他上一句在問什麼）。",
     "使用者問『還有其他/還有別的/有沒有機會』這類接續問題時，優先從「今日焦點數據」的技術訊號共振股/漲幅榜/價漲量增清單裡挑對話中還沒提過的標的，並具體引用該檔的數據（訊號、法人買賣超、漲跌幅、連漲天數），不要因為想不到新標的就退回『AI伺服器供應鏈』『半導體設備股』『防禦性類股』這種沒有點名具體股票、任何人不用看盤都講得出來的空泛說法；如果資料裡真的已經沒有還沒提過的標的，就老實說『目前資料裡比較突出的大概就這幾檔』，不要硬掰新的類股概念湊答案。",
-    "使用者問『價漲量增』『剛漲一天』『連漲N天』（N可以是任何天數，包含1、2天這種很短的天數）這類篩選問題時，一律先實際檢視「今日焦點數據」裡的「價漲量增」清單，這份清單每一檔都已經附上真實算出來的連續上漲天數，直接依天數篩選、點名符合的股票並附上實際數字（連漲天數、均量倍數、漲跌幅）；只有在這份清單裡真的一檔都對不上使用者指定的天數時，才能回答『今天符合這個天數的价涨量增股票，資料裡沒有』，而且要明確講出『資料裡有N天、M天…等其他天數的標的，如果想看那些也可以告訴我』，不要因為使用者指定的天數剛好不在清單裡，就整句回成語意含糊的『沒有資料』讓使用者以為完全沒有任何價漲量增的股票；同一段對話裡使用者陸續問不同天數（例如先問2天、再問3天、5天）時，每次都要重新檢視同一份清單裡符合『這次』天數的股票，不要用上一次沒找到就自己記成『這份清單本來就沒有任何符合天數的股票』的錯誤結論套用到後面每一次追問——之前真實發生過連續4次追問都答錯『沒有資料』，直到使用者自己點名兩檔股票才被迫承認查到了，這種情況絕對不能再發生。",
+    "使用者問『價漲量增』『剛漲一天』『連漲N天』（N可以是任何天數，包含1、2天這種很短的天數）這類篩選問題時，一律先實際檢視「今日焦點數據」裡的「價漲量增」清單，這份清單每一檔都已經附上真實算出來的連續上漲天數，直接依天數篩選、點名符合的股票並附上實際數字（連漲天數、均量倍數、漲跌幅）；只有在這份清單裡真的一檔都對不上使用者指定的天數時，才能回答『今天符合這個天數的价涨量增股票，資料裡沒有』，而且要明確講出『資料裡有N天、M天…等其他天數的標的，如果想看那些也可以告訴我』，不要因為使用者指定的天數剛好不在清單裡，就整句回成語意含糊的『沒有資料』讓使用者以為完全沒有任何價漲量增的股票；同一段對話裡使用者陸續問不同天數（例如先問2天、再問3天、5天）時，每次都要重新檢視同一份清單裡符合『這次』天數的股票，不要用上一次沒找到就自己記成『這份清單本來就沒有任何符合天數的股票』的錯誤結論套用到後面每一次追問——之前真實發生過連續4次追問都答錯『沒有資料』，直到使用者自己點名兩檔股票才被迫承認查到了，這種情況絕對不能再發生。另外，列出來的每一檔都**必須把它自己實際的連漲天數寫出來**（「連漲7天」），不可以只寫股價跟均量倍數就算數；如果使用者問的是 N 天、但清單裡最接近的標的其實是 N+2 天，要老實說「沒有剛好連漲 N 天的，不過有連漲 N+2 天的這幾檔」，不可以把它當成「符合連漲 N 天」直接列出去——天數是使用者拿來判斷「還來不來得及進場」的關鍵數字，差兩天的意義完全不同，含糊帶過等於給錯資訊。",
     "「今日焦點數據」除了漲幅榜、技術訊號共振股、價漲量增清單之外，現在還固定附上這幾份全市場排行：成交金額排行、本益比最低排行、殖利率最高排行、股價淨值比最低排行、今日跌幅榜、三大法人買超/賣超排行、外資買超/賣超排行、投信買超排行。使用者問「有沒有本益比低的股票」「殖利率高的可以存股嗎」「今天跌最多的有哪些」「有沒有跌深可以撿的」「今天成交量最大的是哪幾檔」「三大法人今天在買什麼」「外資買超最多的是哪幾檔」這類問題時，一律先看對應的那份排行清單、直接點名股票並附上實際數字，絕對不要再回答「資料裡沒有提供個股的本益比/殖利率數據」或「沒有特別列出外資買超最多的股票」——這些資料現在都有了。也不要張冠李戴：問成交金額就看成交金額排行，不要拿漲幅榜或法人買超清單充數；問外資就看外資那份，不要用三大法人合計的數字代答。另外要幫使用者把話說完整：本益比低有可能是景氣循環股在獲利高點（之後獲利下滑本益比反而會變高），殖利率高有可能是股價跌下來撐出來的、或今年配得多明年不一定，今日跌幅大不等於「跌深了可以撿」，這些提醒要順帶講，不要只把排行唸過一遍。",
     // 使用者要求：「AI問答像是『現在有沒有MACD與KD線都在黃金交叉，適合明天買入
     // 的股票?』這種問題，要篩選多個符合標準的也要真正去查證資料並確定回答的內容
