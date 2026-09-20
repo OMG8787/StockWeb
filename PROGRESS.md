@@ -246,6 +246,41 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-20（續二）：重大發現——GitHub repo 改成私人後，Vercel 一直在擋掉部署！修好 git 身份設定
+
+使用者把 GitHub repo 設成私人之後，收到兩封 Vercel 通知信，回報「有些commit失敗，不知道
+是不是因為改私人」。查證過程與結論：
+
+1. 用未登入的 `curl https://api.github.com/repos/.../commits/<sha>/status` 查詢回傳
+   404——因為 repo 已經是私人，公開 API 查不到，這條路走不通，改用已登入的 `gh api`
+   查詢（`gh auth status` 確認這台機器的 GitHub CLI 已經用 `hj110b13-Andy` 帳號登入）。
+2. `gh api repos/hj110b13-Andy/Stock-web/commits/<sha>/status` 查到真正原因：Vercel
+   回傳 `"description":"Deployment was blocked"`。搭配使用者轉貼的 Vercel 通知信
+   （"123@gmail.com attempted to deploy a commit... but they're not a member of the
+   team"）確認：**這台機器 git 設定的 commit 作者身份是 `andy1 <123@gmail.com>`
+   （`git config user.name`/`user.email` 查到的值），這個信箱沒有連結任何真實帳號。
+   repo 公開的時候 Vercel 沒有嚴格檢查這件事，改成私人之後 Vercel 開始要求「commit
+   作者必須是團隊認得的成員」，`123@gmail.com` 過不了這關，所以每次從這台機器 push
+   上去的 commit 都被 Vercel 擋下部署——即使 push 到 GitHub 本身是成功的。**
+3. **這代表 2026-09-16 之後到這則筆記為止，所有從這台機器推送的 commit 實際上都沒有
+   真正部署到正式站**，正式站當時顯示的是改私人之前最後一次成功部署的舊版本。
+4. 修法：把這個 repo 的 git 身份改成使用者真正的帳號（`git config user.name
+   "hj110b13-Andy"`、`git config user.email "hj110b13@gmail.com"`，**只改這個 repo
+   本機設定，沒有動全域 `--global` 設定**，避免影響這台機器上其他專案），之後新的
+   commit 用這個身份 push，Vercel 才會認得並正常部署。
+
+**另一個獨立、不相關的問題**：這台機器的 git OAuth 授權範圍不含 `workflow` scope，
+只要 commit 裡有改到 `.github/workflows/*.yml` 這類 GitHub Actions 設定檔，push 會被
+GitHub 直接拒絕（跟 repo 私不私人無關，是完全不同的授權範圍問題）。使用者嘗試重新
+安裝/授權過一次，但 `gh auth status` 顯示的 token scope 仍然沒有 `workflow`，可能是
+另外裝的東西跟這裡實際 push 用的憑證不是同一組。**目前的因應方式：涉及 workflow 檔案
+的修改，改成把最終內容直接寫在這裡或對話裡，請使用者自己到 GitHub 網頁上手動貼上
+儲存**（網頁編輯走的是使用者自己的網頁登入session，沒有這個 OAuth scope 限制）。
+
+**待確認**：這則筆記之後的第一個新 commit 用新身份 push 上去之後，要確認 Vercel
+真的成功部署了（用 `gh api repos/.../commits/<sha>/status` 查 `state` 是不是
+`success`），才能確定這個問題真的解決、堆積的那一大批工作真的上線了。
+
 ### 2026-09-20（續）：CLAUDE.md 全文精簡——刪掉每條規則附的「起因故事」，規則本身的行為要求完全沒有刪減
 
 使用者接著問「CLAUDE.md 全部規則與內容還有可以優化或精簡的部分嗎，讓你能更快閱讀完、消耗更少
