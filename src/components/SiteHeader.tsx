@@ -41,8 +41,13 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [pending, setPending] = useState(false);
-  // 每次查詢帶一個遞增序號，只採用「最後一次送出」的回應——使用者打字很快時，
-  // 先送出的請求可能比後送出的晚回來，沒有這層防護清單會閃回舊關鍵字的結果。
+  // 每次「建議清單」查詢帶一個遞增序號，只採用最後一次送出的回應——使用者打字很快
+  // 時，先送出的請求可能比後送出的晚回來，沒有這層防護清單會閃回舊關鍵字的結果。
+  //
+  // **這個序號只管建議清單，絕對不能套用在按 Enter 送出的那次查詢上**：Enter 送出
+  // 時 debounce 的計時器往往還沒觸發，隨後才發出的建議查詢會把序號墊高，若 Enter
+  // 那次也照序號作廢自己的回應，就會拿到空結果而退化成「導向 /stock/<使用者打的
+  // 中文字>」的查無資料頁（實測：打完「欣興」「美利達」立刻按 Enter 100% 重現）。
   const requestSeq = useRef(0);
   const boxRef = useRef<HTMLDivElement>(null);
   const [menuWidth, setMenuWidth] = useState<number | undefined>(undefined);
@@ -67,11 +72,9 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
   }, [open]);
 
   async function lookup(q: string): Promise<SymbolSuggestion[]> {
-    const seq = ++requestSeq.current;
     const res = await fetch(`/api/symbol-lookup?q=${encodeURIComponent(q)}`);
     if (!res.ok) throw new Error(`lookup failed: ${res.status}`);
     const data = (await res.json()) as { results?: SymbolSuggestion[] };
-    if (seq !== requestSeq.current) return [];
     return data.results ?? [];
   }
 
@@ -85,14 +88,18 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
       return;
     }
     const timer = setTimeout(() => {
+      const seq = ++requestSeq.current;
       lookup(trimmed)
         .then((results) => {
+          // 過期的建議查詢（使用者已經又打了新的字）直接丟掉，避免清單閃回舊關鍵字
+          if (seq !== requestSeq.current) return;
           setSuggestions(results);
           setActiveIndex(-1);
           setOpen(results.length > 0);
         })
         .catch(() => {
           // 建議清單查不到就安靜收起來，使用者照樣可以按 Enter 走原本的導頁流程
+          if (seq !== requestSeq.current) return;
           setSuggestions([]);
           setOpen(false);
         });
