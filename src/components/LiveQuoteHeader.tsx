@@ -52,15 +52,36 @@ export default function LiveQuoteHeader({ initialQuote }: { initialQuote: Quote 
         {status === "pre-market" && "（08:30-09:00試搓時段，尚未正式開盤，以下數字僅供參考）"}
       </p>
 
+      {/* 興櫃專屬說明。興櫃跟上市/上櫃是完全不同的交易制度，如果不講清楚，
+          使用者會用看上市股的習慣去解讀這頁的每一個數字（尤其是「漲跌是跟
+          什麼比」跟「為什麼沒有開盤價」）。 */}
+      {quote.board === "emerging" && (
+        <p className="mt-2 rounded-md bg-(--surface-2) px-3 py-2 text-xs leading-relaxed text-(--text-secondary)">
+          <span className="font-semibold text-(--text-primary)">興櫃股票</span>
+          ：興櫃是公司正式上市櫃之前的階段，用「議價」方式跟券商一對一談價格成交，不是像上市櫃那樣集中撮合。所以它
+          <span className="font-semibold">沒有開盤價、也沒有收盤價</span>
+          ，漲跌是拿最近成交價跟「前日均價」比出來的，而且
+          <span className="font-semibold">沒有漲跌幅上下限</span>
+          ，一天漲跌好幾成都可能發生，成交量通常也很少。
+          {quote.priceNote && <span className="mt-1 block">※ {quote.priceNote}。</span>}
+        </p>
+      )}
+
       <dl className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-        <Stat label="開盤" value={formatPrice(quote.open, quote.currency)} />
-        <Stat label="最高" value={formatPrice(quote.high, quote.currency)} valueClass="text-(--price-up)" />
-        <Stat label="最低" value={formatPrice(quote.low, quote.currency)} valueClass="text-(--price-down)" />
-        <Stat label="昨收" value={formatPrice(quote.prevClose, quote.currency)} />
+        <Stat label="開盤" value={priceOrDash(quote.open, quote.currency)} />
+        <Stat label="最高" value={priceOrDash(quote.high, quote.currency)} valueClass="text-(--price-up)" />
+        <Stat label="最低" value={priceOrDash(quote.low, quote.currency)} valueClass="text-(--price-down)" />
+        <Stat label={quote.prevCloseLabel ?? "昨收"} value={formatPrice(quote.prevClose, quote.currency)} />
         <Stat label="成交量" value={formatVolume(quote.volume, quote.market)} />
       </dl>
     </>
   );
+}
+
+/** 開盤/最高/最低這三個欄位對興櫃可能真的不存在（見 types.ts 的 Quote.open
+ *  說明）——沒有就顯示「—」，不是顯示 0，也不是拿別的數字頂替。 */
+function priceOrDash(value: number | null, currency: string): string {
+  return value == null ? "—" : formatPrice(value, currency);
 }
 
 function Stat({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {

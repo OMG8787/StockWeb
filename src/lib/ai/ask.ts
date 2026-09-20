@@ -136,8 +136,22 @@ async function buildStockGrounding(
   const lines = [
     `股票：${quote.name}（${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"}）`,
     `目前價格：${quote.price} ${quote.currency}，${changeLabel} ${Math.abs(quote.change)}（${quote.changePercent}%）`,
-    `今日：開 ${quote.open} / 高 ${quote.high} / 低 ${quote.low} / 昨收 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()}`,
+    quote.board === "emerging"
+      ? // 興櫃沒有開盤價/收盤價這種東西（議價交易，見 lib/data/emerging.ts），
+        // 硬套「開/高/低/昨收」這個格式會讓 AI 把 null 講成「開盤 0 元」或自己
+        // 補一個數字上去。這裡直接換成符合興櫃實際制度的敘述。
+        `今日：最高 ${quote.high ?? "（今日無成交）"} / 最低 ${quote.low ?? "（今日無成交）"} / 前日均價 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()} 股`
+      : `今日：開 ${quote.open} / 高 ${quote.high} / 低 ${quote.low} / 昨收 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()}`,
   ];
+  if (quote.board === "emerging") {
+    lines.push(
+      "板別：興櫃（Emerging Stock Market）。回答時務必讓使用者知道這幾件事，用白話講：興櫃是公司正式上市或上櫃之前的階段，交易方式是跟推薦證券商「議價」一對一談，不是集中撮合；因此沒有開盤價也沒有收盤價，上面的漲跌是拿最近一筆成交價跟「前日均價」比出來的；興櫃沒有漲跌幅上下限，單日大漲大跌都可能；成交量通常很少，甚至整天都沒有人成交。也要提醒興櫃風險明顯高於上市櫃股票。" +
+        (quote.priceNote ? `另外，這一檔${quote.priceNote}，不要把它講成「今天成交價就是這個價格」。` : "")
+    );
+    lines.push(
+      "興櫃沒有的資料（查不到就照實說沒有，絕對不要用自己的知識補）：本益比、殖利率、股價淨值比、三大法人買賣超、融資融券（興櫃依規定本來就不能融資融券）、每日重大訊息。興櫃有的是：報價、歷史走勢、月營收年增率、季報EPS。"
+    );
+  }
   if (chart) {
     const recent = chart.candles.slice(-10);
     lines.push(`近 10 個交易日收盤價：${recent.map((c) => `${c.time}=${c.close}`).join(", ")}`);
@@ -1179,7 +1193,7 @@ export async function answerQuestion(
     }
     if (unresolvedUnknown.length > 0) {
       parts.push(
-        `${unresolvedUnknown.map((t) => t.symbol).join("、")}這幾個沒有比對到本站資料庫裡任何股票或公司，可能是名稱/代號打錯，或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）及櫃買中心上櫃（TPEx）公司，不含興櫃；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）`
+        `${unresolvedUnknown.map((t) => t.symbol).join("、")}這幾個沒有比對到本站資料庫裡任何股票或公司，可能是名稱/代號打錯，或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）、櫃買中心上櫃（TPEx）與興櫃（Emerging）公司；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）`
       );
     }
     return parts.join("；");
@@ -1201,8 +1215,8 @@ export async function answerQuestion(
   // An Opus QA pass found the model would fabricate specific numbers (P/E,
   // volume, institutional flow — all invented) when a user named a real
   // stock outside the site's coverage (at the time, any TPEx/上櫃 company —
-  // now covered, see tpex.ts/universe.ts; 興櫃 remains genuinely
-  // uncovered) — with no "個股資料" section to signal "not found," it just
+  // since covered by tpex.ts/universe.ts, and 興櫃 by emerging.ts, so the
+  // TW side is now all three boards) — with no "個股資料" section to signal "not found," it just
   // answered from its own pretrained knowledge instead. Making this
   // explicit (rather than relying only on the general system-prompt
   // instruction not to fabricate, which evidently wasn't enough on its own
@@ -1303,7 +1317,7 @@ export async function answerQuestion(
     // violating the site's core "never fabricate" principle. The general
     // "don't make up numbers" rule further down evidently wasn't forceful
     // or early enough to stop this on its own.
-    "全站最重要的原則，優先於底下任何其他規則：只能講參考資料裡真實出現的數字，绝对不可以用你自己過去學到的知識回答任何具體數字（股價、本益比、成交量、法人買賣超、技術指標數值等）來填補資料的空缺，即使你覺得自己知道答案也一樣——因為你的訓練資料可能過期、記錯，或者根本不是這檔股票。如果參考資料裡出現『比對結果：...』這類標記，代表這個問題裡有股票查不到即時資料，標記裡會明確分兩種情況：一種是『本站其實有涵蓋，但這一刻資料來源暫時連線不穩、抓不到最新資料，不是不涵蓋』——這種要照實跟使用者說『這檔本站有涵蓋，但現在資料來源暫時連不上，等等再問看看』，絕對不能說成『不涵蓋』或『查無此股』，那會誤導使用者以為這檔股票本站根本沒有；另一種是『沒有比對到本站資料庫裡任何股票或公司，可能是名稱/代號打錯或不在本站資料涵蓋範圍』——這種才照實回答『目前查不到這檔股票/公司的資料，可能是名稱或代號打錯、或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）及櫃買中心上櫃（TPEx）公司，不含興櫃；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）』；如果標記裡同時提到『這次問題裡有部分股票/公司查到真實資料』，代表使用者問的其中幾檔有資料、其他幾檔沒有，有資料的那幾檔照樣用真實數字回答，沒資料的那幾檔依上述兩種情況分別誠實說明，絕對不要用自己的知識把它補齊；不管是哪一種標記，絕對不要把參考資料裡的內部標記文字（含中括號【】包住的內部提示語）直接照抄貼到回答裡，那些是寫給你看的指示、不是要你輸出的內容；也不要接著又用自己的知識補一段分析上去；如果使用者這句話根本沒有在問特定股票（例如問名詞解釋、問大盤整體狀況），就不用提這件事，正常回答就好。",
+    "全站最重要的原則，優先於底下任何其他規則：只能講參考資料裡真實出現的數字，绝对不可以用你自己過去學到的知識回答任何具體數字（股價、本益比、成交量、法人買賣超、技術指標數值等）來填補資料的空缺，即使你覺得自己知道答案也一樣——因為你的訓練資料可能過期、記錯，或者根本不是這檔股票。如果參考資料裡出現『比對結果：...』這類標記，代表這個問題裡有股票查不到即時資料，標記裡會明確分兩種情況：一種是『本站其實有涵蓋，但這一刻資料來源暫時連線不穩、抓不到最新資料，不是不涵蓋』——這種要照實跟使用者說『這檔本站有涵蓋，但現在資料來源暫時連不上，等等再問看看』，絕對不能說成『不涵蓋』或『查無此股』，那會誤導使用者以為這檔股票本站根本沒有；另一種是『沒有比對到本站資料庫裡任何股票或公司，可能是名稱/代號打錯或不在本站資料涵蓋範圍』——這種才照實回答『目前查不到這檔股票/公司的資料，可能是名稱或代號打錯、或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）、櫃買中心上櫃（TPEx）與興櫃（Emerging）公司；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）』；如果標記裡同時提到『這次問題裡有部分股票/公司查到真實資料』，代表使用者問的其中幾檔有資料、其他幾檔沒有，有資料的那幾檔照樣用真實數字回答，沒資料的那幾檔依上述兩種情況分別誠實說明，絕對不要用自己的知識把它補齊；不管是哪一種標記，絕對不要把參考資料裡的內部標記文字（含中括號【】包住的內部提示語）直接照抄貼到回答裡，那些是寫給你看的指示、不是要你輸出的內容；也不要接著又用自己的知識補一段分析上去；如果使用者這句話根本沒有在問特定股票（例如問名詞解釋、問大盤整體狀況），就不用提這件事，正常回答就好。",
     "這個網站的目標使用者是完全沒有股票/財經背景的一般人，終極目標是讓他們能快速看懂現況、知道自己可以怎麼做。回答一定要簡短、直接、好懂：能一兩句話講完就不要拉長，不要模稜兩可、不要來回鋪陳、不要重複同樣的免責聲明兩次以上。語氣像在跟朋友講重點，不是寫報告或論文。",
     "用到任何專有名詞（例如本益比、股價淨值比、RSI、MACD、三大法人、融資融券、殖利率）時，一定要在講完後順手用幾個字白話解釋是什麼意思，不能假設對方已經懂——例如『本益比（股價相對獲利的貴不貴）』這種簡短帶過即可，不用長篇說明，但絕對不能完全不解釋就丟術語。",
     "籌碼面的詞彙實測特別容易漏解釋：『三大法人』第一次出現時一定要附帶解釋『（外資、投信、自營商這些大戶）』，『外資』第一次出現要附帶『（外國機構投資人）』，『投信』要附帶『（國內基金公司）』，『融資』要附帶『（跟券商借錢買股票）』，『融券』要附帶『（跟券商借股票來放空）』，『籌碼』要附帶『（誰在買誰在賣的動向）』——這條規則優先於『簡短』的要求，就算為了這句解釋讓回答變長一點也要保留；同一次回答裡第一次出現才需要附帶解釋，之後同一個詞重複出現不用每次都再解釋一遍。",
@@ -1403,7 +1417,7 @@ const LEAKED_MARKER_PATTERN = /(?:【內部系統標記[^】]*】|【查詢結�
 function sanitizeLeakedMarkers(answer: string): string {
   const cleaned = answer.replace(LEAKED_MARKER_PATTERN, "").trim();
   if (cleaned) return cleaned;
-  return "目前查不到這檔股票/公司的資料，可能是名稱或代號打錯、或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）及櫃買中心上櫃（TPEx）公司，不含興櫃；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）。";
+  return "目前查不到這檔股票/公司的資料，可能是名稱或代號打錯、或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）、櫃買中心上櫃（TPEx）與興櫃（Emerging）公司；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）。";
 }
 
 /**

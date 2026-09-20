@@ -38,8 +38,14 @@ const YAHOO_TW_UA =
  */
 export async function fetchYahooTwMarketDepth(
   symbol: string,
-  exchange: "TWSE" | "TPEx" | undefined
+  exchange: "TWSE" | "TPEx" | "Emerging" | undefined
 ): Promise<MarketDepth | null> {
+  // 興櫃直接回 null，不是抓取失敗：內外盤的定義是「這筆成交是買方主動用賣價
+  // 成交、還是賣方主動用買價成交」，前提是有集中撮合的委買委賣簿。興櫃是跟
+  // 推薦券商一對一議價成交（見 lib/data/emerging.ts），根本沒有這個分類，
+  // 櫃買中心也沒有公布。就算 Yahoo 頁面上真的印了兩個數字，對興櫃來說也不會
+  // 是這個意思，所以寧可顯示「資料暫缺」也不拿來充數。
+  if (exchange === "Emerging") return null;
   const suffix = exchange === "TPEx" ? "TWO" : "TW";
   const url = `https://tw.stock.yahoo.com/quote/${encodeURIComponent(symbol)}.${suffix}`;
   try {

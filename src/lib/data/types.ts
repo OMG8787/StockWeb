@@ -7,13 +7,42 @@ export interface Quote {
   price: number;
   change: number;
   changePercent: number;
-  open: number;
-  high: number;
-  low: number;
+  /**
+   * 開盤價。**可以是 null**：台灣的興櫃市場（見 lib/data/emerging.ts）是議價
+   * 交易，整個市場根本沒有「開盤價」這個東西，櫃買中心也從來沒有公布過。這種
+   * 情況一律填 null 讓畫面顯示「—」，**絕對不可以拿最新成交價/均價之類的別的
+   * 數字頂替**（那等於憑空生出一個不存在的開盤價）。上市/上櫃/美股都有真實的
+   * 開盤價，維持填數字。
+   */
+  open: number | null;
+  /** 當日最高價；興櫃當天完全沒有成交時為 null（沒有成交就沒有最高價）。 */
+  high: number | null;
+  /** 當日最低價；同上。 */
+  low: number | null;
+  /**
+   * 漲跌幅的計算基準價。上市/上櫃/美股＝昨天的收盤價；**興櫃＝前日均價**
+   * （興櫃沒有收盤價，櫃買中心自己公布的漲跌也是用前日均價算的）。欄位名稱
+   * 維持 prevClose 是為了跟另外兩個市場共用型別，顯示文字請改看
+   * `prevCloseLabel`。
+   */
   prevClose: number;
   volume: number;
   currency: string;
   updatedAt: string;
+  /**
+   * 這檔股票屬於哪個板；只有興櫃會帶值，其餘（上市/上櫃/美股）不帶。UI 用它
+   * 決定要不要顯示「興櫃」標示與相關的說明文字。刻意不放進 Market 型別裡：
+   * 對外的市場分類仍然只有 "TW"/"US"，興櫃是 TW 底下的一個板別。
+   */
+  board?: "emerging";
+  /** `prevClose` 這個數字在畫面上應該叫什麼（興櫃是「前日均價」）；沒帶就用預設的「昨收」。 */
+  prevCloseLabel?: string;
+  /**
+   * 這筆報價本身需要一併告訴使用者的限制說明，例如興櫃某檔股票今天整天都沒有
+   * 成交、畫面上顯示的其實是前日均價。有值就一定要顯示出來——這是「不騙人」的
+   * 一部分，不是可有可無的註解。
+   */
+  priceNote?: string;
 }
 
 export interface Candle {

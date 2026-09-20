@@ -8,14 +8,14 @@ export interface UniverseEntry {
   sector: string;
   currency: string;
   /**
-   * Internal routing detail for TW entries only — which exchange this stock
+   * Internal routing detail for TW entries only — which board this stock
    * actually trades on, used by lib/data/index.ts to pick the right
-   * per-symbol fetch (TWSE vs TPEx). Not part of the public Market contract
-   * ("TW" | "US" stays as-is everywhere outside this internal routing).
-   * Absent/undefined is treated as "TWSE" so every pre-existing seed/US
-   * entry needs no changes.
+   * per-symbol fetch (TWSE 上市 vs TPEx 上櫃 vs Emerging 興櫃). Not part of
+   * the public Market contract ("TW" | "US" stays as-is everywhere outside
+   * this internal routing). Absent/undefined is treated as "TWSE" so every
+   * pre-existing seed/US entry needs no changes.
    */
-  exchange?: "TWSE" | "TPEx";
+  exchange?: "TWSE" | "TPEx" | "Emerging";
 }
 
 // Small hand-curated seed list. Used as the TW universe until the full
@@ -446,8 +446,25 @@ function capOne(companies: UniverseEntry[], seed: UniverseEntry[], max: number):
   return Array.from(picked.values()).slice(0, max);
 }
 
+/**
+ * 興櫃（exchange === "Emerging"）**刻意完全不進入這個回傳值**，這是產品決策
+ * 不是遺漏，理由三個，都跟「這個網站是給沒有股市背景的家人看的」直接相關：
+ *
+ * 1. 興櫃沒有漲跌幅限制，單日 ±30% 是常態。這個回傳值餵的是漲跌幅排行、
+ *    成交量榜、技術訊號共振股、今日建議——只要把興櫃混進去，這些「今天漲最多」
+ *    的榜單幾乎每天都會被興櫃股洗版，而使用者看榜單時的預期是上市櫃。
+ * 2. 興櫃是議價交易、流動性極低（實測某個交易日 361 檔裡有 18 檔整天 0 成交），
+ *    均線/RSI/MACD 這類技術指標套在這種成交結構上算出來的數字沒有意義。
+ * 3. 興櫃是「準備上市櫃的過渡階段」，風險本來就明顯高於上市櫃，不適合出現在
+ *    一個會直接給「建議買進」的清單裡。
+ *
+ * **但興櫃股票完全查得到**：getTwUniverse() 回傳前會把含興櫃的完整清單寫進
+ * twFullCompanySnapshot，所以搜尋框、代號/中文名查詢、個股頁、AI 問答全部都
+ * 認得興櫃股票（那些路徑走的是單檔查詢，不是這裡的批次報價清單）。要改這個
+ * 決策的話，要連同上面三點一起重新評估，不要只因為「看起來少收了東西」就加。
+ */
 function capUniverse(companies: UniverseEntry[]): UniverseEntry[] {
-  const twse = companies.filter((e) => e.exchange !== "TPEx");
+  const twse = companies.filter((e) => e.exchange == null || e.exchange === "TWSE");
   const tpex = companies.filter((e) => e.exchange === "TPEx");
   // TW_UNIVERSE_SEED is all-TWSE, so it only ever matches (and only ever
   // needs to be checked against) the twse partition; tpex has no hand-picked
@@ -471,7 +488,12 @@ function capUniverse(companies: UniverseEntry[]): UniverseEntry[] {
 // poisoning is what motivated the asymmetric-TTL logic below — from v4
 // onward, a degraded (TPEx-empty) result is no longer trusted with the
 // full 24h TTL a genuine success deserves.
-const TW_UNIVERSE_CACHE_KEY = "tw-universe-full-raw-v4";
+// "-v5": bumped again when 興櫃 (Emerging) entries joined this merged list —
+// same reasoning as the v2->v4 history above, this key's CONTENT shape
+// changed, and without a bump every instance would keep serving the
+// pre-興櫃 list out of Redis for up to the full 24h TTL, making emerging
+// stocks look like they still aren't covered.
+const TW_UNIVERSE_CACHE_KEY = "tw-universe-full-raw-v5";
 // How long a DEGRADED (TPEx came back empty — meaning its fetch almost
 // certainly failed, since a real company listing is never actually empty)
 // merge result is trusted before the next request gets a fresh attempt.
@@ -492,6 +514,7 @@ let universeComputePromise: Promise<UniverseEntry[]> | undefined;
 export async function getTwUniverse(): Promise<UniverseEntry[]> {
   const { fetchTwseListedCompanies } = await import("./twse");
   const { fetchTpexListedCompanies } = await import("./tpex");
+  const { fetchEmergingListedCompanies } = await import("./emerging");
   // Cache holds the FULL uncapped official list (TWSE + TPEx merged) — the
   // cap is applied fresh on every read (cheap: an in-memory filter over an
   // already-fetched array), so the raw full list is always available for
@@ -512,15 +535,22 @@ export async function getTwUniverse(): Promise<UniverseEntry[]> {
     full = await universeComputePromise;
   } else {
     universeComputePromise = (async () => {
-      const [twse, tpex] = await Promise.all([
+      const [twse, tpex, emerging] = await Promise.all([
         fetchTwseListedCompanies().catch(() => []),
         fetchTpexListedCompanies().catch(() => []),
+        fetchEmergingListedCompanies().catch(() => []),
       ]);
       // TWSE failing outright falls back to the hand-curated (all-TWSE) seed
       // as before — TPEx succeeding independently must never be the reason
       // every TWSE stock silently vanishes from the universe.
       const twseFinal = twse.length > 0 ? twse : TW_UNIVERSE_SEED;
-      const merged = [...twseFinal, ...tpex];
+      const merged = [...twseFinal, ...tpex, ...emerging];
+      // 降級 TTL 的判斷條件只看 TPEx（維持原本的行為）：那份清單空掉幾乎必然
+      // 代表抓取失敗，而且它會直接讓上櫃股從排行/搜尋消失，屬於嚴重降級。興櫃
+      // 清單空掉的影響小得多（興櫃本來就不進排行，只影響「查不查得到」），且
+      // 它跟 TPEx 共用同一個上游主機、失敗原因通常也一樣，所以 TPEx 成功時
+      // 沒必要因為興櫃單獨失敗就把整份清單的信任期縮到 5 分鐘、害整個 TW
+      // universe 每 5 分鐘重抓一次全市場。
       const ttl = tpex.length > 0 ? TW_UNIVERSE_TTL_MS : TW_UNIVERSE_DEGRADED_TTL_MS;
       await writeCached(TW_UNIVERSE_CACHE_KEY, merged, ttl);
       return merged;

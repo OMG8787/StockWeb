@@ -23,6 +23,12 @@ import {
   fetchTpexQuote,
   fetchTpexQuotesBatch,
 } from "./tpex";
+import {
+  fetchEmergingCandles,
+  fetchEmergingMonthlyRevenueAll,
+  fetchEmergingQuarterlyEpsAll,
+  fetchEmergingQuote,
+} from "./emerging";
 import { fetchUsCandles, fetchUsEarnings, fetchUsFundamentals, fetchUsQuote, fetchUsQuotesBatch, fetchYahooIntradayCandles } from "./us";
 import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth";
 import { fetchTaifexNightFutures } from "./taifex";
@@ -107,13 +113,20 @@ const INTRADAY_CHART_TTL_MS = 60_000;
  * is an acceptable tradeoff, and it must never slow down the common case
  * where the exchange is already known.
  */
-function resolveTwExchange(symbol: string): "TWSE" | "TPEx" | undefined {
+function resolveTwExchange(symbol: string): "TWSE" | "TPEx" | "Emerging" | undefined {
   return findInUniverse(symbol, "TW")?.exchange;
 }
 
+/**
+ * 興櫃股票查不到所屬板別時的最後手段（見 fetchTwQuote/fetchTwChart 的
+ * 「先試 TWSE 再試 TPEx」設計）：興櫃排在最後一個試，因為它的股票數量最少
+ * （約 360 檔 vs 上市 1000+／上櫃 900+），先試前兩個對絕大多數代號來說才是
+ * 最短路徑。真正已知在 universe 裡的興櫃股票根本不會走到這條路。
+ */
 async function fetchTwQuote(symbol: string): Promise<Quote> {
   const exchange = resolveTwExchange(symbol);
   if (exchange === "TPEx") return fetchTpexQuote(symbol);
+  if (exchange === "Emerging") return fetchEmergingQuote(symbol);
   if (exchange === "TWSE") return fetchTwseQuote(symbol);
   try {
     return await fetchTwseQuote(symbol);
@@ -121,7 +134,11 @@ async function fetchTwQuote(symbol: string): Promise<Quote> {
     try {
       return await fetchTpexQuote(symbol);
     } catch {
-      throw err;
+      try {
+        return await fetchEmergingQuote(symbol);
+      } catch {
+        throw err;
+      }
     }
   }
 }
@@ -129,6 +146,7 @@ async function fetchTwQuote(symbol: string): Promise<Quote> {
 async function fetchTwChart(symbol: string, range: ChartRange): Promise<Candle[]> {
   const exchange = resolveTwExchange(symbol);
   if (exchange === "TPEx") return fetchTpexCandles(symbol, range);
+  if (exchange === "Emerging") return fetchEmergingCandles(symbol, range);
   if (exchange === "TWSE") return fetchTwseCandles(symbol, range);
   try {
     return await fetchTwseCandles(symbol, range);
@@ -136,7 +154,11 @@ async function fetchTwChart(symbol: string, range: ChartRange): Promise<Candle[]
     try {
       return await fetchTpexCandles(symbol, range);
     } catch {
-      throw err;
+      try {
+        return await fetchEmergingCandles(symbol, range);
+      } catch {
+        throw err;
+      }
     }
   }
 }
@@ -180,7 +202,9 @@ export async function getQuote(symbolInput: string, marketHint?: Market): Promis
  */
 async function fetchTwIntradayCandles(symbol: string): Promise<Candle[]> {
   const exchange = resolveTwExchange(symbol);
-  const first = exchange === "TPEx" ? "TWO" : "TW";
+  // 興櫃在 Yahoo 上跟上櫃共用 ".TWO" 後綴（實測 7893.TWO 有資料、7893.TW 直接
+  // 404），所以這裡跟 TPEx 走同一條路。
+  const first = exchange === "TPEx" || exchange === "Emerging" ? "TWO" : "TW";
   const second = first === "TW" ? "TWO" : "TW";
   try {
     return await fetchYahooIntradayCandles(`${symbol}.${first}`);
@@ -231,13 +255,18 @@ export async function getChart(
  */
 async function mergeTwMaps<V>(
   fetchTwse: () => Promise<Map<string, V>>,
-  fetchTpex: () => Promise<Map<string, V>>
+  fetchTpex: () => Promise<Map<string, V>>,
+  // 第三個板（興櫃）是選填：只有月營收跟季報 EPS 這兩類資料櫃買中心有替興櫃
+  // 公布，本益比/三大法人/融資融券/重大訊息那幾類對興櫃根本不存在，那些呼叫
+  // 端就只傳兩個資料源，不會憑空生出一份空的興櫃資料來假裝有查過。
+  fetchEmerging?: () => Promise<Map<string, V>>
 ): Promise<Map<string, V>> {
-  const [twse, tpex] = await Promise.all([
+  const [twse, tpex, emerging] = await Promise.all([
     fetchTwse().catch(() => new Map<string, V>()),
     fetchTpex().catch(() => new Map<string, V>()),
+    fetchEmerging ? fetchEmerging().catch(() => new Map<string, V>()) : Promise.resolve(new Map<string, V>()),
   ]);
-  return new Map([...twse, ...tpex]);
+  return new Map([...twse, ...tpex, ...emerging]);
 }
 
 // 2026-09-20：從 5 分鐘拉回 30 分鐘。這裡曾經從「1小時」改成「5分鐘」是為了
@@ -283,11 +312,11 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
   try {
     if (market === "TW") {
       const [revenueMap, epsMap] = await Promise.all([
-        cachedMap("earnings:TW:revenue", EARNINGS_TTL_MS, () =>
-          mergeTwMaps(fetchTwseMonthlyRevenueAll, fetchTpexMonthlyRevenueAll)
+        cachedMap("earnings:TW:revenue:v2", EARNINGS_TTL_MS, () =>
+          mergeTwMaps(fetchTwseMonthlyRevenueAll, fetchTpexMonthlyRevenueAll, fetchEmergingMonthlyRevenueAll)
         ),
-        cachedMap("earnings:TW:eps", EARNINGS_TTL_MS, () =>
-          mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll)
+        cachedMap("earnings:TW:eps:v2", EARNINGS_TTL_MS, () =>
+          mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll, fetchEmergingQuarterlyEpsAll)
         ),
       ]);
       const revenue = revenueMap.get(symbol);

@@ -13,8 +13,13 @@ import { TW_INDUSTRY_NAMES } from "./twse";
 // from TWSE's equivalents (documented inline below where they do).
 //
 // Scope boundary: this covers 上櫃 (OTC mainboard) only. 興櫃 (Emerging
-// Stock Market) is a separate market with its own different data feed and is
-// explicitly out of scope — do not extend this file to cover it.
+// Stock Market) is a separate market with its own different data feed and
+// lives in its own sibling module, ./emerging.ts — do not add 興櫃 parsing
+// here. What emerging.ts DOES reuse from this file is only the low-level
+// transport (TWCA_SSL_SUB_CA_PEM + fetchTpexJson below): both markets are
+// published by the same organisation on the same `www.tpex.org.tw` host, so
+// they share the exact same TLS-chain and truncated-response problems, and
+// duplicating those hard-won workarounds would mean having to fix them twice.
 //
 // A plain User-Agent header is sent on every request: TPEx has been observed
 // to occasionally 302-redirect requests with no UA at all.
@@ -49,7 +54,7 @@ const TPEX_HEADERS = { "User-Agent": "Mozilla/5.0 (compatible; StockRadar/1.0)" 
  * blanket `rejectUnauthorized: false`, so certificate validation stays
  * fully enforced, just now able to complete the one chain that was missing.
  */
-const TWCA_SSL_SUB_CA_PEM = `-----BEGIN CERTIFICATE-----
+export const TWCA_SSL_SUB_CA_PEM = `-----BEGIN CERTIFICATE-----
 MIIG1DCCBLygAwIBAgIQQAE0sE8AAAAAAAAAA+MkrDANBgkqhkiG9w0BAQwFADBQ
 MQswCQYDVQQGEwJUVzESMBAGA1UEChMJVEFJV0FOLUNBMRAwDgYDVQQLEwdSb290
 IENBMRswGQYDVQQDExJUV0NBIENZQkVSIFJvb3QgQ0EwHhcNMjMwMjIzMDcyMjI0
@@ -140,7 +145,10 @@ function tpexHttpsGet(url: string, headers: Record<string, string>, timeoutMs: n
 // to a day), so 2 extra full retries costs nothing that matters.
 const TPEX_JSON_RETRIES = 2;
 
-async function fetchTpexJson<T>(url: string, timeoutMs = 8000): Promise<T> {
+/** Exported for ./emerging.ts, which fetches 興櫃 datasets from the same
+ *  `www.tpex.org.tw` openapi host and therefore needs the identical TLS +
+ *  truncation handling (see the scope-boundary note at the top of this file). */
+export async function fetchTpexJson<T>(url: string, timeoutMs = 8000): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= TPEX_JSON_RETRIES; attempt++) {
     try {
