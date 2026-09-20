@@ -159,15 +159,39 @@ export function computeSignals(candles: Candle[], currentPrice: number, range: C
   if (bollinger) signals.push(bollinger);
 
   // KD (stochastic oscillator, 9,3,3) — like MACD above, only fires on the
-  // day %K actually crosses %D, and only when that cross happens in the
-  // extreme (oversold/overbought) zone, which is the conventional reading;
-  // a cross in the middle of the range is just noise.
-  const kd = computeKdCross(candles);
-  if (kd === "golden") signals.push({ label: "KD低檔黃金交叉", tone: "up" });
-  else if (kd === "death") signals.push({ label: "KD高檔死亡交叉", tone: "down" });
+  // day %K actually crosses %D, never on the days it merely sits above/below
+  // it (which would be true most days and say nothing).
+  //
+  // 2026-09-16：原本這裡還多加了一層「只有在超賣(K<=30)/超買(K>=70)極端區
+  // 發生的交叉才算數」的限制，中間區間的交叉被整個丟掉。實測發現這造成一個
+  // 真實問題：使用者問「有沒有MACD與KD都黃金交叉的股票」，市場上明明有（例如
+  // 當天的嘉基6715：K從44.2上穿D 47.8，同時MACD也黃金交叉），本站卻因為
+  // K=51.4 落在中間區間而完全不產生任何 KD 訊號，AI 只好回答「沒有」——
+  // 對使用者而言「KD黃金交叉」就是 K 上穿 D，低檔與否是強弱的形容詞、不是
+  // 這個訊號存不存在的門檻。改成比照上面 MACD 的做法：交叉一律標示出來，
+  // 用括號說明它發生在哪個區間、力道強弱如何，把判讀資訊交給讀者，而不是
+  // 先幫讀者把訊號整個丟掉。
+  const kd = computeKd(candles);
+  if (kd?.cross === "golden") signals.push({ label: KD_CROSS_LABEL.golden[kd.zone], tone: "up" });
+  else if (kd?.cross === "death") signals.push({ label: KD_CROSS_LABEL.death[kd.zone], tone: "down" });
 
   return signals;
 }
+
+/** KD 交叉的文字標籤：交叉方向 × 發生區間。低檔黃金/高檔死亡是教科書上最
+ *  標準的兩種讀法，其餘四種組合照實描述它實際的意義與風險，不含糊帶過。 */
+const KD_CROSS_LABEL: Record<"golden" | "death", Record<KdZone, string>> = {
+  golden: {
+    low: "KD低檔黃金交叉（超賣區轉強，訊號較明確）",
+    mid: "KD黃金交叉（K值上穿D值，發生在中間區間，力道一般）",
+    high: "KD高檔黃金交叉（K值上穿D值，但已在超買區，追高風險較高）",
+  },
+  death: {
+    low: "KD低檔死亡交叉（K值下穿D值，已在超賣區，屬弱勢續跌）",
+    mid: "KD死亡交叉（K值下穿D值，發生在中間區間，力道一般）",
+    high: "KD高檔死亡交叉（超買區轉弱，訊號較明確）",
+  },
+};
 
 /** Trailing simple moving average — returns one value per input index, null
  *  wherever there isn't yet a full window (keeps the caller's indices
@@ -205,7 +229,22 @@ function computeBollingerSignal(candles: Candle[], currentPrice: number): Signal
  * once-smoothed series is %K, the twice-smoothed series is %D) — matches
  * the (9,3,3) parameters most charting platforms default to.
  */
-function computeKdCross(candles: Candle[]): "golden" | "death" | null {
+export type KdZone = "low" | "mid" | "high";
+
+export interface KdReading {
+  /** 今日 %K */
+  k: number;
+  /** 今日 %D */
+  d: number;
+  prevK: number;
+  prevD: number;
+  /** 只有在「今天」發生交叉才不是 null（K 上穿 D＝golden，下穿＝death）。 */
+  cross: "golden" | "death" | null;
+  /** 今日 %K 落在哪一區：<=30 超賣、>=70 超買、其餘中間。 */
+  zone: KdZone;
+}
+
+export function computeKd(candles: Candle[]): KdReading | null {
   const PERIOD = 9;
   const SMOOTH = 3;
   if (candles.length < PERIOD + SMOOTH * 2) return null;
@@ -234,9 +273,9 @@ function computeKdCross(candles: Candle[]): "golden" | "death" | null {
   const prevD = dSeries[dSeries.length - 2];
   if (lastK === undefined || prevK === undefined || lastD === undefined || prevD === undefined) return null;
 
-  if (prevK <= prevD && lastK > lastD && lastK <= 30) return "golden";
-  if (prevK >= prevD && lastK < lastD && lastK >= 70) return "death";
-  return null;
+  const cross = prevK <= prevD && lastK > lastD ? "golden" : prevK >= prevD && lastK < lastD ? "death" : null;
+  const zone: KdZone = lastK <= 30 ? "low" : lastK >= 70 ? "high" : "mid";
+  return { k: lastK, d: lastD, prevK, prevD, cross, zone };
 }
 
 /** Simple (non-Wilder-smoothed) RSI over the trailing `period` closes. */
@@ -270,7 +309,7 @@ function ema(values: number[], period: number): number[] {
  * converged before treating the signal line as meaningful — with too few
  * bars this is just comparing early warm-up noise.
  */
-function computeMacdCross(candles: Candle[]): { type: "golden" | "death"; aboveZero: boolean } | null {
+function computeMacdCross(candles: Candle[]): { type: "golden" | "death" | null; aboveZero: boolean } | null {
   const MIN_BARS = 50; // "3m" charts run ~60-65 trading days; leave margin for short months
   if (candles.length < MIN_BARS) return null;
   const closes = candles.map((c) => c.close);
@@ -290,5 +329,68 @@ function computeMacdCross(candles: Candle[]): { type: "golden" | "death"; aboveZ
   const aboveZero = macd >= 0;
   if (prevMacd <= prevSignal && macd > signal) return { type: "golden", aboveZero };
   if (prevMacd >= prevSignal && macd < signal) return { type: "death", aboveZero };
-  return null;
+  // 沒有交叉時仍然回傳 aboveZero（type 為 null）——「MACD 線在 0 軸上方/下方」
+  // 本身就是一個獨立、每天都成立的多空狀態，多重指標篩選會用到；只有在 K 線
+  // 根數不足、整個 MACD 都算不出來時才回傳 null。
+  return { type: null, aboveZero };
+}
+
+/**
+ * 同一組 K 線算出來的「原始指標狀態」，跟 computeSignals() 的差別在於：
+ * computeSignals 回傳的是**已經篩選過、只留下有觸發的**中文標籤陣列，適合
+ * 直接顯示在畫面上；這個函式回傳的是**每個指標當下的實際狀態值**（有沒有
+ * 交叉、K/D 各是多少、RSI 幾點、均線是什麼排列），讓呼叫端可以用程式邏輯
+ * 做「多重條件同時成立」的篩選。
+ *
+ * 會需要這個函式，是因為使用者要求「AI 問答被問到『MACD 與 KD 都黃金交叉』
+ * 這類多重技術指標組合的篩選問題時，要真的去資料裡查證」——靠比對中文標籤
+ * 字串來做交集既脆弱又不精確（標籤文字隨時會改、也無法表達「RSI 小於 70」
+ * 這種數值條件），必須有結構化的原始數值才做得到任意組合的篩選。
+ */
+export interface IndicatorState {
+  macdCross: "golden" | "death" | null;
+  /** MACD 線（DIF）本身在 0 軸上方還是下方；沒算得出 MACD 時為 null。 */
+  macdAboveZero: boolean | null;
+  kd: KdReading | null;
+  rsi: number | null;
+  maAlignment: "bullish" | "bearish" | null;
+  /** 現價相對 20 日均線；資料不足時 null。 */
+  aboveMa20: boolean | null;
+  /** 現價觸及布林通道上緣/下緣。 */
+  bollinger: "upper" | "lower" | null;
+  streakDays: number;
+  streakDirection: "up" | "down" | null;
+  /** 最新一根量 ÷ 前 20 日均量（不含最新一根）；算不出來時 null。 */
+  volumeRatio: number | null;
+}
+
+export function computeIndicatorState(candles: Candle[], currentPrice: number): IndicatorState | null {
+  if (candles.length < 5) return null;
+  const macd = computeMacdCross(candles);
+  const kd = computeKd(candles);
+  const streak = computeStreak(candles);
+
+  const latest = candles[candles.length - 1];
+  const priorVolumes = candles.slice(Math.max(0, candles.length - 21), candles.length - 1).map((c) => c.volume);
+  const avgVolume =
+    priorVolumes.length >= 5 ? priorVolumes.reduce((a, b) => a + b, 0) / priorVolumes.length : 0;
+
+  const ma20Window = candles.slice(-20);
+  const ma20 =
+    ma20Window.length >= 10 ? ma20Window.reduce((a, c) => a + c.close, 0) / ma20Window.length : null;
+
+  const bollingerSignal = computeBollingerSignal(candles, currentPrice);
+
+  return {
+    macdCross: macd?.type ?? null,
+    macdAboveZero: macd?.aboveZero ?? null,
+    kd,
+    rsi: computeRSI(candles, 14),
+    maAlignment: computeMaAlignment(candles),
+    aboveMa20: ma20 === null ? null : currentPrice > ma20,
+    bollinger: bollingerSignal ? (bollingerSignal.tone === "up" ? "upper" : "lower") : null,
+    streakDays: streak.days,
+    streakDirection: streak.direction,
+    volumeRatio: avgVolume > 0 ? latest.volume / avgVolume : null,
+  };
 }

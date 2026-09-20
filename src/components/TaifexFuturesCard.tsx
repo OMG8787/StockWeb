@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { TaifexFuturesQuote } from "@/lib/data";
 import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
-
-// 跟伺服器端 lib/data/index.ts 的 QUOTE_TTL_MS 一致。
-const POLL_MS = 20_000;
+import { getTaifexPollDecision, IDLE_CHECK_MS } from "@/lib/pollingSchedule";
+import { useLivePolling } from "@/lib/useLivePolling";
 
 /**
  * 首頁「大盤指數」卡片旁的台指期夜盤（近月合約）小卡。刻意跟 LiveIndices/IndexCard
@@ -14,35 +13,33 @@ const POLL_MS = 20_000;
  * 非夜盤時段誤以為看到的是即時報價——這是台指期期貨資料（跟現貨指數不同）特有的
  * 誠實揭露需求。抓不到資料時顯示「資料暫缺」，絕不用其他數字頂替。
  *
- * 輪詢邏輯也刻意跟 LiveIndices 不同：LiveIndices 只在該市場「盤中」才輪詢（用
- * getMarketStatus 判斷現貨開盤時間），但夜盤時段（15:00~次日05:00）大幅跨出
- * 一般人熟悉的股市交易時間，這裡改成掛載後就持續輪詢，「交易中」/「已收盤」
- * 完全依賴後端回傳的真實狀態，不用本站自己猜測的時間表。
+ * 輪詢邏輯也刻意跟 LiveIndices 不同：這是盤後夜間商品，完全不適用台股日盤
+ * 08:30~14:30 每 10 秒、14:40 補抓那套規則（台股日盤時段內，這張卡顯示的
+ * 前一晚夜盤收盤價根本不會變）。改用夜盤自己的時段（週一~五 15:00~次日 05:00，
+ * 見 lib/pollingSchedule.ts 的 getTaifexPollDecision）：夜盤期間每 20 秒刷新，
+ * 其餘時間只在掛載時抓一次就停，不再空打 API。
+ * 「交易中」/「已收盤」的徽章仍然完全依賴後端回傳的真實狀態，本站自己猜的
+ * 時段只用來決定要不要發請求，絕不用來覆寫顯示狀態。
  */
 export default function TaifexFuturesCard({ initialQuote }: { initialQuote: TaifexFuturesQuote | null }) {
   const [quote, setQuote] = useState(initialQuote);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function tick() {
-      try {
-        const res = await fetch("/api/taifex-futures");
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        if (!cancelled) setQuote(data.quote ?? null);
-      } catch {
-        // best-effort；保留目前畫面上最後一次成功的資料，不清空
-      }
-    }
-
-    tick();
-    const timer = setInterval(tick, POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, []);
+  useLivePolling({
+    fetchOnMount: true,
+    // 夜盤時段以外本來就不用一直打 API，但如果目前根本沒有資料（SSR 那次抓失敗，
+    // 畫面顯示「資料暫缺」），就每分鐘重試一次，不要讓使用者非得重新整理頁面
+    // 才可能救回來。
+    decide: (now) =>
+      quote === null
+        ? { fetch: true, settle: false, nextCheckMs: IDLE_CHECK_MS }
+        : getTaifexPollDecision(now),
+    onFetch: async () => {
+      const res = await fetch("/api/taifex-futures");
+      if (!res.ok) return;
+      const data = await res.json();
+      setQuote(data.quote ?? null);
+    },
+  });
 
   if (!quote) {
     return (

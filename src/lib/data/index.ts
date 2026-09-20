@@ -27,13 +27,15 @@ import { fetchUsCandles, fetchUsEarnings, fetchUsFundamentals, fetchUsQuote, fet
 import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth";
 import { fetchTaifexNightFutures } from "./taifex";
 import type { TaifexFuturesQuote } from "./types";
-import { computeSignals, computeStreak, type Signal } from "@/lib/signals";
+import { computeIndicatorState, computeSignals, computeStreak, type IndicatorState, type Signal } from "@/lib/signals";
+import { isTwQuoteWindow } from "@/lib/pollingSchedule";
 import { backfillVolumeHistoryFromCandles, computeVolumeMetrics, getTrailingAverageVolumeMap, maybeRecordDailyVolumeSnapshot } from "./volumeHistory";
 import type { VolumeTrend } from "./types";
 
 export * from "./types";
 export type { MarketDepth } from "./yahooTwMarketDepth";
-export { sectorsFor, getTwUniverse, findSymbolByName, findAllSymbolsByName, findInUniverse } from "./universe";
+export { sectorsFor, getTwUniverse, findSymbolByName, findAllSymbolsByName, findInUniverse, searchUniverseByQuery } from "./universe";
+export type { UniverseEntry } from "./universe";
 export { describeTaifexNightFutures } from "./taifex";
 
 async function universeFor(market: Market): Promise<UniverseEntry[]> {
@@ -74,6 +76,18 @@ export function normalizeSymbol(symbolInput: string): string {
 }
 
 const QUOTE_TTL_MS = 20_000;
+/**
+ * 台股 08:30~14:30（股市運作期間）的報價快取 TTL。前端在這段時間改成每 1 分鐘
+ * 輪詢一次（見 lib/pollingSchedule.ts，2026-09-20 從10秒調整成1分鐘），這裡跟著
+ * 對齊成 60 秒——沒必要比前端輪詢間隔還短，快取命中率才會高，白白重抓的次數
+ * 才會降到最低。這段時間以外前端根本不輪詢，所以沿用原本的 20 秒即可。
+ */
+const TW_LIVE_QUOTE_TTL_MS = 60_000;
+
+/** 台股盤中 1 分鐘、其餘情況（含所有美股報價）維持原本的 20 秒。 */
+function quoteTtlMs(market: Market): number {
+  return market === "TW" && isTwQuoteWindow() ? TW_LIVE_QUOTE_TTL_MS : QUOTE_TTL_MS;
+}
 const CHART_TTL_MS = 5 * 60_000;
 // The "today" intraday range updates roughly once a minute at the source
 // (Yahoo's own 1-minute bars) — a 5-minute TTL would show the same stale
@@ -135,7 +149,7 @@ async function fetchTwChart(symbol: string, range: ChartRange): Promise<Candle[]
 export async function getQuote(symbolInput: string, marketHint?: Market): Promise<Quote | null> {
   const symbol = normalizeSymbol(symbolInput);
   const market = marketHint ?? detectMarket(symbol);
-  return cached(`quote:${market}:${symbol}`, QUOTE_TTL_MS, async () => {
+  return cached(`quote:${market}:${symbol}`, quoteTtlMs(market), async () => {
     try {
       return market === "TW" ? await fetchTwQuote(symbol) : await fetchUsQuote(symbol);
     } catch {
@@ -226,14 +240,13 @@ async function mergeTwMaps<V>(
   return new Map([...twse, ...tpex]);
 }
 
-// Previously 1 hour ("fundamentals don't move intraday") — shortened to
-// match the site-wide "everything should feel current within ~5 minutes"
-// standard the user asked for after finding several caches (daily brief,
-// action brief, news feed) sitting on much longer refresh windows. The
-// underlying data source itself still only updates once a day, so a 5-min
-// TTL doesn't create *new* freshness here — it just keeps this in step with
-// every other cache on the site rather than being the stale outlier.
-const FUNDAMENTALS_TTL_MS = 5 * 60_000;
+// 2026-09-20：從 5 分鐘拉回 30 分鐘。這裡曾經從「1小時」改成「5分鐘」是為了
+// 跟全站快報/建議/新聞那批 5 分鐘標準看齊，但本益比/股價淨值比/殖利率/市值這類
+// 基本面數字本質上一天只會變一次（收盤價才會變動），5分鐘重算一次沒有換到任何
+// 真正的新鮮度，只是讓 warm-cache 這支背景排程（每5分鐘觸發一次）白白多算很多次
+// ——這是 Vercel 免費方案用量吃緊後盤點出來的真實浪費源頭之一，30分鐘仍然遠比
+// 「一天只變一次」的實際更新頻率頻繁，使用者不會感覺到任何變舊。
+const FUNDAMENTALS_TTL_MS = 30 * 60_000;
 
 /**
  * Returns null when unavailable — fabricating a P/E ratio or dividend
@@ -255,7 +268,9 @@ export async function getFundamentals(symbolInput: string, marketHint?: Market):
   }
 }
 
-const EARNINGS_TTL_MS = 5 * 60_000; // same site-wide 5-min standard as FUNDAMENTALS_TTL_MS above
+// 2026-09-20：拉長到 1 小時——月營收一個月只公布一次、季報EPS一季只公布一次，
+// 5分鐘重算完全是白工，理由同 FUNDAMENTALS_TTL_MS 的說明。
+const EARNINGS_TTL_MS = 60 * 60_000;
 
 /**
  * Returns null when unavailable — a bank/insurer isn't in TWSE's general
@@ -286,7 +301,9 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
   }
 }
 
-const CHIPS_TTL_MS = 5 * 60_000; // 全站統一 5 分鐘更新標準，見 FUNDAMENTALS_TTL_MS 說明
+// 2026-09-20：拉長到 1 小時——三大法人買賣超/融資融券餘額是官方收盤後才公布
+// 一次的報表，盤中/半夜每5分鐘重算是純浪費，理由同 FUNDAMENTALS_TTL_MS 的說明。
+const CHIPS_TTL_MS = 60 * 60_000;
 
 /**
  * TW only（籌碼面：三大法人買賣超＋融資融券餘額）— 美股沒有對應的公開資料
@@ -337,7 +354,9 @@ export async function getMarketDepth(symbolInput: string, marketHint?: Market): 
   );
 }
 
-const ANNOUNCEMENTS_TTL_MS = 5 * 60_000; // 全站統一 5 分鐘更新標準，見 FUNDAMENTALS_TTL_MS 說明
+// 2026-09-20：拉長到 15 分鐘——重大訊息公告比籌碼/財報更可能在盤中臨時出現，
+// 保留比其他基本面資料更短的間隔，但一樣不需要5分鐘等級的新鮮度。
+const ANNOUNCEMENTS_TTL_MS = 15 * 60_000;
 
 /** TW only — 最近一個交易日的重大訊息公告；大多數股票當天沒有公告是常態，回傳空陣列而非 null。 */
 export async function getMaterialAnnouncements(symbolInput: string, marketHint?: Market): Promise<MaterialAnnouncement[]> {
@@ -384,7 +403,9 @@ const INDEX_DEFS: Array<{ symbol: string; name: string; market: Market; misCode?
 export async function getIndices(): Promise<IndexQuote[]> {
   const results = await Promise.all(
     INDEX_DEFS.map((def) =>
-      cached<IndexQuote | null>(`index:${def.symbol}`, QUOTE_TTL_MS, async () => {
+      // 逐檔用自己市場的 TTL：台股指數盤中 10 秒、美股指數維持 20 秒，
+      // 不會因為放在同一個 getIndices() 就把台股規則套到美股指數上。
+      cached<IndexQuote | null>(`index:${def.symbol}`, quoteTtlMs(def.market), async () => {
         try {
           const q =
             def.market === "TW" && def.misCode ? await fetchTwseQuote(def.misCode) : await fetchUsQuote(def.symbol);
@@ -547,10 +568,24 @@ export async function backfillVolumeHistory(
 // slow regardless of how fast the code computing on top of it was.
 const MARKET_MAP_TTL_MS = 2 * 60_000;
 
+/**
+ * 台股 08:30~14:30 期間縮短到 60 秒。首頁「焦點排行」盤中每 10 秒輪詢一次
+ * /api/search，若這份全市場快取還是 2 分鐘，畫面上的漲跌幅最久要 2 分鐘才會
+ * 換一次數字，跟使用者要的「盤中即時」差太多。
+ *
+ * 但也**刻意不跟著縮到 10 秒**：這是全站最貴的一次上游呼叫（整個市場的批次
+ * 報價），PROGRESS.md 2026-09-11 那次效能事故就是因為這份資料只快取 20 秒，
+ * 導致幾乎每一次瀏覽都要現場付整批抓取的成本、全站變慢。60 秒是「盤中數字
+ * 會動」跟「不要重演那次變慢」之間的取捨：焦點排行實際最快每分鐘換一次數字，
+ * 個股報價/大盤指數/關注清單那些單檔報價則是真正的 10 秒級。
+ */
+const TW_LIVE_MARKET_MAP_TTL_MS = 60_000;
+
 // cachedMap, not cached: this value is a Map, and the Redis backend stores
 // JSON — a Map would come back from a shared-cache hit as an empty object.
 async function getMarketQuoteMap(market: Market): Promise<Map<string, Quote>> {
-  return cachedMap(`market-quotes:${market}`, MARKET_MAP_TTL_MS, () => fetchMarketQuoteMap(market));
+  const ttl = market === "TW" && isTwQuoteWindow() ? TW_LIVE_MARKET_MAP_TTL_MS : MARKET_MAP_TTL_MS;
+  return cachedMap(`market-quotes:${market}`, ttl, () => fetchMarketQuoteMap(market));
 }
 
 export interface SearchFilters {
@@ -672,14 +707,11 @@ export interface MomentumItem extends SearchItem {
 
 // Was doubled to 10 minutes at one point to reduce how often this
 // genuinely expensive screen (a chart fetch per candidate stock) has to
-// recompute — brought back down to the site-wide 5-min standard (see
-// FUNDAMENTALS_TTL_MS) since real visitors were never the ones paying that
-// cost anyway: warm-cache's cron (.github/workflows/warm-cache.yml) already
-// recomputes this in the background on its own ~5-min schedule regardless
-// of whether anyone is actively visiting, so halving the TTL mainly means
-// the cron's own background work runs twice as often, not that users wait
-// longer for anything.
-const MOMENTUM_TTL_MS = 5 * 60_000;
+// 2026-09-20：拉長到 15 分鐘——這是這支排程裡數一數二貴的一項（要對候選股
+// 各抓一次K線），warm-cache 的背景排程本來就每5分鐘觸發一次，TTL 定在5分鐘
+// 等於每次觸發都重算，是 Vercel 用量吃緊後盤點出來的浪費源頭之一；15分鐘仍然
+// 遠比技術訊號實際變化的速度（通常以「天」為單位）新鮮很多。
+const MOMENTUM_TTL_MS = 15 * 60_000;
 // Computing a signal requires a chart fetch per candidate stock, so the
 // candidate pool is capped to the biggest movers by |change%| before doing
 // that work — a board that only ever displays the top ~10 results doesn't
@@ -748,6 +780,88 @@ export async function getMultiSignalStocks(market: Market, minSignals = 2): Prom
   });
 }
 
+export interface TechScreenItem {
+  symbol: string;
+  market: Market;
+  name: string;
+  price: number;
+  changePercent: number;
+  turnover: number;
+  /** 每個技術指標「當下的實際狀態值」，見 lib/signals.ts 的 IndicatorState。 */
+  state: IndicatorState;
+  /** 同一組 K 線算出來、已經觸發的中文訊號標籤（跟個股頁上顯示的完全一致）。 */
+  signals: Signal[];
+}
+
+// 2026-09-20：拉長到 30 分鐘——這是全站最貴的一項背景計算（要對成交金額
+// 前120檔台股+60檔美股各抓一次K線），5分鐘的 warm-cache 排程若每次都重算這個，
+// 是 Vercel 免費方案用量吃緊後盤點出來的最大浪費源頭，30分鐘仍然遠比技術指標
+// 交叉訊號實際變化的速度新鮮很多。
+const TECH_SCREEN_TTL_MS = 30 * 60_000;
+// 掃描範圍：依今日成交金額（＝市場資金實際關注度）由大到小取前 N 檔。
+//
+// 為什麼不沿用 getMultiSignalStocks 那個「當日漲跌幅最大前15檔」的候選池：
+// 使用者要求「問『有沒有MACD與KD都黃金交叉的股票』這種多重指標篩選時，要真的
+// 去查證資料」。實測（2026-09-16）用獨立腳本掃描台股成交金額前150檔發現，當天
+// 真的有一檔嘉基(6715) 同時符合 MACD 黃金交叉 + K值上穿D值，但它當天只漲 3.32%、
+// 完全排不進全市場漲跌幅前15名，所以 getMultiSignalStocks 從一開始就不會把它
+// 納入候選，AI 手上根本沒有這筆資料，只能誠實回答「沒有」——跟先前「連漲N天」
+// 那個 bug 是同一個根因：**候選池的挑選標準（漲跌幅）跟使用者問的條件（技術
+// 指標交叉）根本無關**。技術指標交叉天生就常發生在漲幅普通的股票上（MACD 剛
+// 黃金交叉通常只是小漲一根），用漲跌幅當入場券等於系統性地把答案濾掉。
+//
+// 改用成交金額排序的理由：①它跟「有沒有發生交叉」完全無關，不會造成上述那種
+// 系統性偏誤；②技術指標對幾乎沒有人交易的殭屍股本來就沒有參考價值（算得出
+// 漂亮的黃金交叉也買不到、賣不掉），用流動性當門檻同時也是對使用者負責。
+// 這仍然不是「全市場每一檔」（那需要對上千檔各抓一次K線，對上游是不可行的
+// 請求量），所以清單本身、以及送進 AI 的說明文字都必須誠實標示掃描範圍。
+const TECH_SCREEN_CANDIDATE_LIMIT: Record<Market, number> = { TW: 120, US: 60 };
+// 抓K線的併發上限。跟 getVolumeSurgeStocks 用同一個量級（它已經在正式站穩定
+// 跑 60 檔），且兩者候選池高度重疊、getChart 本身有快取，重複的部分是免費的。
+const TECH_SCREEN_CHART_CONCURRENCY = 20;
+
+/**
+ * 全市場（成交金額前 N 檔）的「每一檔技術指標實際狀態」快照，專門用來支援
+ * 「多重技術指標同時符合」的篩選問題。
+ *
+ * 跟 getMultiSignalStocks 的關鍵差異有兩個：
+ * 1. 候選池用成交金額而非當日漲跌幅挑（見上方 TECH_SCREEN_CANDIDATE_LIMIT 註解），
+ *    範圍也大 8 倍，不會系統性漏掉漲幅普通但剛發生指標交叉的股票。
+ * 2. 回傳的是結構化的指標數值（有沒有交叉、K/D 幾點、RSI 幾點、均線什麼排列），
+ *    不是只有中文標籤字串，所以呼叫端可以用程式做任意組合的交集篩選
+ *    （「MACD黃金交叉 且 KD黃金交叉」「均線多頭排列 且 RSI<70」…），
+ *    而不是靠 AI 看著標籤自己猜。
+ */
+export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
+  return cached(`tech-screen:${market}:v1`, TECH_SCREEN_TTL_MS, async () => {
+    const pool = await searchStocks({ market, sortBy: "turnover", sortDir: "desc" });
+    const candidates = pool.slice(0, TECH_SCREEN_CANDIDATE_LIMIT[market]);
+
+    const results = await mapWithConcurrency(
+      candidates,
+      TECH_SCREEN_CHART_CONCURRENCY,
+      async (item): Promise<TechScreenItem | null> => {
+        const chart = await getChart(item.symbol, "3m", item.market);
+        if (!chart) return null;
+        const state = computeIndicatorState(chart.candles, item.price);
+        if (!state) return null;
+        return {
+          symbol: item.symbol,
+          market: item.market,
+          name: item.name,
+          price: item.price,
+          changePercent: item.changePercent,
+          turnover: item.turnover,
+          state,
+          signals: computeSignals(chart.candles, item.price, "3m"),
+        };
+      }
+    );
+
+    return results.filter((r): r is TechScreenItem => r !== null);
+  });
+}
+
 export interface VolumeSurgeItem {
   symbol: string;
   market: Market;
@@ -763,7 +877,9 @@ export interface VolumeSurgeItem {
   streakDirection: "up" | "down" | null;
 }
 
-const VOLUME_SURGE_TTL_MS = 5 * 60_000;
+// 2026-09-20：拉長到 20 分鐘——一樣是要對候選股逐一抓K線的較貴計算，理由同
+// MOMENTUM_TTL_MS/TECH_SCREEN_TTL_MS 的說明。
+const VOLUME_SURGE_TTL_MS = 20 * 60_000;
 // 這裡刻意跟 getMultiSignalStocks 的做法不同：先用完全不用抓K線、成本很低的
 // searchStocks({volumeTrends:["buy-leaning"]})（只靠已經有的報價+近期均量快取）
 // 掃過「整個台股市場」找出真正符合「今日價漲、且量能明顯高於自己均量」的股票，
@@ -835,7 +951,10 @@ export interface ValueScreen {
   decliners: ValueScreenItem[];
 }
 
-const VALUE_SCREEN_TTL_MS = 5 * 60_000;
+// 2026-09-20：拉長到 30 分鐘，跟本益比/殖利率背後的 FUNDAMENTALS_TTL_MS 對齊
+// ——這個排行本身不用抓K線（只是重新排序已經快取好的基本面/報價資料），沒有
+// MOMENTUM/TECH_SCREEN 那麼貴，但排序依據的本益比/殖利率一天也不會變好幾次。
+const VALUE_SCREEN_TTL_MS = 30 * 60_000;
 const VALUE_SCREEN_N = 12;
 // 流動性下限：本益比/殖利率最極端的名次幾乎一定被「幾乎沒有人交易的殭屍股」佔滿
 // （成交金額只有幾萬元的冷門股，本益比 2 倍也買不到、賣不掉），對使用者完全沒有
@@ -926,7 +1045,9 @@ export interface ChipsRanking {
   trustBuy: ChipsRankingItem[];
 }
 
-const CHIPS_RANKING_TTL_MS = 5 * 60_000;
+// 2026-09-20：拉長到 1 小時，跟 CHIPS_TTL_MS 對齊——這個排行的依據（三大法人
+// 買賣超）本身就是收盤後才公布一次的報表，理由同 CHIPS_TTL_MS 的說明。
+const CHIPS_RANKING_TTL_MS = 60 * 60_000;
 const CHIPS_RANKING_N = 10;
 
 /**

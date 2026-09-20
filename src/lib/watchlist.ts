@@ -31,6 +31,54 @@ export function hasHolding(item: Pick<WatchlistItem, "costBasis" | "shares">): b
 const STORAGE_KEY = "stockradar:watchlist";
 export const WATCHLIST_CHANGED_EVENT = "stockradar:watchlist-changed";
 
+/**
+ * 「僅關注（未持有）」那一組有沒有被使用者親手排過順序，依市場分開記錄
+ * （`{"TW":true,"US":true}`）。
+ *
+ * 為什麼需要這個旗標：`order` 欄位本身分不出「使用者刻意排成這樣」跟
+ * 「只是照加入清單的先後自動編號」——每檔新加入的股票都會拿到一個 order
+ * （見 nextOrderFor），所以光看 order 有沒有值是問不出答案的。有了這個旗標，
+ * 僅關注清單才能做到使用者要的行為：**還沒手動排過就預設依細分產業分組排列**
+ * （見 lib/fineIndustry.ts），**一旦手動拖曳過就完全尊重使用者排的順序**，
+ * 不會每次重新整理又被打回產業排序。
+ *
+ * 刻意存在跟清單本身不同的 key：它是「這台裝置上的排序偏好」，不是清單資料的
+ * 一部分，所以登入後跟伺服器同步清單（replaceWatchlist）時不會被覆蓋，也不會
+ * 因為同步進來別台裝置的清單就莫名其妙變成「排過了」。
+ *
+ * 依市場分開的理由：台股/美股是兩個分頁、兩張表，在台股那張表拖曳不該讓美股
+ * 那張表跟著從產業排序切換成別的順序（使用者會覺得自己沒碰過的清單無故重排）。
+ */
+const UNHELD_MANUAL_ORDER_KEY = "stockradar:watchlist-unheld-manual-order";
+
+function readManualOrderFlags(): Partial<Record<Market, boolean>> {
+  if (typeof window === "undefined") return {};
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(UNHELD_MANUAL_ORDER_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 這個市場的「僅關注」清單是否已被使用者手動排過（拖曳或按過排序按鈕）。 */
+export function hasManualUnheldOrder(market: Market): boolean {
+  return readManualOrderFlags()[market] === true;
+}
+
+/** 記下「使用者親手排過這個市場的僅關注清單」，之後一律照 `order` 顯示。 */
+export function markManualUnheldOrder(market: Market): void {
+  try {
+    window.localStorage.setItem(
+      UNHELD_MANUAL_ORDER_KEY,
+      JSON.stringify({ ...readManualOrderFlags(), [market]: true })
+    );
+    window.dispatchEvent(new Event(WATCHLIST_CHANGED_EVENT));
+  } catch {
+    // localStorage 不可用（無痕模式/被封鎖）——就當作沒排過，維持產業排序即可
+  }
+}
+
 function safeParse(raw: string | null): WatchlistItem[] {
   if (!raw) return [];
   try {

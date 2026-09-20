@@ -706,6 +706,59 @@ export function findAllSymbolsByName(text: string, limit: number): UniverseEntry
   return results;
 }
 
+/**
+ * 「使用者在搜尋框打了幾個字，有哪些股票對得上？」——跟上面兩個函式方向相反。
+ *
+ * findSymbolByName/findAllSymbolsByName 問的是「這段文字（一整句問句）裡面有沒有
+ * 包含某家公司的名字」，所以是 `使用者文字.includes(公司名)`；搜尋框要的是反過來的
+ * 「公司名裡面有沒有包含使用者打的這幾個字」（`公司名.includes(使用者輸入)`）——
+ * 打「台灣」要列出台灣大、台灣高鐵、台灣精材…，而不是去找一家剛好就叫「台灣」的
+ * 公司（那樣會一檔都找不到）。這兩種比對不能互相取代，所以另外寫一個。
+ *
+ * 排序（分數小的排前面）刻意讓「打得越精準的越上面」：
+ *   0 代號完全相同 / 公司名完全相同（打 2330 或「台積電」）
+ *   1 代號開頭相同（打 233 → 2330、2337…）
+ *   2 公司名開頭相同（打「台積」→ 台積電）
+ *   3 公司名中間包含（打「電」→ 台達電、中華電…）
+ * 同分再讓台股排在美股前面（使用者主力是台股），最後照代號排，確保同一組輸入
+ * 每次回傳的順序都一樣（不會因為底層清單重抓而跳動）。
+ *
+ * 比對用 matchCandidates()，所以美股的中文俗名（特斯拉、輝達…）跟去掉 Inc./Corp.
+ * 的簡稱一樣都查得到，跟 AI 問答那邊認得的名稱範圍一致。
+ */
+export function searchUniverseByQuery(query: string, limit: number): UniverseEntry[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const scored: Array<{ entry: UniverseEntry; score: number }> = [];
+  const seen = new Set<string>();
+  for (const entry of [...twFullCompanySnapshot, ...US_UNIVERSE]) {
+    const key = `${entry.market}:${entry.symbol.toUpperCase()}`;
+    if (seen.has(key)) continue;
+    const symbol = entry.symbol.toLowerCase();
+    let score = -1;
+    const consider = (candidateScore: number) => {
+      if (score === -1 || candidateScore < score) score = candidateScore;
+    };
+    if (symbol === q) consider(0);
+    else if (symbol.startsWith(q)) consider(1);
+    for (const candidate of matchCandidates(entry)) {
+      const name = candidate.toLowerCase();
+      if (name === q) consider(0);
+      else if (name.startsWith(q)) consider(2);
+      else if (name.includes(q)) consider(3);
+    }
+    if (score === -1) continue;
+    seen.add(key);
+    scored.push({ entry, score });
+  }
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    if (a.entry.market !== b.entry.market) return a.entry.market === "TW" ? -1 : 1;
+    return a.entry.symbol.localeCompare(b.entry.symbol);
+  });
+  return scored.slice(0, limit).map((s) => s.entry);
+}
+
 export function sectorsFor(market: Market): string[] {
   const pool = market === "TW" ? twUniverseSnapshot : US_UNIVERSE;
   const set = new Set(pool.map((e) => e.sector));

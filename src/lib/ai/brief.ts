@@ -27,17 +27,12 @@ export interface DailyBrief {
 // morning snapshot. First set to 3 hours (this prompt is bigger/more
 // expensive than actionBrief's, ~550-800 words vs 200-350, so refreshing
 // every 20 minutes felt wasteful) — then tightened to the site-wide 5-min
-// standard the user asked for across every cache on the site (fundamentals,
-// chips, momentum screens, this brief, action brief, news feed — see
-// FUNDAMENTALS_TTL_MS in lib/data/index.ts for the fuller reasoning). This
-// does mean noticeably more AI calls per day than the 3h version; if that
-// ever causes rate-limit fallbacks to show up more often, the fix is to
-// raise this back up, not to special-case it back to a stale cadence.
-// warm-cache's cron (every ~5 min, see .github/workflows/warm-cache.yml)
-// calls getDailyBrief() too, so this still regenerates in the background
-// right after the TTL lapses rather than making whoever visits next wait on
-// a live AI call.
-const BRIEF_TTL_MS = 5 * 60_000;
+// 2026-09-20：從5分鐘拉長回30分鐘——這裡曾經從3小時改成5分鐘是為了跟全站快取
+// 標準看齊，但快報是給人一天看幾次的摘要性內容，且每次重算都要真的呼叫一次
+// 外部AI（成本、延遲都不小），5分鐘的 warm-cache 排程若每次都重算，是 Vercel
+// 用量吃緊後盤點出來的浪費源頭之一，理由同 lib/data/index.ts 的 FUNDAMENTALS_TTL_MS
+// 說明；30分鐘仍然遠比3小時的舊版本新鮮很多。
+const BRIEF_TTL_MS = 30 * 60_000;
 const BRIEF_CACHE_KEY = "daily-brief:v2"; // v2: dropped the per-date key when this moved to a rolling TTL
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {

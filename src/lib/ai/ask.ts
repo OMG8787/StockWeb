@@ -12,18 +12,20 @@ import {
   getMultiSignalStocks,
   getQuote,
   getTaifexNightFutures,
+  getTechnicalScreen,
   getTwUniverse,
   getValueScreen,
   getVolumeSurgeStocks,
   searchStocks,
 } from "@/lib/data";
+import type { TechScreenItem } from "@/lib/data";
 import type { Market } from "@/lib/data";
 import { mapWithConcurrency } from "@/lib/data/cache";
 import { fetchNews, fetchNewsMulti, fetchUsMarketNews } from "@/lib/data/news";
 import { formatMarketCap, formatSharesWithLots, formatTurnover } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
-import { computeSignals } from "@/lib/signals";
+import { computeSignals, computeIndicatorState } from "@/lib/signals";
 import { computeHoldingPnl } from "@/lib/portfolio";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
@@ -249,10 +251,105 @@ const MOVERS_INTENT_PATTERN =
 // 字的篩選問題，就視為同一串追問，繼續套用篩選資料。
 const BARE_FOLLOWUP_PATTERN = /^[\d一二三四五六七八九十]{0,4}\s*(天|日)?\s*(呢|嗎|吗|的話|的话|怎樣|怎样|可以嗎|可以吗)?[?？!！。.]?$/;
 
+// BARE_FOLLOWUP_PATTERN 只接得住「3天呢?」這種幾乎只剩數字的句子。2026-09-16
+// 實測發現同一類問題還有一個更常見的形狀沒接到：「那美股呢?」——上一句問
+// 「今天台股有哪些股票不錯?」，接著問「那美股呢?」，這句既不含任何篩選關鍵字、
+// 也不是純數字，於是 wantsMovers 判成 false，連美股漲幅榜都沒附上，AI 只能拿
+// 大盤指數跟新聞回答，完全沒點名任何一檔美股個股——明明資料裡有美股漲幅榜跟
+// 美股技術訊號共振股。這裡用「很短 + 以語氣詞結尾」這個形狀來涵蓋這一整類
+// 接續句（那美股呢／台股呢／其他的呢／現在如何），不再靠窮舉關鍵字。
+const SHORT_FOLLOWUP_MAX_LEN = 12;
+function isShortFollowup(question: string): boolean {
+  const trimmed = question.trim().replace(/[?？!！。.,，]+$/g, "");
+  if (trimmed.length === 0 || trimmed.length > SHORT_FOLLOWUP_MAX_LEN) return false;
+  return /(呢|咧|如何|怎樣|怎麼樣|怎么样|的話|的话)$/.test(trimmed);
+}
+
+function isFollowupShape(question: string): boolean {
+  return BARE_FOLLOWUP_PATTERN.test(question.trim()) || isShortFollowup(question);
+}
+
 function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
   if (MOVERS_INTENT_PATTERN.test(question)) return true;
-  if (!BARE_FOLLOWUP_PATTERN.test(question.trim())) return false;
+  if (!isFollowupShape(question)) return false;
   return history.some((turn) => turn.role === "user" && MOVERS_INTENT_PATTERN.test(turn.content));
+}
+
+// 「用技術指標篩股票」的問法。拆成「有提到技術指標」＋「這句話是在找/篩股票」
+// 兩個條件同時成立才算，而不是看到 KD/MACD/均線就觸發——「MACD是什麼意思」
+// 「什麼是黃金交叉」這種純名詞解釋不需要（也不該）附上整份全市場篩選清單。
+// 這兩個 pattern 只有在問句完全沒有指到任何特定股票時才會被檢查（見
+// answerQuestion 裡的 targets.length === 0 前提），所以「台積電的KD如何」
+// 走的是個股資料那條路，不受影響。
+const TECH_INDICATOR_PATTERN =
+  /黃金交叉|黄金交叉|golden\s*cross|金叉|死亡交叉|死叉|多頭排列|多头排列|空頭排列|空头排列|超賣|超卖|超買|超买|技術指標|技术指标|技術面|技术面|KD|MACD|RSI|布林|K值|D值|均線|均线|乖離|乖离/i;
+const TECH_SCREEN_VERB_PATTERN =
+  /有沒有|有没有|有哪些|哪些|哪幾|哪几|哪支|哪一?檔|哪一?只|找出|找到|篩選|筛选|挑出|選股|选股|推薦|推荐|符合|同時|同时|都在|都已|條件|条件|股票|標的|标的/;
+
+function conversationWantsTechScreen(question: string, history: ChatTurn[]): boolean {
+  if (TECH_INDICATOR_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
+  // 極短的接續追問（「那KD呢」「其他呢」）本身不成句，靠對話脈絡判斷——
+  // 跟 conversationWantsMovers 完全同一套邏輯，理由見那裡的註解。
+  if (!isFollowupShape(question)) return false;
+  return history.some(
+    (turn) =>
+      turn.role === "user" && TECH_INDICATOR_PATTERN.test(turn.content) && TECH_SCREEN_VERB_PATTERN.test(turn.content)
+  );
+}
+
+// 使用者用「這檔/那支/它/第一檔/剛剛那個」指代上文提過的股票，或乾脆只丟一個
+// 指標名稱（「本益比多少?」）繼續追問，而沒有再講一次股票名稱。
+//
+// 2026-09-16 實測抓到的真實錯答：對話裡 AI 已經講過「今天台股漲幅榜前幾名有
+// 光鼎(6226)、雍智科技(6683)」，使用者接著問「第一檔的本益比多少?」，AI 回
+// 「目前查不到這檔股票的本益比資料」——但 6226 的本益比本站其實查得到，只是
+// 這一句沒寫出股票名稱，guessSymbolsFromText 自然什麼都找不到，完全沒有個股
+// 資料可用。這個錯答比單純答不出來更糟：使用者會以為本站根本沒有這檔的資料。
+const PRONOUN_FOLLOWUP_PATTERN =
+  /這[檔支家隻個]|这[档支家只个]|那[檔支家隻]|第[一二三四五六七八九十\d]+[檔支個家只]|剛剛|刚刚|剛才|刚才|上面(那|提到|講|说|說)|前面(那|提到|講|说|說)/;
+// 只丟指標名稱的追問（「本益比多少?」「法人買超多少?」）。因為沒有代名詞可以
+// 當依據，條件收得比上面嚴格：句子要很短，而且不能含任何「這是在篩全市場」
+// 的字眼，避免把「有沒有本益比低的股票」這種全市場篩選問題誤判成在問某一檔。
+const METRIC_FOLLOWUP_PATTERN =
+  /本益比|殖利率|股價淨值比|淨值比|市值|營收|营收|EPS|財報|财报|法人|籌碼|筹码|融資|融券|技術面|技术面|基本面|新聞|新闻|消息|現價|现价|股價|股价|漲跌|涨跌|成交量|均線|均线|RSI|MACD|KD|布林/i;
+const METRIC_FOLLOWUP_MAX_LEN = 14;
+const SCREENING_WORDS_PATTERN = /有沒有|有没有|有哪些|哪些|哪幾|哪几|哪支|推薦|推荐|篩選|筛选|選股|选股|排行|最高|最低|前幾名|前几名/;
+
+function parseOrdinal(question: string): number | null {
+  const digit = question.match(/第(\d+)[檔支個家只]/);
+  if (digit) return Number(digit[1]);
+  const CH = "一二三四五六七八九十";
+  const chinese = question.match(new RegExp(`第([${CH}])[檔支個家只]`));
+  if (chinese) return CH.indexOf(chinese[1]) + 1;
+  return null;
+}
+
+/**
+ * 這一句沒有寫出股票名稱、但顯然是在追問上文提過的某一檔時，從對話紀錄裡
+ * 把那一檔找回來。只在完全沒解析到股票、也不是全市場篩選/主題問題時才會被
+ * 呼叫（見 answerQuestion 裡的呼叫條件），所以不會搶走篩選類問題的資料。
+ */
+async function resolveFollowupTargets(
+  question: string,
+  history: ChatTurn[]
+): Promise<Array<{ symbol: string; market: Market | undefined }>> {
+  const trimmed = question.trim();
+  const hasPronoun = PRONOUN_FOLLOWUP_PATTERN.test(trimmed);
+  const bareMetric =
+    METRIC_FOLLOWUP_PATTERN.test(trimmed) &&
+    trimmed.length <= METRIC_FOLLOWUP_MAX_LEN &&
+    !SCREENING_WORDS_PATTERN.test(trimmed);
+  if (!hasPronoun && !bareMetric) return [];
+
+  const ordinal = parseOrdinal(trimmed);
+  // 由新到舊找第一則真的有提到股票的訊息（通常是 AI 上一則點名了幾檔的回答）。
+  for (let i = history.length - 1; i >= 0; i--) {
+    const found = await guessSymbolsFromText(history[i].content);
+    if (found.length === 0) continue;
+    const picked = ordinal != null && found[ordinal - 1] ? found[ordinal - 1] : found[0];
+    return [{ symbol: picked.symbol, market: picked.market }];
+  }
+  return [];
 }
 
 // Momentum stocks get more slots than plain gainers: a gainer is just one
@@ -275,6 +372,134 @@ const VOLUME_SURGE_N = 30;
 // 是哪幾檔」時，原本資料裡根本沒有這份排行，AI 只好拿技術訊號共振股的法人買賣超
 // 硬湊，答出來的東西跟「成交量最大」沒有關係。
 const TURNOVER_N = 10;
+
+// 一檔股票在「技術指標明細表」裡的一行。刻意把每個指標的實際數值都寫出來
+// （K/D 幾點、RSI 幾點、MACD 在 0 軸哪一側），而不是只寫有沒有訊號——這樣
+// AI 才有辦法回答「KD 剛交叉但還在低檔」「RSI 還沒過熱」這種帶數值條件的
+// 追問，也讓它引用的每個數字都有出處、不需要自己編。
+function describeTechState(item: TechScreenItem): string {
+  const s = item.state;
+  const parts: string[] = [];
+  const zoneText = { low: "低檔/超賣區", mid: "中間區間", high: "高檔/超買區" } as const;
+  parts.push(
+    s.macdCross === "golden"
+      ? `MACD黃金交叉（${s.macdAboveZero ? "0軸上方，訊號較明確" : "0軸下方，屬低檔訊號，力道較弱"}）`
+      : s.macdCross === "death"
+        ? `MACD死亡交叉（${s.macdAboveZero ? "0軸上方" : "0軸下方，屬續跌訊號"}）`
+        : s.macdAboveZero === null
+          ? "MACD資料不足"
+          : `MACD今日未交叉（MACD線在0軸${s.macdAboveZero ? "上方" : "下方"}）`
+  );
+  if (s.kd) {
+    const crossText =
+      s.kd.cross === "golden"
+        ? `KD黃金交叉（K值${s.kd.prevK.toFixed(1)}→${s.kd.k.toFixed(1)}上穿D值${s.kd.prevD.toFixed(1)}→${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`
+        : s.kd.cross === "death"
+          ? `KD死亡交叉（K值${s.kd.k.toFixed(1)}下穿D值${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`
+          : `KD今日未交叉（K值${s.kd.k.toFixed(1)}、D值${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`;
+    parts.push(crossText);
+  } else {
+    parts.push("KD資料不足");
+  }
+  parts.push(
+    s.maAlignment === "bullish"
+      ? "均線多頭排列（5日線>10日線>20日線）"
+      : s.maAlignment === "bearish"
+        ? "均線空頭排列（5日線<10日線<20日線）"
+        : "均線未成明確排列"
+  );
+  if (s.aboveMa20 !== null) parts.push(s.aboveMa20 ? "站上20日均線" : "跌破20日均線");
+  if (s.rsi != null) {
+    const tag = s.rsi >= 70 ? "，超買區" : s.rsi <= 30 ? "，超賣區" : "，未過熱也未超賣";
+    parts.push(`RSI ${s.rsi.toFixed(0)}${tag}`);
+  }
+  if (s.bollinger) parts.push(s.bollinger === "upper" ? "觸及布林通道上緣" : "觸及布林通道下緣");
+  if (s.streakDirection && s.streakDays >= 1) {
+    parts.push(`連${s.streakDirection === "up" ? "漲" : "跌"}${s.streakDays}天`);
+  }
+  if (s.volumeRatio != null) parts.push(`量能${s.volumeRatio.toFixed(1)}倍均量`);
+  return `${item.name}(${item.symbol})，現價${item.price}(${item.changePercent >= 0 ? "+" : ""}${item.changePercent}%)：${parts.join("、")}`;
+}
+
+// 明細表最多列幾檔：凡是「今天有任一交叉」的一律全部列出（這才是多重指標
+// 篩選真正會用到的母體，通常一天只有十幾檔），另外再補上成交金額最大的
+// 幾檔（讓「台積電現在技術面如何」這類問法也有數值可引用）。
+const TECH_TABLE_EXTRA_BY_TURNOVER = 25;
+
+/**
+ * 「多重技術指標同時符合」的篩選資料。
+ *
+ * 使用者要求：問「現在有沒有MACD與KD線都在黃金交叉，適合明天買入的股票?」
+ * 這種同時要符合多個技術條件的問題時，要真的去查證資料、確定回答內容正確。
+ * 2026-09-16 實測的真實 bug：當天市場上確實有股票同時符合（嘉基6715），
+ * AI 卻回答「資料裡沒有同時列出MACD與KD都黃金交叉的股票」——因為舊的
+ * 「技術訊號共振股」只掃當日漲跌幅前15檔（見 getTechnicalScreen 的註解），
+ * 而且舊的 KD 訊號只認低檔交叉（見 lib/signals.ts 的 KD 註解），兩個原因
+ * 疊在一起讓正確答案根本不可能出現在 AI 手上。
+ *
+ * 這裡把常見組合先用程式算好交集（而不是把一堆資料丟給 AI 讓它自己配對，
+ * 那正是會出錯的地方），同時附上完整的指標明細表，讓沒有事先列舉到的
+ * 其他組合（例如「均線多頭排列＋RSI未過熱＋站上20日均線」）也有真實數值
+ * 可以逐檔核對。
+ */
+async function buildTechScreenGrounding(): Promise<string> {
+  const [tw, us] = await Promise.all([
+    getTechnicalScreen("TW").catch(() => [] as TechScreenItem[]),
+    getTechnicalScreen("US").catch(() => [] as TechScreenItem[]),
+  ]);
+  if (tw.length === 0 && us.length === 0) return "";
+
+  const blockFor = (items: TechScreenItem[], marketLabel: string, scanned: number): string => {
+    if (items.length === 0) return "";
+    const fmtList = (list: TechScreenItem[]) =>
+      list.length === 0
+        ? "（今天掃描範圍內一檔都沒有，這是實際比對過每一檔指標後的結果，可以直接回答「今天沒有」）"
+        : list.map((i) => `- ${describeTechState(i)}`).join("\n");
+
+    const macdGolden = items.filter((i) => i.state.macdCross === "golden");
+    const macdDeath = items.filter((i) => i.state.macdCross === "death");
+    const kdGolden = items.filter((i) => i.state.kd?.cross === "golden");
+    const kdDeath = items.filter((i) => i.state.kd?.cross === "death");
+    const bothGolden = items.filter((i) => i.state.macdCross === "golden" && i.state.kd?.cross === "golden");
+    const bothDeath = items.filter((i) => i.state.macdCross === "death" && i.state.kd?.cross === "death");
+    const bullishMaHealthyRsi = items.filter(
+      (i) => i.state.maAlignment === "bullish" && i.state.rsi != null && i.state.rsi < 70
+    );
+    const bullishMaMacdGolden = items.filter(
+      (i) => i.state.maAlignment === "bullish" && i.state.macdCross === "golden"
+    );
+    const oversoldTurning = items.filter(
+      (i) => i.state.kd?.cross === "golden" && i.state.rsi != null && i.state.rsi <= 40
+    );
+
+    const crossed = items.filter((i) => i.state.macdCross !== null || i.state.kd?.cross != null);
+    const crossedSymbols = new Set(crossed.map((i) => i.symbol));
+    const extras = items
+      .slice()
+      .sort((a, b) => b.turnover - a.turnover)
+      .filter((i) => !crossedSymbols.has(i.symbol))
+      .slice(0, TECH_TABLE_EXTRA_BY_TURNOVER);
+    const tableRows = [...crossed, ...extras];
+
+    return [
+      `【${marketLabel}多重技術指標篩選】掃描範圍：依今日成交金額由大到小的前 ${scanned} 檔${marketLabel}（不是全部上市櫃股票；這個排序跟「有沒有發生指標交叉」完全無關，所以不會系統性漏掉某一類股票，但極冷門、幾乎沒有成交的股票不在範圍內）。以下每一檔的指標都是用該檔近3個月真實日K線當場算出來的，不是估計值。`,
+      `${marketLabel}「MACD黃金交叉 且 KD黃金交叉」同時成立（共${bothGolden.length}檔）：\n${fmtList(bothGolden)}`,
+      `${marketLabel}「MACD死亡交叉 且 KD死亡交叉」同時成立（共${bothDeath.length}檔）：\n${fmtList(bothDeath)}`,
+      `${marketLabel}今日 MACD黃金交叉（共${macdGolden.length}檔）：\n${fmtList(macdGolden)}`,
+      `${marketLabel}今日 KD黃金交叉（K值上穿D值，共${kdGolden.length}檔；括號裡會註明發生在低檔/中間/高檔，低檔交叉是最標準的轉強訊號，高檔交叉要留意追高風險）：\n${fmtList(kdGolden)}`,
+      `${marketLabel}今日 MACD死亡交叉（共${macdDeath.length}檔）：\n${fmtList(macdDeath)}`,
+      `${marketLabel}今日 KD死亡交叉（共${kdDeath.length}檔）：\n${fmtList(kdDeath)}`,
+      `${marketLabel}「均線多頭排列 且 RSI未過熱（RSI<70）」（共${bullishMaHealthyRsi.length}檔）：\n${fmtList(bullishMaHealthyRsi)}`,
+      `${marketLabel}「均線多頭排列 且 MACD黃金交叉」（共${bullishMaMacdGolden.length}檔）：\n${fmtList(bullishMaMacdGolden)}`,
+      `${marketLabel}「KD黃金交叉 且 RSI仍低（RSI≤40，尚未漲多）」（共${oversoldTurning.length}檔）：\n${fmtList(oversoldTurning)}`,
+      `${marketLabel}技術指標明細表（今天有發生任一交叉的全部列出，另補上成交金額最大的幾檔；使用者問到上面沒有預先列出的其他指標組合時，一律從這張表逐檔比對後回答，不要自己回想或推測）：\n${tableRows.map((i) => `- ${describeTechState(i)}`).join("\n")}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  };
+
+  return [blockFor(tw, "台股", tw.length), blockFor(us, "美股", us.length)].filter(Boolean).join("\n\n");
+}
 
 async function buildMoversGrounding(): Promise<string> {
   try {
@@ -400,12 +625,19 @@ async function buildMoversGrounding(): Promise<string> {
  * which can be stale) and, when cost/shares were entered, its unrealized
  * P&L computed from that live price.
  */
-async function buildHoldingsGrounding(holdings: HoldingInput[]): Promise<string> {
+async function buildHoldingsGrounding(holdings: HoldingInput[], includeTechnical = false): Promise<string> {
   if (holdings.length === 0) return "";
   const lines = await Promise.all(
     holdings.map(async (h) => {
       const quote = await getQuote(h.symbol, h.market);
       if (!quote) return `${h.name}(${h.symbol})：目前查不到報價`;
+      // 2026-09-16 實測抓到的缺口：使用者問「我的持股裡有沒有哪一檔出現黃金
+      // 交叉?」時，這份輕量版清單只有報價跟損益，完全沒有技術訊號，AI 只好
+      // 回答「個股詳細技術指標剛好沒有在這次的資料裡列出來」——可是這些資料
+      // 本站每一檔個股頁都算得出來，只是沒送進來。這裡只在使用者真的問到技術
+      // 指標時才多抓一次K線（getChart 本身有快取，持股通常也只有幾檔），
+      // 不讓一般的「我持股賺還賠」問題平白多付這個成本。
+      const technical = includeTechnical ? await describeHoldingTechnical(quote) : "";
       const base = `${quote.name}(${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"})：現價 ${quote.price} ${quote.currency}，今日${quote.change >= 0 ? "漲" : "跌"} ${Math.abs(quote.changePercent)}%`;
       if (h.costBasis != null && h.shares != null && h.shares > 0) {
         // Same lib/portfolio.ts math the watchlist table itself uses (buy/
@@ -416,12 +648,41 @@ async function buildHoldingsGrounding(holdings: HoldingInput[]): Promise<string>
         if (pnl == null) return `${base}；持有 ${h.shares} 股，平均成本 ${h.costBasis}`;
         const pnlText = pnlPercent != null ? `${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}（${pnlPercent >= 0 ? "+" : ""}${pnlPercent.toFixed(1)}%）` : `${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)}`;
         const pnlLabel = h.market === "TW" ? "損益（已估算計入買賣手續費與證交稅）" : "損益";
-        return `${base}；持有 ${h.shares} 股，平均成本 ${h.costBasis}，${pnlLabel} ${pnlText}`;
+        return `${base}；持有 ${h.shares} 股，平均成本 ${h.costBasis}，${pnlLabel} ${pnlText}${technical}`;
       }
-      return `${base}（尚未設定持股成本/股數）`;
+      return `${base}（尚未設定持股成本/股數）${technical}`;
     })
   );
   return lines.join("\n");
+}
+
+/** 單一持股的技術指標描述，格式跟【技術指標篩選】區塊一致，讓 AI 在兩邊看到
+ *  同一檔股票時說法不會前後矛盾。 */
+async function describeHoldingTechnical(quote: { symbol: string; market: Market; price: number }): Promise<string> {
+  try {
+    const chart = await getChart(quote.symbol, "3m", quote.market);
+    if (!chart) return "；技術面：目前抓不到K線資料，無法計算指標";
+    const state = computeIndicatorState(chart.candles, quote.price);
+    if (!state) return "；技術面：K線資料不足，無法計算指標";
+    const crossText =
+      state.macdCross === "golden"
+        ? `有MACD黃金交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
+        : state.macdCross === "death"
+          ? "有MACD死亡交叉"
+          : "今日沒有MACD交叉";
+    const kdText = state.kd
+      ? state.kd.cross === "golden"
+        ? `有KD黃金交叉（K值${state.kd.k.toFixed(1)}上穿D值${state.kd.d.toFixed(1)}）`
+        : state.kd.cross === "death"
+          ? `有KD死亡交叉（K值${state.kd.k.toFixed(1)}下穿D值${state.kd.d.toFixed(1)}）`
+          : `今日沒有KD交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
+      : "KD資料不足";
+    const signals = computeSignals(chart.candles, quote.price, "3m");
+    const signalText = signals.length > 0 ? signals.map((s) => s.label).join("、") : "今日沒有觸發任何技術訊號";
+    return `；技術面：${crossText}、${kdText}；已觸發的技術訊號：${signalText}`;
+  } catch {
+    return "；技術面：指標計算失敗";
+  }
 }
 
 // Matches the chat widget's "📋 分析我的關注清單" button text and close
@@ -710,7 +971,7 @@ export async function answerQuestion(
   history: ChatTurn[] = [],
   holdings: HoldingInput[] = []
 ): Promise<AskResult> {
-  const targets = contextSymbol
+  let targets: Array<{ symbol: string; market: Market | undefined }> = contextSymbol
     ? [{ symbol: contextSymbol, market: undefined as Market | undefined }]
     : await guessSymbolsFromText(question);
   // A themed request ("AI概念股有哪些") only makes sense to check when the
@@ -722,6 +983,19 @@ export async function answerQuestion(
   // 的說明）——這種情況要明講，不能讓 AI 拿一般的今日焦點清單冒充成該主題的成分股。
   const unknownTheme = targets.length === 0 && !themeMatch && THEME_QUESTION_PATTERN.test(question);
   const wantsMovers = targets.length === 0 && !themeMatch && conversationWantsMovers(question, history);
+  // 「用技術指標條件篩股票」跟上面的 wantsMovers 是兩個獨立的需求：問「有沒有
+  // MACD跟KD都黃金交叉的股票」時需要的是全市場逐檔算過的指標明細，不是漲幅榜；
+  // 反過來問「今天有哪些股票不錯」則不需要那份很長的指標表。兩者可以同時成立
+  // （例如「有沒有均線多頭排列、適合明天買的股票」），各自附各自的資料。
+  const wantsTechScreen = targets.length === 0 && !themeMatch && conversationWantsTechScreen(question, history);
+  // 這一句沒寫出股票名稱、也不是主題/篩選問題，但看起來是在追問上文提過的某一檔
+  // （「第一檔的本益比多少?」「這檔法人買超多少?」）——把那一檔從對話紀錄裡
+  // 找回來當成目標，否則會完全沒有個股資料、誤答成「查不到這檔股票的資料」。
+  // 刻意排在 themeMatch/wantsMovers/wantsTechScreen 之後判斷，確保全市場篩選類
+  // 問題永遠優先，不會被誤解成在問某一檔。
+  if (targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && history.length > 0) {
+    targets = await resolveFollowupTargets(question, history);
+  }
   const wantsHoldingsAnalysis = holdings.length > 0 && HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question);
   // The "問AI關於<股票>" button on every stock page pre-fills exactly this
   // phrasing (see ChatWidget.tsx's ASK_ABOUT_EVENT handler) — a user asked
@@ -743,7 +1017,16 @@ export async function answerQuestion(
   // used to be missing entirely whenever someone asked about "資訊面"/總經
   // without naming a specific stock, which had no grounding path to attach
   // it to.
-  const [stockGroundingResults, indexGrounding, moversGrounding, themeGrounding, holdingsGrounding, marketNews, newsFeed] =
+  const [
+    stockGroundingResults,
+    indexGrounding,
+    moversGrounding,
+    techScreenGrounding,
+    themeGrounding,
+    holdingsGrounding,
+    marketNews,
+    newsFeed,
+  ] =
     await Promise.all([
       Promise.all(targets.map((t) => buildStockGrounding(t))),
       Promise.all([getIndices(), getTaifexNightFutures().catch(() => null)])
@@ -758,8 +1041,12 @@ export async function answerQuestion(
         })
         .catch(() => ""),
       wantsMovers ? buildMoversGrounding() : Promise.resolve(""),
+      wantsTechScreen ? buildTechScreenGrounding().catch(() => "") : Promise.resolve(""),
       themeMatch ? buildThemeGrounding(themeMatch) : Promise.resolve(""),
-      (wantsHoldingsAnalysis ? buildHoldingsAnalysisGrounding(holdings) : buildHoldingsGrounding(holdings)).catch(() => ""),
+      (wantsHoldingsAnalysis
+        ? buildHoldingsAnalysisGrounding(holdings)
+        : buildHoldingsGrounding(holdings, TECH_INDICATOR_PATTERN.test(question))
+      ).catch(() => ""),
       Promise.all([fetchNews("台股", 6), fetchUsMarketNews(5)]).catch(() => [[], []] as const),
       // Shares the same 20-minute cache as the /news page's AI classifier —
       // a near-free reuse of work already done there (which items are
@@ -894,6 +1181,12 @@ export async function answerQuestion(
       text: moversGrounding ? `【今日焦點數據（漲幅榜、技術訊號共振股）】\n${moversGrounding}` : "",
       userSafe: false,
     },
+    {
+      // 清單標題與說明文字裡夾雜寫給模型看的指示（「可以直接回答今天沒有」
+      // 「不要自己回想或推測」），跟「今日焦點數據」同一個理由標成 userSafe:false。
+      text: techScreenGrounding ? `【技術指標篩選（多重條件比對用）】\n${techScreenGrounding}` : "",
+      userSafe: false,
+    },
     { text: themeGrounding ? `【主題股清單】\n${themeGrounding}` : "", userSafe: true },
     {
       text: unknownTheme
@@ -957,6 +1250,13 @@ export async function answerQuestion(
     "使用者問『還有其他/還有別的/有沒有機會』這類接續問題時，優先從「今日焦點數據」的技術訊號共振股/漲幅榜/價漲量增清單裡挑對話中還沒提過的標的，並具體引用該檔的數據（訊號、法人買賣超、漲跌幅、連漲天數），不要因為想不到新標的就退回『AI伺服器供應鏈』『半導體設備股』『防禦性類股』這種沒有點名具體股票、任何人不用看盤都講得出來的空泛說法；如果資料裡真的已經沒有還沒提過的標的，就老實說『目前資料裡比較突出的大概就這幾檔』，不要硬掰新的類股概念湊答案。",
     "使用者問『價漲量增』『剛漲一天』『連漲N天』（N可以是任何天數，包含1、2天這種很短的天數）這類篩選問題時，一律先實際檢視「今日焦點數據」裡的「價漲量增」清單，這份清單每一檔都已經附上真實算出來的連續上漲天數，直接依天數篩選、點名符合的股票並附上實際數字（連漲天數、均量倍數、漲跌幅）；只有在這份清單裡真的一檔都對不上使用者指定的天數時，才能回答『今天符合這個天數的价涨量增股票，資料裡沒有』，而且要明確講出『資料裡有N天、M天…等其他天數的標的，如果想看那些也可以告訴我』，不要因為使用者指定的天數剛好不在清單裡，就整句回成語意含糊的『沒有資料』讓使用者以為完全沒有任何價漲量增的股票；同一段對話裡使用者陸續問不同天數（例如先問2天、再問3天、5天）時，每次都要重新檢視同一份清單裡符合『這次』天數的股票，不要用上一次沒找到就自己記成『這份清單本來就沒有任何符合天數的股票』的錯誤結論套用到後面每一次追問——之前真實發生過連續4次追問都答錯『沒有資料』，直到使用者自己點名兩檔股票才被迫承認查到了，這種情況絕對不能再發生。",
     "「今日焦點數據」除了漲幅榜、技術訊號共振股、價漲量增清單之外，現在還固定附上這幾份全市場排行：成交金額排行、本益比最低排行、殖利率最高排行、股價淨值比最低排行、今日跌幅榜、三大法人買超/賣超排行、外資買超/賣超排行、投信買超排行。使用者問「有沒有本益比低的股票」「殖利率高的可以存股嗎」「今天跌最多的有哪些」「有沒有跌深可以撿的」「今天成交量最大的是哪幾檔」「三大法人今天在買什麼」「外資買超最多的是哪幾檔」這類問題時，一律先看對應的那份排行清單、直接點名股票並附上實際數字，絕對不要再回答「資料裡沒有提供個股的本益比/殖利率數據」或「沒有特別列出外資買超最多的股票」——這些資料現在都有了。也不要張冠李戴：問成交金額就看成交金額排行，不要拿漲幅榜或法人買超清單充數；問外資就看外資那份，不要用三大法人合計的數字代答。另外要幫使用者把話說完整：本益比低有可能是景氣循環股在獲利高點（之後獲利下滑本益比反而會變高），殖利率高有可能是股價跌下來撐出來的、或今年配得多明年不一定，今日跌幅大不等於「跌深了可以撿」，這些提醒要順帶講，不要只把排行唸過一遍。",
+    // 使用者要求：「AI問答像是『現在有沒有MACD與KD線都在黃金交叉，適合明天買入
+    // 的股票?』這種問題，要篩選多個符合標準的也要真正去查證資料並確定回答的內容
+    // 是正確的。」這條規則配合 buildTechScreenGrounding 產生的【技術指標篩選】
+    // 區塊一起運作——資料面已經先用程式把交集算好了，這裡要確保模型只用那份
+    // 算好的結果，不要自己從別的清單挑股票硬湊成「符合條件」。
+    "使用者問任何『用技術指標條件篩股票』的問題時（例如『有沒有MACD與KD都黃金交叉的股票』『均線多頭排列而且RSI沒過熱的有哪些』『KD剛低檔轉強的有嗎』），參考資料裡會出現「技術指標篩選（多重條件比對用）」區塊：裡面每一份清單都是先用程式對掃描範圍內每一檔股票的真實日K線逐檔算過指標、再做交集篩出來的結果，不是估計。回答規則：①先找有沒有跟使用者條件完全對應的那份清單（例如問MACD+KD都黃金交叉，就看『MACD黃金交叉 且 KD黃金交叉』那份），直接照那份清單回答並引用裡面的實際數值（K值、D值、RSI、0軸上下方）；②沒有預先列出的組合（例如『站上20日均線且量能放大且RSI<60』），就從最後那張「技術指標明細表」逐檔比對條件後回答，表裡每一檔的每個指標狀態都寫出來了，可以直接核對；③某份清單顯示『共0檔』時，那就是今天掃描範圍內真的一檔都沒有，直接乾脆地說「今天沒有符合的」並說明掃描範圍，這是查證過的結論、不是資料缺漏，不要說成『資料裡沒有提供這個指標』；④絕對不可以因為找不到完全符合的股票，就從漲幅榜、技術訊號共振股、價漲量增清單裡挑幾檔改口說它們『符合條件』或『接近條件』——那些清單的挑選標準跟使用者問的技術指標無關。要推薦替代標的是可以的，但必須明講『這幾檔並沒有同時出現你問的那兩個訊號，只是今天技術面比較強的標的』，把差別說清楚；⑤只能點名清單/明細表裡真實出現的股票，絕對不可以憑自己的知識說某檔股票『應該有黃金交叉』。",
+    "『黃金交叉』『死亡交叉』這兩個詞第一次出現時要順手用白話解釋：黃金交叉是短天期的線由下往上穿過長天期的線（一般解讀成轉強），死亡交叉相反（解讀成轉弱）；KD 的黃金交叉指的是 K 值上穿 D 值。另外，資料裡的 KD 交叉一定會註明發生在『低檔/超賣區』『中間區間』還是『高檔/超買區』，這個區間差別要照實講出來、不要省略：低檔交叉是最標準的轉強訊號，中間區間的交叉力道普通，高檔交叉雖然同樣是 K 上穿 D，但股價已經漲多，追高風險反而較高——不能一律講成「買進訊號」。也要提醒使用者：技術指標交叉只是描述已經發生的價量變化，不保證隔天會漲。",
     "使用者一次問到兩檔以上股票做比較（例如『A跟B比較』『這幾檔誰比較好』）時，如果「個股資料」有列出多個區塊（會分別標示每一檔），要針對每一檔各自的實際數字逐項比較（現價/漲跌、本益比、營收/EPS成長、法人買賣超、技術面），講出你覺得哪一檔目前比較好、為什麼，不要只把每檔資料複述一遍卻不下結論；如果其中某幾檔查不到資料，就照實只講查得到的那幾檔並誠實說明另一檔查不到，不要用自己的知識幫查不到的那檔瞎猜數字或做比較。",
     "使用者問『XX概念股/XX類股/XX相關股有哪些』這類主題式問題時（例如『AI概念股』『半導體股』『航運股』），直接引用「主題股清單」區塊裡的真實股票與數據來回答，可以綜合漲跌幅與法人籌碼講出你覺得目前比較值得留意的幾檔，但只能從清單裡的股票挑、不要無中生有列出清單以外的公司；清單如果註明是『本站整理的常見相關個股、非完整或官方分類清單』，回答時就照實反映這一點（例如『以下是幾檔常見的相關個股，不是完整清單』），不要講得像官方權威分類。",
     "提到任何一檔個股時，一律同時寫出它在資料裡的完整名稱與股票代號（例如『台灣精材(3467)』，不可以只寫『精材』），而且名稱要原封不動照抄資料裡的寫法、不要自己簡稱或省略字——台股有很多名稱只差一兩個字的不同公司（例如台灣精材3467 與 精材3374 是兩家不同公司、當天漲跌方向可能完全相反），省略代號或簡稱會讓使用者看成另一檔股票。",

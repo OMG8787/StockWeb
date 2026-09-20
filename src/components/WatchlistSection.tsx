@@ -1,27 +1,33 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import WatchlistTable, { type HoldingItem } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
-import type { Quote, SearchItem } from "@/lib/data";
+import type { Market, Quote, SearchItem } from "@/lib/data";
+import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
+import { useLivePolling } from "@/lib/useLivePolling";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
-import { hasHolding, WATCHLIST_CHANGED_EVENT, getWatchlist, type WatchlistItem } from "@/lib/watchlist";
+import {
+  hasHolding,
+  hasManualUnheldOrder,
+  WATCHLIST_CHANGED_EVENT,
+  getWatchlist,
+  type WatchlistItem,
+} from "@/lib/watchlist";
+import { sortByFineIndustry } from "@/lib/fineIndustry";
 
 function subscribe(callback: () => void) {
   window.addEventListener(WATCHLIST_CHANGED_EVENT, callback);
   return () => window.removeEventListener(WATCHLIST_CHANGED_EVENT, callback);
 }
 
-// Matches the other live-polling components (LiveIndices, LiveQuoteHeader,
-// LiveMoversBoard) — server-side quote cache TTL is 20s, so polling faster
-// wouldn't surface anything newer. This list mixes TW and US symbols with
-// different trading hours, so it just re-polls unconditionally on this
-// interval rather than tracking each market's own open/closed state — an
-// extra request for an already-closed market's unchanged quote is cheap,
-// and simpler than per-item status tracking here.
-const POLL_MS = 20_000;
-
 const EMPTY: WatchlistItem[] = [];
+
+/** 跟 WatchlistTable 裡同名的比較函式一致：缺 order 視為 0，讓還沒被拖過的
+ *  舊資料維持原本的加入順序。 */
+function byOrder(a: HoldingItem, b: HoldingItem): number {
+  return (a.order ?? 0) - (b.order ?? 0);
+}
 
 /** CSV 欄位刻意跟畫面上的 WatchlistTable 完全對應（含 2026-09-15 那次改版
  *  新增的持有股數/購買價格/損益平衡價/投資金額/損益）——原本只匯出
@@ -94,13 +100,24 @@ export default function WatchlistSection() {
   );
   const [items, setItems] = useState<SearchItem[] | null>(null); // null = not fetched yet for the current list
 
-  useEffect(() => {
-    if (list.length === 0) return;
-    let cancelled = false;
-
-    async function tick() {
+  // 這份清單會同時混著台股跟美股，兩邊交易時段完全不同，所以刷新節奏是
+  // 「各市場各自判斷」：台股 08:30~14:30 每 10 秒重抓、收盤後停、14:40 補一次；
+  // 美股維持原本的盤中每 20 秒。掛載那一次一律全部抓（不分市場、不分開收盤），
+  // 否則收盤時段打開頁面會永遠停在骨架載入畫面。沒被重抓的那些（例如台股盤後
+  // 的台股檔）保留上一次成功的數字，不會被清掉。
+  useLivePolling({
+    restartKey: list.map((w) => `${w.market}:${w.symbol}`).join(","),
+    fetchOnMount: true,
+    decide: (now, settledDayKey) => {
+      const markets = Array.from(new Set(list.map((w) => w.market)));
+      return mergePollDecisions(markets.map((m: Market) => getPollDecision(m, now, settledDayKey)));
+    },
+    onFetch: async (ctx) => {
+      if (list.length === 0) return;
+      const targets = list.filter((w) => shouldRefreshSymbol(w.market, ctx.now, ctx));
+      if (targets.length === 0) return;
       const results = await Promise.all(
-        list.map(async (w): Promise<SearchItem | null> => {
+        targets.map(async (w): Promise<SearchItem | null> => {
           try {
             const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
             if (!res.ok) return null;
@@ -126,17 +143,15 @@ export default function WatchlistSection() {
           }
         })
       );
-      if (cancelled) return;
-      setItems(results.filter((r): r is SearchItem => r !== null));
-    }
-
-    tick();
-    const timer = setInterval(tick, POLL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [list]);
+      const fresh = results.filter((r): r is SearchItem => r !== null);
+      setItems((prev) => {
+        if (ctx.mount || prev === null) return fresh;
+        const byKey = new Map(prev.map((i) => [`${i.market}:${i.symbol.toUpperCase()}`, i]));
+        for (const item of fresh) byKey.set(`${item.market}:${item.symbol.toUpperCase()}`, item);
+        return Array.from(byKey.values());
+      });
+    },
+  });
 
   // Filtered against the *current* list (not just whatever the last fetch
   // returned) so removing every watched stock immediately clears the sort/
@@ -148,19 +163,27 @@ export default function WatchlistSection() {
   // "unavailable" for that one symbol instead of silently dropping it here
   // while a real quote for it was actually fetched successfully.
   const holdingByKey = new Map(list.map((w) => [`${w.market}:${w.symbol.toUpperCase()}`, w]));
-  const displayItems: HoldingItem[] = (items ?? [])
+  const displayItemsRaw: HoldingItem[] = (items ?? [])
     .filter((i) => holdingByKey.has(`${i.market}:${i.symbol.toUpperCase()}`))
     .map((i) => {
       const holding = holdingByKey.get(`${i.market}:${i.symbol.toUpperCase()}`);
       return { ...i, costBasis: holding?.costBasis, shares: holding?.shares, order: holding?.order };
     })
-    // Held-first, then each group in its own manual drag order — matches
-    // what WatchlistTable renders, so the CSV export (which uses this same
-    // array) comes out in the same order the user actually sees on screen.
-    .sort((a, b) => {
-      const heldDiff = Number(hasHolding(b)) - Number(hasHolding(a));
-      return heldDiff !== 0 ? heldDiff : (a.order ?? 0) - (b.order ?? 0);
-    });
+    ;
+
+  // Held-first, then each group in the same order WatchlistTable renders it —
+  // so the CSV export (which uses this same array) comes out in the order the
+  // user actually sees on screen. The 僅關注 group's default is the curated
+  // fine-industry grouping (lib/fineIndustry.ts) until the user has actually
+  // dragged/sorted it themselves on that market, which is exactly the rule
+  // WatchlistTable applies; keeping the two in sync is what stops the CSV
+  // from silently coming out in a different order than the table.
+  const heldItems = displayItemsRaw.filter(hasHolding).sort(byOrder);
+  const unheldItems = (["TW", "US"] as Market[]).flatMap((m) => {
+    const group = displayItemsRaw.filter((i) => !hasHolding(i) && i.market === m);
+    return hasManualUnheldOrder(m) ? group.sort(byOrder) : sortByFineIndustry(group);
+  });
+  const displayItems: HoldingItem[] = [...heldItems, ...unheldItems];
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">

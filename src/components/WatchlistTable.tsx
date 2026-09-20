@@ -4,8 +4,9 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } f
 import Link from "next/link";
 import type { Market, SearchItem } from "@/lib/data";
 import { formatAmount, formatAmountChange, formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
-import { hasHolding, reorderGroup, updateHolding } from "@/lib/watchlist";
+import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
+import { sortByFineIndustry } from "@/lib/fineIndustry";
 import WatchlistButton from "./WatchlistButton";
 
 export interface HoldingItem extends SearchItem {
@@ -37,12 +38,25 @@ function pnlPercentOrZero(item: HoldingItem): number {
   return computeHoldingPnl(item.price, item.costBasis, item.shares, item.market).pnlPercent ?? 0;
 }
 
-type HeldSortField = "investedAmount" | "changePercent" | "pnlPercent";
-const HELD_SORT_FIELDS: Record<HeldSortField, (item: HoldingItem) => number> = {
+/** 「依產業」不是數值指標，所以不能跟其他三個一樣用 metric 相減比較——它走
+ *  lib/fineIndustry.ts 的族群順序，也沒有「高→低／低→高」的意義。 */
+type HeldSortField = "investedAmount" | "changePercent" | "pnlPercent" | "fineIndustry";
+const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: HoldingItem) => number> = {
   investedAmount: investedAmountOrZero,
   changePercent: (item) => item.changePercent,
   pnlPercent: pnlPercentOrZero,
 };
+
+/** 本站自行整理的細分產業分類說明，排序按鈕/選單都掛同一段提示，避免使用者
+ *  誤以為這是交易所的官方產業別（見 lib/fineIndustry.ts 開頭的完整說明）。 */
+const FINE_INDUSTRY_HINT =
+  "把實際做的內容相近的股票排在一起（例如載板、矽光子/CPO、散熱、被動元件），比官方的「半導體業」「光電業」更細。此分類為本站整理、盡力而為，非官方權威分類，也沒有涵蓋全部股票（對不到的會排在最後）。";
+
+function sortForField(items: HoldingItem[], field: HeldSortField, dir: "asc" | "desc"): HoldingItem[] {
+  if (field === "fineIndustry") return sortByFineIndustry(items);
+  const metric = HELD_SORT_METRICS[field];
+  return [...items].sort((a, b) => (dir === "desc" ? metric(b) - metric(a) : metric(a) - metric(b)));
+}
 
 /**
  * Watchlist-specific table (not the shared StockTable): adds editable
@@ -61,7 +75,14 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
   }
 
   const held = items.filter(hasHolding).sort(byOrder);
-  const unheld = items.filter((i) => !hasHolding(i)).sort(byOrder);
+  // 僅關注那一組的「預設順序」= 依細分產業分組（使用者要求：同產業的排在一起，
+  // 不要照加入清單的先後散亂排列）。只有在使用者**真的親手排過**這個市場的
+  // 僅關注清單之後（拖曳或按過「依產業排序」，見 lib/watchlist.ts 的
+  // hasManualUnheldOrder），才改回完全照 order 顯示——否則每次重新整理都會把
+  // 使用者剛調好的順序強制打回產業排序。
+  const unheldItems = items.filter((i) => !hasHolding(i));
+  const market = items[0].market; // 一張表只會有同一個市場（上層已用 MarketTabs 分開）
+  const unheld = hasManualUnheldOrder(market) ? unheldItems.sort(byOrder) : sortByFineIndustry(unheldItems);
 
   // 總成本 includes the buy-side commission actually paid (TW only — see
   // lib/portfolio.ts), so it's real money spent, not just 購買價格×股數.
@@ -111,8 +132,8 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           table into a stacked mobile layout. sm: hides it once the table
           actually fits without scrolling. */}
       <p className="text-[13px] text-(--text-muted) sm:hidden">← 可左右滑動查看持有股數／購買價格／損益 →</p>
-      {held.length > 0 && <DraggableGroup title="持有中" items={held} sortable market={held[0].market} />}
-      <DraggableGroup title={held.length > 0 ? "僅關注（未持有）" : undefined} items={unheld} />
+      {held.length > 0 && <DraggableGroup title="持有中" items={held} sortable market={held[0].market} group="held" />}
+      <DraggableGroup title={held.length > 0 ? "僅關注（未持有）" : undefined} items={unheld} market={market} group="unheld" />
     </div>
   );
 }
@@ -134,11 +155,15 @@ function DraggableGroup({
   items,
   sortable = false,
   market,
+  group,
 }: {
   title?: string;
   items: HoldingItem[];
   sortable?: boolean;
   market?: Market;
+  /** 這一組是持有中還是僅關注——決定要不要在拖曳後記下「使用者手動排過」
+   *  （只有僅關注那組有「沒排過就預設依產業排序」的行為需要區分）。 */
+  group: "held" | "unheld";
 }) {
   const [order, setOrder] = useState<string[]>(() => items.map(groupKey));
   const [sortField, setSortField] = useState<HeldSortField>("investedAmount");
@@ -183,41 +208,62 @@ function DraggableGroup({
     setOrder(next);
   }
 
+  /** 把這次排出來的順序寫進 localStorage；僅關注那組同時記下「使用者親手排過」，
+   *  之後就不再套用預設的依產業排序，改為完全尊重使用者排的結果。 */
+  function persistOrder(ordered: HoldingItem[]) {
+    reorderGroup(ordered);
+    if (group === "unheld" && market) markManualUnheldOrder(market);
+  }
+
   function handlePointerUp() {
     const dragKey = draggingKeyRef.current;
     draggingKeyRef.current = null;
     if (!dragKey) return;
     const ordered = order.map((k) => byKey.get(k)).filter((i): i is HoldingItem => i != null);
-    reorderGroup(ordered);
+    persistOrder(ordered);
   }
 
   function applySort(field: HeldSortField, dir: "asc" | "desc") {
     setSortField(field);
     setSortDir(dir);
-    const metric = HELD_SORT_FIELDS[field];
-    const sorted = [...items].sort((a, b) => (dir === "desc" ? metric(b) - metric(a) : metric(a) - metric(b)));
+    const sorted = sortForField(items, field, dir);
     setOrder(sorted.map(groupKey));
-    reorderGroup(sorted);
+    persistOrder(sorted);
   }
 
   if (items.length === 0) return null;
 
+  // 只有一檔時排序沒有意義，按鈕只會變成誤導（按了畫面完全沒變）。
+  const showIndustryButton = group === "unheld" && items.length > 1;
+
   return (
     <div>
-      {(title || sortable) && (
-        <div className="mb-1.5 flex items-center justify-between">
-          {title && <h3 className="text-xs font-semibold text-(--text-muted)">{title}</h3>}
-          {sortable && (
-            <div className="flex items-center gap-1.5">
-              <select
-                value={sortField}
-                onChange={(e) => applySort(e.target.value as HeldSortField, sortDir)}
-                className="rounded-md border border-(--gridline) bg-(--surface-2) px-1.5 py-0.5 text-xs"
-              >
-                <option value="investedAmount">依投資金額</option>
-                <option value="changePercent">依漲跌幅</option>
-                <option value="pnlPercent">依損益%</option>
-              </select>
+      {/* 手機寬度下標題與排序控制項會擠在一起，所以用 flex-wrap＋gap 讓控制項
+          整組掉到下一行，而不是硬擠成一列把按鈕文字壓到換行。整列都沒東西時
+          （沒標題、沒排序控制項）整個 header 不渲染，免得留一條空白間距。 */}
+      {(title || sortable || showIndustryButton) && (
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+        {title && <h3 className="text-xs font-semibold text-(--text-muted)">{title}</h3>}
+        {sortable && (
+          <div className="ml-auto flex items-center gap-1.5">
+            <select
+              value={sortField}
+              onChange={(e) => applySort(e.target.value as HeldSortField, sortDir)}
+              className="rounded-md border border-(--gridline) bg-(--surface-2) px-1.5 py-0.5 text-xs"
+              title={sortField === "fineIndustry" ? FINE_INDUSTRY_HINT : undefined}
+            >
+              <option value="investedAmount">依投資金額</option>
+              <option value="changePercent">依漲跌幅</option>
+              <option value="pnlPercent">依損益%</option>
+              <option value="fineIndustry">依產業</option>
+            </select>
+            {/* 依產業沒有「高→低」的意義（族群順序不是數值），所以這顆方向鈕
+                只在數值型排序時出現，改附上分類來源說明。 */}
+            {sortField === "fineIndustry" ? (
+              <span className="text-[11px] text-(--text-muted)" title={FINE_INDUSTRY_HINT}>
+                （分類為本站整理）
+              </span>
+            ) : (
               <button
                 type="button"
                 onClick={() => applySort(sortField, sortDir === "desc" ? "asc" : "desc")}
@@ -226,9 +272,23 @@ function DraggableGroup({
               >
                 {sortDir === "desc" ? "高→低" : "低→高"}
               </button>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+        {/* 僅關注這組沒有持股數字可排，但使用者要能一鍵把清單重新依產業分組
+            （例如之前手動拖過、現在想改回產業排序）。按下去等同一次性的手動
+            排序：會寫進 order、之後照樣可以再拖曳微調，不是鎖定模式。 */}
+        {showIndustryButton && (
+          <button
+            type="button"
+            onClick={() => applySort("fineIndustry", "desc")}
+            className="ml-auto rounded-md border border-(--gridline) bg-(--surface-2) px-1.5 py-0.5 text-xs hover:bg-(--page-plane)"
+            title={FINE_INDUSTRY_HINT}
+          >
+            依產業排序
+          </button>
+        )}
+      </div>
       )}
       <div className="overflow-x-auto">
         <table className={`w-full text-sm ${sortable ? "min-w-[760px]" : "min-w-[600px]"}`}>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChips, getEarnings, getFundamentals, getIndices, getMaterialAnnouncements, getMultiSignalStocks, searchStocks } from "@/lib/data";
+import { getChips, getEarnings, getFundamentals, getIndices, getMaterialAnnouncements, getMultiSignalStocks, getTechnicalScreen, searchStocks } from "@/lib/data";
 import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
@@ -56,6 +56,13 @@ export async function GET(req: NextRequest) {
       searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" }),
       getMultiSignalStocks("TW"),
       getMultiSignalStocks("US"),
+      // AI 問答「多重技術指標篩選」用的全市場指標快照（成交金額前120/60檔各抓
+      // 一次3個月K線）——這是這支 cron 裡最昂貴的一項，正是為什麼要在背景預熱：
+      // 真正的使用者問「有沒有MACD跟KD都黃金交叉的股票」時就直接讀快取，不用
+      // 現場等一百多次K線抓取。用 warm() 包起來單獨降級，上游不穩時不會拖垮
+      // 其他預熱項目。
+      warm("technical screen TW", getTechnicalScreen("TW")),
+      warm("technical screen US", getTechnicalScreen("US")),
       getIndices(),
       warm("daily brief", getDailyBrief()),
       warm("action brief", getActionBrief()),

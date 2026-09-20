@@ -8,8 +8,8 @@ import MarkdownLite from "./MarkdownLite";
  * Fetched client-side rather than server-rendered, same reasoning as
  * DailyBriefCard/MomentumSection: keeps this page's AI call (up to a 20s
  * timeout) from blocking the rest of the page render on a cache-cold visit.
- * Unlike the daily brief this content targets ~200-350 characters (a short,
- * direct "what to do today" read, not a four-section wrap), so no
+ * Unlike the daily brief this content targets ~350-550 characters (a direct
+ * "what to buy today and why" read, not a four-section market wrap), so no
  * collapse/expand treatment is needed here.
  */
 export default function ActionBriefCard() {
