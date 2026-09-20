@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import WatchlistTable, { type HoldingItem } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
 import type { Market, Quote, SearchItem } from "@/lib/data";
+import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
@@ -100,21 +101,33 @@ export default function WatchlistSection() {
   );
   const [items, setItems] = useState<SearchItem[] | null>(null); // null = not fetched yet for the current list
 
+  /**
+   * 關注清單裡哪幾檔是興櫃（交易到 15:00，不是 13:30）。
+   * localStorage 的 WatchlistItem 只存 market（"TW"/"US"），沒有板別；而且舊資料
+   * 也不可能追加。所以改成「抓到報價時順手記下來」——每次掛載一定會先全部抓
+   * 一次（fetchOnMount），回來的 Quote.board 就說得出哪幾檔是興櫃，之後幾輪的
+   * 節奏判斷就有依據了。用 ref 而不是 state：它只影響下一輪輪詢的判斷，
+   * 不需要（也不該）因此重新 render 整張表。
+   */
+  const emergingSymbols = useRef<Set<string>>(new Set());
+  const scopeOf = (w: { market: Market; symbol: string }): MarketScope =>
+    w.market === "TW" && emergingSymbols.current.has(w.symbol.toUpperCase()) ? "TW-EMERGING" : w.market;
+
   // 這份清單會同時混著台股跟美股，兩邊交易時段完全不同，所以刷新節奏是
   // 「各市場各自判斷」：台股 08:30~14:30 每 10 秒重抓、收盤後停、14:40 補一次；
-  // 美股維持原本的盤中每 20 秒。掛載那一次一律全部抓（不分市場、不分開收盤），
-  // 否則收盤時段打開頁面會永遠停在骨架載入畫面。沒被重抓的那些（例如台股盤後
-  // 的台股檔）保留上一次成功的數字，不會被清掉。
+  // 美股維持原本的盤中每 20 秒；興櫃則是自己的 09:00~15:10。掛載那一次一律全部
+  // 抓（不分市場、不分開收盤），否則收盤時段打開頁面會永遠停在骨架載入畫面。
+  // 沒被重抓的那些（例如台股盤後的台股檔）保留上一次成功的數字，不會被清掉。
   useLivePolling({
     restartKey: list.map((w) => `${w.market}:${w.symbol}`).join(","),
     fetchOnMount: true,
     decide: (now, settledDayKey) => {
-      const markets = Array.from(new Set(list.map((w) => w.market)));
-      return mergePollDecisions(markets.map((m: Market) => getPollDecision(m, now, settledDayKey)));
+      const scopes = Array.from(new Set(list.map(scopeOf)));
+      return mergePollDecisions(scopes.map((s) => getPollDecision(s, now, settledDayKey)));
     },
     onFetch: async (ctx) => {
       if (list.length === 0) return;
-      const targets = list.filter((w) => shouldRefreshSymbol(w.market, ctx.now, ctx));
+      const targets = list.filter((w) => shouldRefreshSymbol(scopeOf(w), ctx.now, ctx));
       if (targets.length === 0) return;
       const results = await Promise.all(
         targets.map(async (w): Promise<SearchItem | null> => {
@@ -140,6 +153,8 @@ export default function WatchlistSection() {
             q = await fetchOnce();
           }
           if (!q) return null;
+          // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。
+          if (q.board === "emerging") emergingSymbols.current.add(q.symbol.toUpperCase());
           return {
             symbol: q.symbol,
             market: q.market,

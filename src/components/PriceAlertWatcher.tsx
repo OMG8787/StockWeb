@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { formatPrice } from "@/lib/format";
+import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
 import { getAlerts, markTriggered, type PriceAlert } from "@/lib/priceAlerts";
@@ -27,16 +28,30 @@ const ALERT_MIN_CHECK_MS = 30_000;
 export default function PriceAlertWatcher() {
   const [firedNow, setFiredNow] = useState<PriceAlert[]>([]);
 
+  /**
+   * 哪些提醒的標的是興櫃股（交易到 15:00，不是 13:30）。PriceAlert 本身只存
+   * market（"TW"/"US"）沒有板別，所以跟關注清單一樣，抓報價時從 Quote.board
+   * 順手記下來——掛載那一次一定會檢查一輪，之後的節奏判斷就有依據。
+   */
+  const emergingSymbols = useRef<Set<string>>(new Set());
+  const scopeOf = (a: PriceAlert): MarketScope =>
+    a.market === "TW" && emergingSymbols.current.has(a.symbol.toUpperCase()) ? "TW-EMERGING" : a.market;
+
   useLivePolling({
     fetchOnMount: true,
-    decide: (now, settledDayKey) =>
-      mergePollDecisions(
-        [getPollDecision("TW", now, settledDayKey), getPollDecision("US", now, settledDayKey)],
+    decide: (now, settledDayKey) => {
+      const scopes: MarketScope[] = ["TW", "US"];
+      // 只有真的還有「未觸發的興櫃提醒」時才把興櫃時段納入，否則 13:30~15:00
+      // 這段會為了不存在的興櫃提醒白白每 30 秒空轉檢查一次。
+      if (getAlerts().some((a) => !a.triggered && scopeOf(a) === "TW-EMERGING")) scopes.push("TW-EMERGING");
+      return mergePollDecisions(
+        scopes.map((s) => getPollDecision(s, now, settledDayKey)),
         ALERT_MIN_CHECK_MS
-      ),
+      );
+    },
     onFetch: async (ctx) => {
       const pending = getAlerts().filter(
-        (a) => !a.triggered && shouldRefreshSymbol(a.market, ctx.now, ctx)
+        (a) => !a.triggered && shouldRefreshSymbol(scopeOf(a), ctx.now, ctx)
       );
       if (pending.length === 0) return;
       const fired: PriceAlert[] = [];
@@ -45,6 +60,8 @@ export default function PriceAlertWatcher() {
           const res = await fetch(`/api/quote/${encodeURIComponent(alert.symbol)}?market=${alert.market}`);
           if (!res.ok) continue;
           const quote = await res.json();
+          // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。
+          if (quote?.board === "emerging") emergingSymbols.current.add(alert.symbol.toUpperCase());
           const hit =
             alert.condition === "above" ? quote.price >= alert.targetPrice : quote.price <= alert.targetPrice;
           if (hit) fired.push(alert);

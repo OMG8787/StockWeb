@@ -1,5 +1,4 @@
-import type { Market } from "@/lib/data/types";
-import { getMarketStatus } from "@/lib/marketStatus";
+import { getMarketStatus, type MarketScope } from "@/lib/marketStatus";
 
 /**
  * 全站「即時報價類」資料該多久刷新一次的單一權威來源。
@@ -19,6 +18,11 @@ import { getMarketStatus } from "@/lib/marketStatus";
  *  4. 這套規則**只適用台股**。美股交易時段完全不同（美東 09:30-16:00，換算台北
  *     時間是晚上到凌晨），維持原本「只有美股盤中才輪詢、間隔 20 秒」的邏輯，
  *     絕不可以把台股的 10 秒/停止輪詢/14:40 補抓套到美股報價上。
+ *  5. **興櫃（Emerging）是第三套時段**（2026-09-20 補上）：興櫃交易時間是
+ *     09:00~15:00，跟上市櫃的 09:00~13:30 不一樣，所以第 1 點那組時間對它
+ *     不適用，否則 13:30~15:00 這段興櫃其實還在交易的時間會被當成收盤、
+ *     停止輪詢。判斷方式是呼叫端傳 scope="TW-EMERGING"（見 marketStatus.ts 的
+ *     MarketScope），細節寫在下面 EMERGING_* 常數的註解。
  *
  * 這裡刻意寫成純函式（不含任何 React/瀏覽器 API），所以：
  *  - 前端由 lib/useLivePolling.ts 這個 hook 呼叫，決定 setTimeout 的節奏；
@@ -30,6 +34,27 @@ import { getMarketStatus } from "@/lib/marketStatus";
 
 /** 08:30 台北時間——試搓開始，TWSE/TPEx 已經在公布模擬撮合價。 */
 export const TW_LIVE_START_MINUTES = 8 * 60 + 30;
+/**
+ * 興櫃（Emerging）專用時段。興櫃交易時間是 **09:00~15:00**（櫃買中心「興櫃股票
+ * 交易制度」頁面白紙黑字寫「上午9時~下午3時」），跟上市櫃的 09:00~13:30 不同，
+ * 所以不能沿用上面那組 TW_* 常數，否則 13:30~15:00 這段興櫃其實還在交易的時間
+ * 會被當成收盤、停止輪詢（這正是 2026-09-20 記在 PROGRESS.md 的已知問題）。
+ *
+ * 兩個刻意的差異：
+ *  1. **沒有 08:30 試撮**：試撮是集中市場集合競價的產物，興櫃是跟推薦證券商
+ *     一對一議價點選成交，沒有集合競價、櫃買也不公布興櫃盤前模擬價，所以
+ *     輪詢窗直接從 09:00 開始，不是 08:30。
+ *  2. **沒有另外的「收盤補抓」時間點**：上市櫃那套是 13:30 收盤、14:30 盤後
+ *     定價結束、14:40 再補抓一次最終收盤價。興櫃沒有盤後定價交易，只需要
+ *     讓輪詢窗多延續 10 分鐘（到 15:10）跨過上游結算延遲，最後一輪自然就會
+ *     抓到當日最終數字——這樣也避免跟台股那個「今天已補抓過」的單一標記
+ *     （useLivePolling 只有一個 settledDayKey）互相把對方的補抓吃掉。
+ */
+export const EMERGING_LIVE_START_MINUTES = 9 * 60;
+/** 15:00 台北時間——興櫃收盤（狀態徽章用這個時間判斷盤中/已收盤）。 */
+export const EMERGING_CLOSE_MINUTES = 15 * 60;
+/** 15:10 台北時間——輪詢多留 10 分鐘，讓最後一輪抓到結算後的最終數字。 */
+export const EMERGING_LIVE_END_MINUTES = 15 * 60 + 10;
 /** 14:30 台北時間——盤後定價交易結束，之後當日數字不會再變動。 */
 export const TW_LIVE_END_MINUTES = 14 * 60 + 30;
 /** 14:40 台北時間——收盤後補抓一次最終數字的時間點。 */
@@ -114,6 +139,17 @@ export function isTwQuoteWindow(now: Date = new Date()): boolean {
   return clock.minutes >= TW_LIVE_START_MINUTES && clock.minutes < TW_LIVE_END_MINUTES;
 }
 
+/**
+ * 現在是不是興櫃的「該輪詢期間」（09:00~15:10，含收盤後 10 分鐘的結算緩衝）。
+ * 注意這跟「興櫃盤中嗎」不是同一件事——盤中/已收盤的徽章一律以
+ * marketStatus.ts 的 getMarketStatus("TW-EMERGING") 為準（15:00 就收盤）。
+ */
+export function isEmergingQuoteWindow(now: Date = new Date()): boolean {
+  const clock = taipeiClock(now);
+  if (!isTwWeekday(clock)) return false;
+  return clock.minutes >= EMERGING_LIVE_START_MINUTES && clock.minutes < EMERGING_LIVE_END_MINUTES;
+}
+
 export interface PollDecision {
   /** 這一輪要不要真的去打 API 抓新資料 */
   fetch: boolean;
@@ -160,22 +196,44 @@ function twPollDecision(now: Date, settledDayKey: string | null): PollDecision {
   return { fetch: false, settle: false, nextCheckMs };
 }
 
+/**
+ * 興櫃：09:00~15:10 每分鐘抓一次，其餘時間不打 API，只把下一次評估排到 09:00。
+ * 沒有試撮、也沒有 14:40 那種補抓（理由見上方 EMERGING_* 常數的說明），所以
+ * 這個函式永遠回 settle:false，不會去動 useLivePolling 的 settledDayKey。
+ */
+function emergingPollDecision(now: Date): PollDecision {
+  const clock = taipeiClock(now);
+  if (isTwWeekday(clock) && clock.minutes >= EMERGING_LIVE_START_MINUTES && clock.minutes < EMERGING_LIVE_END_MINUTES) {
+    return { fetch: true, settle: false, nextCheckMs: TW_LIVE_POLL_MS };
+  }
+  const nextCheckMs =
+    isTwWeekday(clock) && clock.minutes < EMERGING_LIVE_START_MINUTES
+      ? clampCheck(msUntilMinuteMark(clock, EMERGING_LIVE_START_MINUTES, now))
+      : IDLE_CHECK_MS;
+  return { fetch: false, settle: false, nextCheckMs };
+}
+
 /** 美股：完全維持改動前的行為——盤中每 20 秒抓一次，收盤時只是空轉檢查、不打 API。 */
 function usPollDecision(now: Date): PollDecision {
   return { fetch: getMarketStatus("US", now) === "open", settle: false, nextCheckMs: US_POLL_MS };
 }
 
 /**
- * 某個市場現在該不該抓資料、下一次什麼時候再評估。
+ * 某個市場（或板別）現在該不該抓資料、下一次什麼時候再評估。
  * `settledDayKey` 是呼叫端記住的「今天的 14:40 補抓已經做過了」標記（台北日期），
- * 沒做過就傳 null。美股永遠用不到這個參數。
+ * 沒做過就傳 null。美股與興櫃永遠用不到這個參數。
+ *
+ * scope 傳 "TW" 代表上市櫃（09:00-13:30 那套，含 08:30 試撮與 14:40 補抓，
+ * 行為跟興櫃支援之前完全一樣），要判斷單一興櫃股票時才傳 "TW-EMERGING"。
  */
 export function getPollDecision(
-  market: Market,
+  scope: MarketScope,
   now: Date = new Date(),
   settledDayKey: string | null = null
 ): PollDecision {
-  return market === "TW" ? twPollDecision(now, settledDayKey) : usPollDecision(now);
+  if (scope === "TW") return twPollDecision(now, settledDayKey);
+  if (scope === "TW-EMERGING") return emergingPollDecision(now);
+  return usPollDecision(now);
 }
 
 /**
@@ -218,11 +276,14 @@ export function mergePollDecisions(decisions: PollDecision[], minCheckMs = 0): P
  * 收盤時段永遠停在骨架載入狀態。
  */
 export function shouldRefreshSymbol(
-  market: Market,
+  scope: MarketScope,
   now: Date,
   opts: { mount: boolean; settle: boolean }
 ): boolean {
   if (opts.mount) return true;
-  if (market === "TW") return opts.settle || isTwQuoteWindow(now);
+  if (scope === "TW") return opts.settle || isTwQuoteWindow(now);
+  // 興櫃：自己的 09:00~15:10 窗。台股 14:40 的補抓（settle）落在這個窗之內，
+  // 順手一起重抓也不會有副作用，所以照收。
+  if (scope === "TW-EMERGING") return opts.settle || isEmergingQuoteWindow(now);
   return getMarketStatus("US", now) === "open";
 }
