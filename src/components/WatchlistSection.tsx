@@ -118,29 +118,44 @@ export default function WatchlistSection() {
       if (targets.length === 0) return;
       const results = await Promise.all(
         targets.map(async (w): Promise<SearchItem | null> => {
-          try {
-            const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
-            if (!res.ok) return null;
-            const q: Quote = await res.json();
-            return {
-              symbol: q.symbol,
-              market: q.market,
-              name: q.name,
-              sector: "自選",
-              price: q.price,
-              changePercent: q.changePercent,
-              volume: q.volume,
-              turnover: q.price * q.volume,
-              // This view fetches one quote at a time (/api/quote/[symbol]),
-              // not the batched search list that has the trailing-average
-              // volume map alongside it (see lib/data/volumeHistory.ts) — so
-              // there's genuinely no basis to compute a real volumeTrend here.
-              // "neutral" is honest (no signal), not a fabricated guess.
-              volumeTrend: "neutral",
-            } satisfies SearchItem;
-          } catch {
-            return null;
+          // 掛載時如果這裡失敗，這一檔就完全不會出現在畫面上（不是顯示「—」，
+          // 是整列消失）——尤其是掛載那一次，因為這是這檔股票第一次出現在
+          // items 裡，沒有「保留上次成功資料」這個退路可以用。多數失敗是暫時性
+          // 的（例如上游那一刻剛好抽到一次逾時），先在這裡自己重試一次再放棄，
+          // 大幅降低使用者會實際遇到「清單少一檔」的機率。這是緩解、不是根治
+          // ——如果兩次都失敗，這一檔目前還是會照舊消失；真正根治需要讓
+          // HoldingItem 允許 price 為 null 並在畫面顯示「—」，那個改動會牽動
+          // WatchlistTable 好幾處數字計算，這次先不動，留在 PROGRESS.md。
+          const fetchOnce = async (): Promise<Quote | null> => {
+            try {
+              const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
+              return res.ok ? await res.json() : null;
+            } catch {
+              return null;
+            }
+          };
+          let q = await fetchOnce();
+          if (!q) {
+            await new Promise((r) => setTimeout(r, 1200));
+            q = await fetchOnce();
           }
+          if (!q) return null;
+          return {
+            symbol: q.symbol,
+            market: q.market,
+            name: q.name,
+            sector: "自選",
+            price: q.price,
+            changePercent: q.changePercent,
+            volume: q.volume,
+            turnover: q.price * q.volume,
+            // This view fetches one quote at a time (/api/quote/[symbol]),
+            // not the batched search list that has the trailing-average
+            // volume map alongside it (see lib/data/volumeHistory.ts) — so
+            // there's genuinely no basis to compute a real volumeTrend here.
+            // "neutral" is honest (no signal), not a fabricated guess.
+            volumeTrend: "neutral",
+          } satisfies SearchItem;
         })
       );
       const fresh = results.filter((r): r is SearchItem => r !== null);
