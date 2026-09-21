@@ -290,6 +290,16 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-21（五續）：ask.ts/data/index.ts 大檔案拆分完成——純機械式搬移，行為零改動
+
+Opus agent 把 `ask.ts`（1,448→356行）拆成10個檔案（意圖判斷/各grounding組裝/收尾清理各自
+獨立），`data/index.ts`（1,246→47行純barrel）拆成15個檔案，對外 public API 完全不變。agent
+用逐行multiset比對原檔跟新檔（去掉import/export後）證明零邏輯差異，我自己另外重跑
+`tsc --noEmit`／`npm run build` 確認通過，`git diff --stat` 只有那兩個原檔被改、其他約50處
+呼叫端import路徑一行都沒動。目的是降低之後改AI問答/資料層任何小功能時要讀的檔案大小。
+待 Opus 規則二對正式站AI問答做完整功能複查後才能回報「更新完成」（拆檔理論上零風險，
+但這是全站被除錯最多次的功能，仍照規則走完整驗證）。
+
 ### 2026-09-21（四續）：CLAUDE.md 規則八擴充為4點；同時派agent拆分ask.ts/data/index.ts大檔案（進行中）
 
 延續token精簡討論，使用者要求4個優化方向全部處理。規則八擴充成：查資料要精準、行動範圍
