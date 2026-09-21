@@ -391,11 +391,44 @@ function getNameLookupTerms(): NameLookupTerm[] {
 
 const MIN_NAME_MATCH_LENGTH = 2;
 
+// Same problem as STOPWORDS above, just on the Chinese-name side instead of
+// the English-ticker side: a company's OFFICIAL short name can coincide with
+// an everyday word, and a plain substring match then hijacks any sentence
+// that happens to use that word in its ordinary sense. Confirmed via a real
+// production incident (Opus QA, 2026-09-21): asking "殖利率最高的有哪些股票？
+// 請附上殖利率數字" got misread as naming 數字(5287, TPEx) purely because the
+// question ends with the word "數字" ("number/figure") — verified directly
+// against the exchange's own listing (`/api/symbol-lookup?q=數字` on this
+// site) that "數字" genuinely IS 5287's real, official short name, not a bug
+// in how this file derives it. Because targets.length becomes non-zero, the
+// whole ranking-screen grounding path never runs and the model has to answer
+// "no data" for a question the site could actually answer — same failure
+// shape as "MACD/RSI got treated as unknown US tickers" that STOPWORDS
+// exists to prevent, just triggered by an ordinary Chinese word instead of a
+// technical acronym.
+//
+// A blanket length increase (e.g. requiring 3+ characters) isn't a safe fix
+// here: plenty of real, commonly-referenced TW companies have genuinely
+// 2-character short names people actually type as-is (台泥, 中鋼, 台塑, 統一,
+// 鴻海, 台達, 廣達…) — raising the floor would break all of those instead of
+// just this one collision. So this is a small, curated exclusion list in the
+// same spirit as STOPWORDS: only add a name here once it's been confirmed to
+// (a) be a real official short name that (b) also reads as ordinary
+// vocabulary common enough that a sentence using the word in its normal
+// sense is far more likely than someone actually meaning this specific,
+// otherwise-obscure company. Excluding a term here only blocks *name-based*
+// sentence parsing (guessSymbolsFromText/findAllSymbolsByName/
+// findSymbolByName) — the numeric code (e.g. "5287") still resolves fine
+// through SYMBOL_PATTERN in symbolResolve.ts, and the search box's own
+// separate contains-match function is untouched, so someone who deliberately
+// types "數字" into the search box to find this company can still find it.
+const AMBIGUOUS_CN_NAME_STOPWORDS = new Set(["數字"]);
+
 function buildNameLookupTerms(twCompanies: UniverseEntry[]): NameLookupTerm[] {
   const terms: NameLookupTerm[] = [];
   for (const entry of [...twCompanies, ...US_UNIVERSE]) {
     for (const candidate of matchCandidates(entry)) {
-      if (candidate.length >= MIN_NAME_MATCH_LENGTH) {
+      if (candidate.length >= MIN_NAME_MATCH_LENGTH && !AMBIGUOUS_CN_NAME_STOPWORDS.has(candidate)) {
         terms.push({ term: candidate.toLowerCase(), entry });
       }
     }

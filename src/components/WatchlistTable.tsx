@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import type { Market, SearchItem } from "@/lib/data";
-import { formatAmount, formatAmountChange, formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
+import { formatAmount, formatAmountChange, formatPercent, formatPrice, formatVolume, priceDirectionClass } from "@/lib/format";
 import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
-import { sortByFineIndustry } from "@/lib/fineIndustry";
+import { fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
 import WatchlistButton from "./WatchlistButton";
 
 export interface HoldingItem extends SearchItem {
@@ -291,14 +291,18 @@ function DraggableGroup({
       </div>
       )}
       <div className="overflow-x-auto">
-        <table className={`w-full text-sm ${sortable ? "min-w-[760px]" : "min-w-[600px]"}`}>
+        <table className={`w-full text-sm ${sortable ? "min-w-[960px]" : "min-w-[800px]"}`}>
           <thead>
             <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
               <th className="w-6" />
               <th className="w-8" />
               <th className="py-2 pr-4 font-medium">代碼 / 名稱</th>
+              <th className="py-2 pr-4 font-medium" title={FINE_INDUSTRY_HINT}>
+                產業
+              </th>
               <th className="py-2 pr-4 font-medium text-right">股價</th>
               <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
+              <th className="py-2 pr-4 font-medium text-right">成交量</th>
               <th className="py-2 pr-4 font-medium text-right">持有股數</th>
               <th className="py-2 pr-4 font-medium text-right">購買價格</th>
               {sortable && (
@@ -434,10 +438,12 @@ function HoldingRow({
           {item.market === "TW" ? "台股" : "美股"}
         </span>
       </td>
+      <td className="py-2.5 pr-4 text-(--text-secondary)">{fineIndustryOf(item)}</td>
       <td className="py-2.5 pr-4 text-right tabular-nums">{formatPrice(item.price, currency)}</td>
       <td className={`py-2.5 pr-4 text-right font-medium tabular-nums ${priceDirectionClass(item.changePercent)}`}>
         {formatPercent(item.changePercent)}
       </td>
+      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">{formatVolume(item.volume, item.market)}</td>
       <td className="py-2.5 pr-4 text-right">
         <input
           type="number"
