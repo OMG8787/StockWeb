@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState, useSyncExternalStore } from "react";
-import WatchlistTable, { type HoldingItem } from "@/components/WatchlistTable";
+import WatchlistTable, { type HoldingItem, type WatchlistQuote } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
-import type { Market, Quote, SearchItem } from "@/lib/data";
+import type { Market, Quote } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
@@ -57,16 +57,19 @@ function exportCsv(items: HoldingItem[]) {
     const held = hasHolding(i);
     const breakEven = held ? breakEvenPrice(i.costBasis!, i.shares!, i.market) : null;
     const invested = held ? investedAmount(i.costBasis!, i.shares!, i.market) : null;
-    const { pnl, pnlPercent } = held
+    // 報價暫缺（price === null）的那幾檔，股價/漲跌幅/成交量/損益一律留空字串，
+    // 跟「僅關注沒填持股」同樣的處理原則：空白＝沒有這筆資料，填 0 會被試算表
+    // 當成真的股價 0 元、損益 0 元。
+    const { pnl, pnlPercent } = held && i.price != null
       ? computeHoldingPnl(i.price, i.costBasis!, i.shares!, i.market)
       : { pnl: null, pnlPercent: null };
     return [
       i.market === "TW" ? "台股" : "美股",
       i.symbol,
       i.name,
-      i.price,
-      i.changePercent,
-      i.volume,
+      i.price ?? "",
+      i.changePercent ?? "",
+      i.volume ?? "",
       held ? "持有中" : "僅關注",
       held ? i.shares! : "",
       held ? i.costBasis! : "",
@@ -99,7 +102,10 @@ export default function WatchlistSection() {
     getWatchlist,
     () => EMPTY // server snapshot: localStorage isn't available during SSR
   );
-  const [items, setItems] = useState<SearchItem[] | null>(null); // null = not fetched yet for the current list
+  // null = not fetched yet for the current list。逐檔報價的結果型別是
+  // WatchlistQuote（＝允許 price/changePercent/volume/turnover 為 null 的
+  // SearchItem），因為抓不到報價的那一檔現在也要照樣留在清單裡顯示「資料暫缺」。
+  const [items, setItems] = useState<WatchlistQuote[] | null>(null);
 
   /**
    * 關注清單裡哪幾檔是興櫃（交易到 15:00，不是 13:30）。
@@ -130,15 +136,13 @@ export default function WatchlistSection() {
       const targets = list.filter((w) => shouldRefreshSymbol(scopeOf(w), ctx.now, ctx));
       if (targets.length === 0) return;
       const results = await Promise.all(
-        targets.map(async (w): Promise<SearchItem | null> => {
-          // 掛載時如果這裡失敗，這一檔就完全不會出現在畫面上（不是顯示「—」，
-          // 是整列消失）——尤其是掛載那一次，因為這是這檔股票第一次出現在
-          // items 裡，沒有「保留上次成功資料」這個退路可以用。多數失敗是暫時性
-          // 的（例如上游那一刻剛好抽到一次逾時），先在這裡自己重試一次再放棄，
-          // 大幅降低使用者會實際遇到「清單少一檔」的機率。這是緩解、不是根治
-          // ——如果兩次都失敗，這一檔目前還是會照舊消失；真正根治需要讓
-          // HoldingItem 允許 price 為 null 並在畫面顯示「—」，那個改動會牽動
-          // WatchlistTable 好幾處數字計算，這次先不動，留在 PROGRESS.md。
+        targets.map(async (w): Promise<WatchlistQuote> => {
+          // 這一檔的報價抓失敗時**不再回 null**（回 null 會讓它整列從畫面上
+          // 消失，使用者以為自己的關注清單資料掉了）。先自己重試一次（多數失敗
+          // 是上游那一刻剛好抽到一次逾時，重試就會好），真的兩次都失敗就回一個
+          // 報價欄位全部為 null 的「佔位列」，由 WatchlistTable 顯示成
+          // 「資料暫缺」——名稱/代號/市場都拿 localStorage 裡的關注清單資料，
+          // 不需要報價也一定有。2026-09-21 根治，取代原本只有重試的緩解措施。
           const fetchOnce = async (): Promise<Quote | null> => {
             try {
               const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
@@ -152,7 +156,19 @@ export default function WatchlistSection() {
             await new Promise((r) => setTimeout(r, 1200));
             q = await fetchOnce();
           }
-          if (!q) return null;
+          if (!q) {
+            return {
+              symbol: w.symbol,
+              market: w.market,
+              name: w.name,
+              sector: "自選",
+              price: null,
+              changePercent: null,
+              volume: null,
+              turnover: null,
+              volumeTrend: "neutral",
+            } satisfies WatchlistQuote;
+          }
           // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。
           if (q.board === "emerging") emergingSymbols.current.add(q.symbol.toUpperCase());
           return {
@@ -170,14 +186,24 @@ export default function WatchlistSection() {
             // there's genuinely no basis to compute a real volumeTrend here.
             // "neutral" is honest (no signal), not a fabricated guess.
             volumeTrend: "neutral",
-          } satisfies SearchItem;
+          } satisfies WatchlistQuote;
         })
       );
-      const fresh = results.filter((r): r is SearchItem => r !== null);
       setItems((prev) => {
-        if (ctx.mount || prev === null) return fresh;
-        const byKey = new Map(prev.map((i) => [`${i.market}:${i.symbol.toUpperCase()}`, i]));
-        for (const item of fresh) byKey.set(`${item.market}:${item.symbol.toUpperCase()}`, item);
+        const keyOf = (i: WatchlistQuote) => `${i.market}:${i.symbol.toUpperCase()}`;
+        const prevByKey = new Map((prev ?? []).map((i) => [keyOf(i), i]));
+        // 這一輪失敗、但上一輪有抓到過的那幾檔，沿用上一次成功的數字而不是
+        // 直接降級成「資料暫缺」——單一輪的暫時性失敗不該讓已經在畫面上的
+        // 數字閃成空白（跟收盤後不重抓時「保留上次成功資料」的行為一致）。
+        // 只有從頭到現在都沒抓到過的那幾檔才真的顯示「資料暫缺」。
+        const merged = results.map((item) => {
+          if (item.price != null) return item;
+          const old = prevByKey.get(keyOf(item));
+          return old?.price != null ? old : item;
+        });
+        if (ctx.mount || prev === null) return merged;
+        const byKey = new Map(prevByKey);
+        for (const item of merged) byKey.set(keyOf(item), item);
         return Array.from(byKey.values());
       });
     },

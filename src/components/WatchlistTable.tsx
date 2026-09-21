@@ -9,11 +9,35 @@ import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfol
 import { fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
 import WatchlistButton from "./WatchlistButton";
 
-export interface HoldingItem extends SearchItem {
+/**
+ * 關注清單自己的列型別。跟 `SearchItem` 最大的差別是**報價欄位允許 null**：
+ * 關注清單是逐檔打 `/api/quote/<代號>` 的（不是批次清單），某一檔的請求失敗
+ * （上游逾時等）時，以前的做法是讓那一檔整列從畫面上消失，使用者會以為自己
+ * 的關注清單資料掉了。現在改成照樣渲染那一列、只把數字欄位顯示成「資料暫缺／
+ * —」（2026-09-21 根治，取代原本只在 WatchlistSection 重試一次的緩解措施）。
+ *
+ * 刻意只放寬**這個**型別而不是全站共用的 `SearchItem`：排行榜/搜尋/篩選頁走的
+ * 是批次清單，抓不到的股票本來就不會進到清單裡（沒有「該在但不見了」的問題），
+ * 讓它們的 price 一起變成 null 只會讓幾十處計算多出無意義的 null 判斷。
+ */
+export interface WatchlistQuote extends Omit<SearchItem, "price" | "changePercent" | "volume" | "turnover"> {
+  /** null＝這一檔目前抓不到報價（含 WatchlistSection 的自動重試也失敗）。 */
+  price: number | null;
+  changePercent: number | null;
+  volume: number | null;
+  turnover: number | null;
+}
+
+/** 一列＝一檔關注股票的報價 ＋ 使用者自己填的持股資料（localStorage）。 */
+export interface HoldingItem extends WatchlistQuote {
   costBasis?: number;
   shares?: number;
   order?: number;
 }
+
+/** 抓不到報價時那一列顯示的字樣，與全站「抓不到就誠實說沒有」的慣例一致。 */
+const NO_QUOTE_LABEL = "資料暫缺";
+const NO_QUOTE_HINT = "這一檔的即時報價暫時抓不到（資料來源逾時等），股票仍在你的關注清單裡，下一輪自動重抓就會恢復";
 
 function byOrder(a: HoldingItem, b: HoldingItem): number {
   return (a.order ?? 0) - (b.order ?? 0);
@@ -33,18 +57,21 @@ function investedAmountOrZero(item: HoldingItem): number {
   return investedAmount(item.costBasis, item.shares, item.market);
 }
 
-function pnlPercentOrZero(item: HoldingItem): number {
-  if (item.costBasis == null || item.shares == null) return 0;
-  return computeHoldingPnl(item.price, item.costBasis, item.shares, item.market).pnlPercent ?? 0;
+/** null（不是 0）＝這一檔沒有報價或沒有持股資料，算不出損益%。排序時 null
+ *  一律墊底（見 sortForField）——當成 0% 會讓報價暫缺的股票插在漲跌的正負之間，
+ *  看起來像真的「不漲不跌」。 */
+function pnlPercentOrNull(item: HoldingItem): number | null {
+  if (item.costBasis == null || item.shares == null || item.price == null) return null;
+  return computeHoldingPnl(item.price, item.costBasis, item.shares, item.market).pnlPercent;
 }
 
 /** 「依產業」不是數值指標，所以不能跟其他三個一樣用 metric 相減比較——它走
  *  lib/fineIndustry.ts 的族群順序，也沒有「高→低／低→高」的意義。 */
 type HeldSortField = "investedAmount" | "changePercent" | "pnlPercent" | "fineIndustry";
-const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: HoldingItem) => number> = {
+const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: HoldingItem) => number | null> = {
   investedAmount: investedAmountOrZero,
   changePercent: (item) => item.changePercent,
-  pnlPercent: pnlPercentOrZero,
+  pnlPercent: pnlPercentOrNull,
 };
 
 /** 本站自行整理的細分產業分類說明，排序按鈕/選單都掛同一段提示，避免使用者
@@ -55,7 +82,14 @@ const FINE_INDUSTRY_HINT =
 function sortForField(items: HoldingItem[], field: HeldSortField, dir: "asc" | "desc"): HoldingItem[] {
   if (field === "fineIndustry") return sortByFineIndustry(items);
   const metric = HELD_SORT_METRICS[field];
-  return [...items].sort((a, b) => (dir === "desc" ? metric(b) - metric(a) : metric(a) - metric(b)));
+  return [...items].sort((a, b) => {
+    const av = metric(a);
+    const bv = metric(b);
+    // 算不出數字的（報價暫缺）兩個方向都墊底，不參與大小比較——否則 null 會
+    // 被當成 NaN 讓整個排序結果變得不可預期。
+    if (av == null || bv == null) return av == null ? (bv == null ? 0 : 1) : -1;
+    return dir === "desc" ? bv - av : av - bv;
+  });
 }
 
 /**
@@ -94,9 +128,19 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
   // wouldn't match summing the individually-correct per-row numbers — a
   // small, expected gap (the not-yet-incurred sell-side friction), not a
   // bug in either total.
+  //
+  // 報價暫缺（price === null）的那幾檔算不出市值與損益，所以 總市值/總損益 只
+  // 加總「有報價」的那幾檔，並在旁邊標明有幾檔沒計入——直接把它們當 0 元會讓
+  // 總市值/總損益 默默少一大塊，比誠實說「有幾檔暫缺」危險得多。
+  // 總成本 不受影響照樣算全部：那是已經花掉的錢，跟抓不抓到現價無關。
+  // 百分比的分母則刻意只取「有報價那幾檔的成本」（pricedCost），這樣分子分母
+  // 是同一批股票，不會出現「分子少一檔、分母多一檔」的失真百分比。
+  const priced = held.filter((i) => i.price != null);
+  const missingQuoteCount = held.length - priced.length;
   const totalCost = held.reduce((sum, i) => sum + investedAmount(i.costBasis!, i.shares!, i.market), 0);
-  const totalValue = held.reduce((sum, i) => sum + i.price * i.shares!, 0);
-  const totalPnl = held.reduce((sum, i) => sum + (computeHoldingPnl(i.price, i.costBasis!, i.shares!, i.market).pnl ?? 0), 0);
+  const pricedCost = priced.reduce((sum, i) => sum + investedAmount(i.costBasis!, i.shares!, i.market), 0);
+  const totalValue = priced.reduce((sum, i) => sum + i.price! * i.shares!, 0);
+  const totalPnl = priced.reduce((sum, i) => sum + (computeHoldingPnl(i.price!, i.costBasis!, i.shares!, i.market).pnl ?? 0), 0);
   const currency = held[0]?.market === "TW" ? "TWD" : "USD";
 
   return (
@@ -109,15 +153,24 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           </span>
           <span>
             <span className="text-(--text-muted)">總市值：</span>
-            <span className="font-medium tabular-nums">{formatAmount(totalValue, currency)}</span>
+            <span className="font-medium tabular-nums">{priced.length > 0 ? formatAmount(totalValue, currency) : "—"}</span>
           </span>
           <span>
             <span className="text-(--text-muted)">總損益：</span>
-            <span className={`font-semibold tabular-nums ${priceDirectionClass(totalPnl)}`}>
-              {formatAmountChange(totalPnl, currency)}
-              {" "}({totalCost ? formatPercent((totalPnl / totalCost) * 100) : "—"})
-            </span>
+            {priced.length > 0 ? (
+              <span className={`font-semibold tabular-nums ${priceDirectionClass(totalPnl)}`}>
+                {formatAmountChange(totalPnl, currency)}
+                {" "}({pricedCost ? formatPercent((totalPnl / pricedCost) * 100) : "—"})
+              </span>
+            ) : (
+              <span className="font-semibold tabular-nums text-(--text-muted)">—</span>
+            )}
           </span>
+          {missingQuoteCount > 0 && (
+            <span className="text-xs text-(--text-muted)" title={NO_QUOTE_HINT}>
+              （{missingQuoteCount} 檔報價暫缺，未計入總市值／總損益）
+            </span>
+          )}
         </div>
       )}
       {/* On a narrow (mobile) screen this table is wider than the viewport —
@@ -403,7 +456,9 @@ function HoldingRow({
   // since the bad value was already persisted to localStorage). Now shown
   // as "—" instead of asserted away. computeHoldingPnl() itself already
   // returns { pnl: null, pnlPercent: null } for a non-positive cost basis.
-  const { pnl, pnlPercent } = hasHoldingInput
+  // 現價抓不到（item.price === null）時損益同樣無法計算，一律顯示「—」——
+  // 持股數字還是照樣留在輸入框裡可以編輯，不會因為報價暫缺就不能改持股。
+  const { pnl, pnlPercent } = hasHoldingInput && item.price != null
     ? computeHoldingPnl(item.price, costNum, sharesNum, item.market)
     : { pnl: null, pnlPercent: null };
   const breakEven = hasHoldingInput ? breakEvenPrice(costNum, sharesNum, item.market) : null;
@@ -439,11 +494,25 @@ function HoldingRow({
         </span>
       </td>
       <td className="py-2.5 pr-4 text-(--text-secondary)">{fineIndustryOf(item)}</td>
-      <td className="py-2.5 pr-4 text-right tabular-nums">{formatPrice(item.price, currency)}</td>
-      <td className={`py-2.5 pr-4 text-right font-medium tabular-nums ${priceDirectionClass(item.changePercent)}`}>
-        {formatPercent(item.changePercent)}
+      <td className="py-2.5 pr-4 text-right tabular-nums">
+        {item.price != null ? (
+          formatPrice(item.price, currency)
+        ) : (
+          <span className="text-xs whitespace-nowrap text-(--text-muted)" title={NO_QUOTE_HINT}>
+            {NO_QUOTE_LABEL}
+          </span>
+        )}
       </td>
-      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">{formatVolume(item.volume, item.market)}</td>
+      <td
+        className={`py-2.5 pr-4 text-right font-medium tabular-nums ${
+          item.changePercent != null ? priceDirectionClass(item.changePercent) : "text-(--text-muted)"
+        }`}
+      >
+        {item.changePercent != null ? formatPercent(item.changePercent) : "—"}
+      </td>
+      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
+        {item.volume != null ? formatVolume(item.volume, item.market) : "—"}
+      </td>
       <td className="py-2.5 pr-4 text-right">
         <input
           type="number"
