@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { UNLOCK_COOKIE } from "@/proxy";
 
 // Hardcoded fallback so the gate works out of the box without any Vercel
-// setup — but this repo is public, so anyone reading the source can see it.
-// Set SITE_PASSWORD in the Vercel project's environment variables (then
-// redeploy) to actually override it with a real secret.
+// setup. This repo was made private on 2026-09-20 (see PROGRESS.md), so this
+// literal is no longer publicly readable by anyone — but it's still visible
+// to anyone with repo access, which is a materially weaker guarantee than an
+// actual secret. Set SITE_PASSWORD in the Vercel project's environment
+// variables (then redeploy) to override it with a real one; if the repo's
+// visibility is ever flipped back to public, this fallback would need to
+// change first.
 const SITE_PASSWORD = process.env.SITE_PASSWORD || "1118";
 
 export async function POST(req: NextRequest) {

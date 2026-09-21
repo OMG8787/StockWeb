@@ -1,50 +1,61 @@
 # 股情雷達 StockRadar
 
-公開、免費的股票研究網站 Demo：即時查詢台股與美股報價、互動走勢圖表、篩選排行，並提供 AI 問答快速掌握個股情報。
+私人股票研究工具：即時查詢台股（上市/上櫃/興櫃）與美股報價、互動走勢圖表、篩選排行、關注清單損益試算，並提供 AI 問答直接給個人看法與具體操作建議。
 
 用 Next.js (App Router) + TypeScript + Tailwind CSS 打造，圖表使用 [lightweight-charts](https://github.com/tradingview/lightweight-charts)。
 
+> **這不是公開 Demo，是有密碼保護的私人工具**（見下方「存取限制」），只有知道密碼的人（開發者跟家人）能用。這一點很重要：AI 問答會直接給「建議買進/賣出」「這檔目前偏多/偏空」這類具體個人看法與價位建議，這種內容如果對不特定多數人公開，在台灣屬於《證券投資顧問事業管理規則》規範的業務；靠密碼把使用者限定在少數已知的人，才是這個網站能這樣設計 AI 問答的前提。**如果之後把密碼保護拿掉、或網站變成任何人都能進來，AI 問答的系統提示詞（`src/lib/ai/ask.ts`）務必要改回客觀數據描述、不給具體買賣建議的版本。**
+
+## 存取限制
+
+`src/proxy.ts`（Next.js 16 的 middleware）攔截所有頁面與大多數 API 路由：沒有 `site_unlocked` cookie 一律導去 `/unlock` 輸入密碼。密碼比對邏輯在 `src/app/api/unlock/route.ts`：
+
+```ts
+const SITE_PASSWORD = process.env.SITE_PASSWORD || "1118";
+```
+
+正式站建議在 Vercel 環境變數設定 `SITE_PASSWORD` 覆蓋掉這個預設值；沒設定的話就是字面值 `"1118"`（本 repo 目前是**私人 repo**，所以這個字面值不會被公開讀到，但仍建議設定成真正的密鑰）。Vercel Cron 與 GitHub Actions 觸發的 `api/cron/*` 路由被排除在密碼閘門外（各自用自己的 `CRON_SECRET` 驗證）。
+
 ## 功能
 
-- **首頁**：AI 每日市場快報、我的關注清單、大盤指數（台股／美股分頁）、焦點排行（台股／美股分頁）。
-- **個股頁** `/stock/[symbol]`：即時（或近即時）報價、基本面（本益比/殖利率/市值）、K 線圖 + 成交量（1個月/3個月/6個月/1年，滑鼠 hover 顯示當日開高低收與成交量）、客觀技術訊號標籤（爆量、創新高/新低、均線、連漲跌天數）、關注清單星號。報價旁會顯示「盤中／已收盤」狀態：非交易時段顯示最近一次收盤資訊，交易時段中每 20 秒自動刷新，不用手動重新整理（大盤指數卡片也是同樣邏輯）。
-- **搜尋 / 篩選** `/search`：台股、美股用分頁切換（不並排），各自可依產業（多選）、股價區間、漲跌幅篩選與排序。
-- **每日焦點榜單** `/highlights`：漲幅榜／跌幅榜／成交量榜／技術訊號共振股，台股、美股分開排名，用分頁切換。
-- **我的關注**：預設用瀏覽器 localStorage 儲存自選股清單，不需登入，首頁與個股頁可加入/移除、排序、匯出 CSV；設定 Google 登入後，登入即可跨裝置同步同一份清單（見下方「帳號登入」）。
-- **AI 問答**：右下角浮動聊天視窗，支援多輪對話記憶，可針對目前瀏覽的個股或任何代碼提問，回答會同時參考個股資料與台股＋美股大盤概況。
-- **深色模式**：右上角手動切換開關，選擇會記住在瀏覽器；未手動選擇時跟隨系統設定。
-
-> 網站定位是「幫助使用者快速看懂資訊」，刻意不提供「建議買進/賣出」「即將上漲」等操作建議或預測——公開網站對外提供具體投資建議或研判進出時機，在台灣屬於受《證券投資顧問事業管理規則》規範的業務，未取得執照對外提供有法律風險。技術訊號、AI 快報皆為客觀數據描述，並非投資建議或預測。
+- **首頁**：AI 每日市場快報、AI「今日建議」（多面向整合技術面/籌碼面/基本面/財報面/消息面，明確給買進候選與「漲很多但不建議追」的反例）、我的關注清單、大盤指數（台股／美股分頁，含台指期夜盤近月合約）、焦點排行（台股／美股分頁）。
+- **個股頁** `/stock/[symbol]`：即時（或近即時）報價、基本面（本益比/殖利率/股價淨值比/市值）、K 線圖（當日分時線 + 1個月/3個月/6個月/1年 K 線，滑鼠 hover 顯示明細）、客觀技術訊號標籤（均線位置/多空排列、RSI、MACD 含 0 軸強弱、KD、布林通道、爆量、連漲跌天數）、籌碼面（三大法人/外資/投信/自營商買賣超、融資融券，僅台股）、重大訊息公告（僅台股）、內外盤（僅台股，資料源見下方）、AI 問答（「問 AI 關於本股」深度分析）、到價提醒、關注清單星號。報價旁顯示交易狀態（盤中／試搓中／已收盤／興櫃議價中），交易時段自動輪詢刷新。
+- **搜尋 / 篩選** `/search`：台股、美股分頁切換，可依產業（多選，含本站自行整理的細分產業如 IC 載板/矽光子/記憶體，比官方大分類更細）、股價區間、漲跌幅、成交量、成交金額篩選與排序，另有「價量關係」偏多/偏空推論篩選。
+- **每日焦點榜單** `/highlights`：漲幅榜／跌幅榜／成交量榜／技術訊號共振股，台股、美股分開排名。
+- **重大新聞** `/news`：AI 從近期新聞裡挑出「可能影響大盤等級」的消息置頂，其餘一般新聞附全文摘要，無限捲動。
+- **我的關注**：預設用瀏覽器 localStorage 儲存自選股，可填入持有股數／購買價格，自動算損益平衡價（已計入台股買賣手續費 0.1425%×2、賣出證交稅 0.3%，捨去到整數元對齊真實券商計費方式）、投資金額、損益金額/百分比；持有股票自動排在最上面並可依投資金額/漲跌幅/損益%/細分產業排序，支援拖曳調整順序、匯出 CSV；設定 Google 登入後可跨裝置同步（見下方「帳號登入」）。
+- **AI 問答**：右下角浮動聊天視窗（支援語音輸入），多輪對話記憶，可針對目前瀏覽的個股、任何代碼/公司名、排行榜篩選（技術指標多重條件、本益比/殖利率/股價淨值比、法人買賣超等）提問，也能對關注清單整批做深度分析（持有/未持有分開講、給具體價位建議與理由）。
+- **到價提醒**：設定股價到達某個區間時的網頁內提醒（localStorage，尚未接外部通知管道）。
+- **深色模式**：右上角手動切換，選擇會記住在瀏覽器；未手動選擇時跟隨系統設定。
 
 ## 資料來源與限制（重要）
 
-這是一個 **Demo / 雛形**，資料串接方式如下：
-
-| 市場 | 即時報價 | 基本面 | 歷史 K 線 |
-|---|---|---|---|
-| 台股（上市 TWSE） | TWSE `mis.twse.com.tw`（單檔 + 批次查詢，非官方但廣泛使用，延遲數分鐘） | TWSE OpenAPI `BWIBBU_ALL`（官方，本益比/殖利率，每日更新） | TWSE `STOCK_DAY`（官方公開日 K 資料） |
-| 台股（上櫃 TPEx） | TPEx OpenAPI `tpex_mainboard_quotes`（官方，全市場一次回傳，非逐筆即時——每個交易日更新，不像 TWSE MIS 那樣盤中逐筆更新，見下方說明） | TPEx OpenAPI `tpex_mainboard_peratio_analysis`（官方，本益比/殖利率/股價淨值比） | TPEx 網站查詢端點 `afterTrading/tradingStock/st43_result.php`（官方，非 openapi/v1，逐月查詢） |
-| 美股 | Yahoo Finance `chart` + `v7/finance/quote`（批次查詢，非官方） | Yahoo `v7/finance/quote`（本益比/殖利率/市值） | Yahoo `chart`（同左） |
+| 市場 | 即時報價 | 基本面 | 歷史 K 線 | 籌碼面 |
+|---|---|---|---|---|
+| 台股（上市 TWSE） | `mis.twse.com.tw`（單檔＋批次，非官方但廣泛使用） | TWSE OpenAPI `BWIBBU_ALL`（官方，每日更新） | TWSE `STOCK_DAY`（官方） | TWSE 三大法人(T86)／融資融券(MI_MARGN)（官方） |
+| 台股（上櫃 TPEx） | `mis.twse.com.tw` 的 `otc_` 前綴（**跟上市股同一套即時系統**，2026-09 前曾誤用 TPEx 官方 OpenAPI `tpex_mainboard_quotes`，但那個端點其實是「每個交易日更新一次」的盤後資料，已改掉） | TPEx OpenAPI（本益比/殖利率/股價淨值比，官方） | TPEx 網站查詢端點（官方，逐月查詢） | TPEx 官方對應端點 |
+| 台股（興櫃 Emerging） | 櫃買中心自己的興櫃即時報價站 `mis.tpex.org.tw`（`Quote.asmx/GETQ20` 單檔／`GETQ30` 全市場） | 櫃買中心 OpenAPI（本益比/殖利率等興櫃**沒有**，依規定不對外公布，見下方限制） | Yahoo Finance `.TWO`（興櫃跟上櫃共用這個後綴） | 興櫃依規定不能融資融券，無此資料 |
+| 台指期夜盤（近月合約） | TAIFEX 官方看盤網站 `mis.taifex.com.tw/futures/`（非正式文件化 API，見 `src/lib/data/taifex.ts` 開頭研究記錄） | — | — | — |
+| 美股 | Yahoo Finance `chart` + `v7/finance/quote`（批次查詢，非官方） | Yahoo `v7/finance/quote` | Yahoo `chart` | 無公開資料源，美股籌碼面留白 |
 
 以上皆為**無需 API 金鑰的公開端點**，但：
 
-- 屬於非官方端點，可能隨時變動、被限流或封鎖，正式產品建議改用有授權的資料商（例如 TWSE OpenAPI 正式合作方案、IEX Cloud、Polygon.io、Alpha Vantage 等）。
-- **本站不使用任何示範／假資料。** 股票資訊要求準確性——當即時資料抓取失敗（網路限制、被限流、端點變動、代碼不存在等），系統一律**誠實顯示「目前無法取得資料」**，絕不會用亂數產生的數字頂替。個股頁在報價抓不到時會顯示明確的無法取得資料訊息；圖表、基本面、大盤指數、搜尋/排行清單等在抓不到資料時，一律略過該筆或顯示為空，而不是用替代數字填滿畫面。AI 問答與每日快報同樣只根據實際抓到的資料作答，資料不足時會如實告知使用者，不會編造數字。
-- 列表頁（搜尋/焦點榜單/首頁排行/快報）使用**批次查詢**（TWSE 多代碼一次查、Yahoo `v7/finance/quote` 多代碼一次查），而不是每檔股票各打一次 API——後者在單一伺服器函式內對 TWSE/Yahoo 單股查詢端點發出 20+ 個並發請求，容易被限流或逾時。批次查詢大幅提高即時資料的成功率；仍抓不到的個別股票會直接從清單中略過。
-- 目前開發沙盒環境本身的對外網路被組織政策限制（僅允許 npm registry / GitHub），因此本機測試時多數即時資料會顯示為無法取得；部署到具備一般對外網路的環境（如 Vercel）後，即時資料串接會自動生效，無需改動程式碼。
-- 搜尋 / 篩選頁與首頁排行榜的股票清單：台股改為動態抓取 TWSE 官方上市公司清單＋TPEx（櫃買中心）官方上櫃公司清單並合併（含真實產業別；興櫃不含），美股則是約 100 檔精選跨產業大型股（`src/lib/data/universe.ts`）。清單數量刻意各自限制在一定檔數之內（TWSE/TPEx 分開設上限）而不是涵蓋全部近兩千檔上市櫃股票——批次查報價/技術訊號時同時打太多支股票給上游端點，容易被限流，反而拖慢或打壞整個網站（包括跟這份清單無關的個股頁查詢）；TPEx 的批次報價端點本身一次回傳全市場、不受此限流考量影響。之後若要擴大涵蓋範圍，建議搭配共用快取（見下方）與更保守的分批節流一起調整。個股頁單檔查詢（報價/K線/基本面/財報/籌碼面）不受這個清單上限影響，一律走 TWSE/TPEx 官方端點即時查，只要代號存在就查得到。
-- 台股成交量單位：TWSE 即時報價的原始單位是「張」（1張=1000股），程式已換算成股數以跟歷史 K 線的成交量單位一致。
+- 屬於非官方或半官方端點，可能隨時變動、被限流或封鎖。實測過對 `mis.twse.com.tw` 併發請求太多（無上限扇出可能有數十個同時連線）會被靜默斷線甚至短暫封鎖來源 IP（不會回 429），全站批次報價因此都有併發上限節流（見 `src/lib/data/twse.ts` 的 `MIS_BATCH_CONCURRENCY`）。
+- **本站不使用任何示範／假資料。** 抓取失敗一律誠實顯示「資料暫缺」／「目前無法取得資料」，絕不用亂數或參考價頂替；失敗結果只會被短暫快取（幾秒等級），不會讓一次暫時性的上游失敗拖累到下一個完整快取週期都看不到資料。
+- 台股上市/上櫃清單各自有批次抓報價用的檔數上限（目前 TWSE 1200 檔、TPEx 900 檔，已涵蓋官方全部現存上市櫃公司；美股約 171 檔精選跨產業大型股），興櫃（約 360 多檔）只進完整清單供搜尋/個股頁/AI 問答查詢，**不進批次排行榜清單**（興櫃無漲跌幅限制、流動性低，混進「今天漲最多」榜單會天天洗版）。清單以外的極冷門股/興櫃排行查不到是刻意的取捨，個股頁單檔查詢不受此限制。
+- 台股成交量單位：原始單位是「張」（1張=1000股），程式已換算成股數以跟歷史 K 線一致；顯示給使用者時再換算回「張」（台股慣例）。
+- 「內外盤」（買氣/賣壓）資料來源是 `tw.stock.yahoo.com` 的台灣在地化網頁（非 `query1.finance.yahoo.com` 那個全球 API），只支援單檔查詢，因此只出現在個股頁，不進批次清單/排序。外盤＝買方主動追價（買氣，紅色）、內盤＝賣方主動降價求售（賣壓，綠色）。
 
 ## AI 問答設定
 
-AI 問答與每日快報會以即時/近即時報價與近期走勢作為依據（RAG 概念，非憑空生成數字），支援兩種模型供應商：
+AI 問答、每日快報、「今日建議」都以即時/近即時報價與近期走勢作為依據（RAG 概念，非憑空生成數字），支援兩種模型供應商：
 
 | 供應商 | 環境變數 | 費用 | 申請 |
 |---|---|---|---|
 | Google Gemini（優先使用） | `GEMINI_API_KEY` | 有免費額度，不需信用卡 | https://aistudio.google.com/apikey |
 | Anthropic Claude | `ANTHROPIC_API_KEY` | 按量計費 | https://console.anthropic.com |
 
-兩個都設定時會優先呼叫 Gemini，失敗才 fallback 到 Claude。兩個都沒設定時，`/api/ask` 與每日快報會回傳「原始資料整理」的罐頭內容（仍會附上即時/近即時報價），並提示使用者尚未啟用 AI，網站其餘功能不受影響。
+兩個都設定時會優先呼叫 Gemini，失敗才 fallback 到 Claude。兩個都沒設定時，會回傳「原始資料整理」的罐頭內容（仍附上即時/近即時報價），並提示尚未啟用 AI，網站其餘功能不受影響。
 
 本機開發建立 `.env.local`：
 ```bash
@@ -52,22 +63,19 @@ GEMINI_API_KEY=xxxx
 ```
 部署在 Vercel 則在 Project → Settings → Environment Variables 新增同名變數。
 
-### 每日快報排程（Vercel Cron）
+### 每日快報／今日建議／預熱排程
 
-`vercel.json` 設定了一個每天 UTC 00:50（台北時間 08:50）觸發 `/api/cron/daily-brief` 的排程，會在當天第一位訪客之前預先生成好快報。快報本身以「台北時間的日期」當快取 key，同一天內所有訪客看到同一份內容。
+- `vercel.json`：每天觸發一次 `/api/cron/daily-brief`，在當天第一位訪客之前預先生成好快報。
+- `.github/workflows/warm-cache.yml`：平日主要時段每 5 分鐘、離峰每 30 分鐘（週末不觸發）呼叫 `/api/cron/warm-cache`，預熱報價/排行/技術指標篩選/今日建議等各項快取，降低 Vercel 用量與訪客等待時間；回應會附上每一項預熱任務的實際結果，排查快取問題時可以直接看這支。
+- 可選環境變數 `CRON_SECRET`：設定後，cron 路由只接受帶正確 `Authorization: Bearer <secret>` 的請求；不設定則不驗證。
 
-- 可選環境變數 `CRON_SECRET`：設定後，cron 路由只接受帶正確 `Authorization: Bearer <secret>` 的請求（Vercel 觸發排程時會自動附上，符合 [Vercel 官方作法](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs)）；不設定則路由不做驗證，任何人手動打這支 API 只會是提早重新生成快報，沒有安全疑慮。
-- **已知限制**：若未設定下方「共用快取」，快取預設是 `lib/data/cache.ts` 裡的記憶體內 Map，屬於單一 Serverless 執行個體，不是跨個體共享的儲存。Cron 只能預熱「處理到這次排程的那個執行個體」，不保證每個訪客連到的執行個體都已經有快取——效果是大幅降低 AI 呼叫次數，但不是嚴格保證「一天只生成一次」。設定共用快取後這個限制就解除了。
+### 共用快取（Redis，選用但正式站已設定）
 
-### 共用快取（Redis，選用）
-
-預設情況下（不設定任何環境變數）快取存在每個 Serverless 執行個體自己的記憶體裡，同一份資料可能在不同執行個體被重複抓取。設定 Redis 後，`lib/data/cache.ts` 的 `cached()` 會自動改用共用的 Redis 儲存（`lib/data/kv.ts`），所有執行個體、所有訪客共用同一份快取——不用改任何程式碼，設定好環境變數即生效；沒設定的話會自動退回原本的記憶體內快取，網站行為完全不受影響。
-
-任一種都可以（擇一設定）：
+`src/lib/data/cache.ts` 的 `cached()`／`cachedMap()` 等函式優先用共用的 Redis（`src/lib/data/kv.ts`），沒設定則自動退回單一 Serverless 執行個體自己的記憶體內快取。正式站目前已設定 Upstash Redis 免費方案。
 
 | 方式 | 環境變數 |
 |---|---|
-| Vercel Marketplace「Redis」整合（Project → Storage → 新增 Redis，通常會自動填好） | `KV_REST_API_URL`、`KV_REST_API_TOKEN` |
+| Vercel Marketplace「Redis」整合 | `KV_REST_API_URL`、`KV_REST_API_TOKEN` |
 | 直接連接 Upstash Redis（[upstash.com](https://upstash.com) 免費額度即可） | `UPSTASH_REDIS_REST_URL`、`UPSTASH_REDIS_REST_TOKEN` |
 
 任何一個 Redis 讀寫失敗都會自動退回即時重新抓資料，不會讓頁面壞掉。
@@ -82,7 +90,7 @@ GEMINI_API_KEY=xxxx
 2. 把取得的用戶端 ID / 密碼填進環境變數：`AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET`
 3. `AUTH_SECRET`：任意隨機字串（可用 `npx auth secret` 產生），用來加密登入 session
 
-**跨裝置同步需要「共用快取」章節提到的 Redis** 來存放每個帳號的自選股清單；只設定登入、沒設定 Redis 的話，登入功能本身仍然正常（可以登入/登出、看到自己的 Google 頭像），但自選股不會真的跨裝置同步，會退回該裝置的 localStorage（`/api/watchlist` 會回報 `syncAvailable: false`）。首次登入時，會把「這台裝置當下的本機清單」與「帳號裡已同步的清單」取聯集合併（不會互相覆蓋刪除），之後每次加入/移除都會即時推上雲端。
+**跨裝置同步需要「共用快取」章節提到的 Redis** 來存放每個帳號的自選股清單；只設定登入、沒設定 Redis 的話，登入功能本身仍然正常，但自選股不會真的跨裝置同步（`/api/watchlist` 會回報 `syncAvailable: false`）。首次登入時，會把「這台裝置當下的本機清單」與「帳號裡已同步的清單」取聯集合併，之後每次加入/移除都會即時推上雲端。
 
 ## 開發
 
@@ -98,37 +106,38 @@ npm run lint    # ESLint
 npm run build   # 正式版建置
 ```
 
-## 專案結構
+## 專案結構（重點檔案，不是全部）
 
 ```
 src/
   app/
-    page.tsx              首頁
-    stock/[symbol]/       個股頁
-    search/                搜尋／篩選頁
-    highlights/            每日焦點榜單頁
+    page.tsx / action/ / stock/[symbol]/ / search/ / highlights/ / news/ / unlock/
     api/
-      quote/[symbol]/      即時報價 API
-      chart/[symbol]/      歷史 K 線 API
-      search/               篩選 API
-      sectors/               搜尋頁產業選單 API
-      indices/              大盤指數 API
-      ask/                  AI 問答 API（支援多輪對話）
-      watchlist/             登入後自選股同步 API（GET/PUT）
-      auth/[...nextauth]/    NextAuth（Google 登入）路由
-      cron/daily-brief/     每日快報排程觸發端點
-    sitemap.ts / robots.ts   SEO：sitemap.xml / robots.txt
-  components/               UI 元件（StockChart、ChatWidget、MarketTabs、AuthButton 等）
+      quote/[symbol]/ chart/[symbol]/ search/ sectors/ indices/ taifex-futures/
+      symbol-lookup/ momentum/ ask/ daily-brief/ action-brief/ news-feed/
+      watchlist/ auth/[...nextauth]/ unlock/ cron/{daily-brief,warm-cache,backfill-volume-history}/
+  proxy.ts                  全站密碼保護閘門（Next.js 16 middleware）
+  components/               UI 元件（StockChart、ChatWidget、WatchlistTable、TaifexFuturesCard 等）
   lib/
-    data/                   資料層：TWSE / Yahoo 抓取器（含批次查詢）、universe.ts（股票清單）、kv.ts（選用 Redis 共用快取）、統一介面（抓不到資料一律回傳 null，不產生假資料）
-    ai/                     AI 問答邏輯 + 每日快報生成（provider.ts 共用 Gemini/Claude fallback）
-    auth.ts                  NextAuth 設定（Google 登入）
-    watchlist.ts              自選股清單（localStorage，未登入或未設定共用儲存時的預設行為）
-    watchlistStore.ts         登入後自選股的伺服器端（Redis）儲存
-    signals.ts               客觀技術訊號計算（爆量、均線、連漲跌等）
-    marketStatus.ts           判斷台股／美股目前是否在交易時段（盤中／已收盤）
-    format.ts                數字／價格格式化，含台股慣例（紅漲綠跌）
-    site.ts                  網站名稱／網址常數（SEO metadata 用）
+    data/                   資料層——所有股票資料的唯一進出口
+      index.ts               純 barrel，只做 re-export，實際邏輯在下面各檔
+      twse.ts / tpex.ts / emerging.ts / us.ts / taifex.ts   各市場資料抓取
+      universe.ts             股票清單（TWSE/TPEx/興櫃官方清單 + 美股精選清單）
+      symbols.ts / quote.ts / chart.ts / marketIndices.ts / search.ts / companyData.ts
+      momentum.ts / techScreen.ts / volumeSurge.ts / valueScreen.ts / chipsRanking.ts
+      cache.ts / degradedCache.ts / kv.ts   共用 TTL 快取（Redis 優先、記憶體備援）
+      news.ts / articleExtract.ts   新聞抓取與全文摘要
+    ai/                     AI 問答與每日快報／今日建議生成
+      ask.ts                  /api/ask 主要進入點；intent.ts/symbolResolve.ts/grounding/*.ts
+                               各自負責意圖判斷與各面向資料組裝
+      brief.ts / actionBrief.ts   每日快報／今日建議
+      provider.ts / gemini.ts     Gemini→Claude fallback 呼叫邏輯
+    portfolio.ts              關注清單損益平衡價/投資金額/損益公式（唯一真實來源）
+    watchlist.ts / watchlistStore.ts   自選股（localStorage / 登入後 Redis）
+    fineIndustry.ts           本站自行整理的細分產業分類（非官方）
+    signals.ts                客觀技術訊號計算
+    marketStatus.ts / pollingSchedule.ts   交易時段判斷與各市場輪詢節奏
+    priceAlerts.ts            到價提醒（localStorage）
 ```
 
 ## 設計慣例
@@ -136,7 +145,8 @@ src/
 - 依台灣／中文市場慣例：**紅色＝上漲、綠色＝下跌**（與美股常見的紅跌綠漲相反）。
 - 淺色／深色模式皆已設計對應色票，並通過色盲友善（CVD）對比驗證；漲跌同時搭配 ▲／▼ 圖示與正負號，不僅依賴顏色辨識。
 - 任何同時涉及台股與美股的畫面，一律用分頁（MarketTabs）切換顯示單一市場，不並排顯示兩個市場，避免混淆。
+- 抓不到真實資料時一律誠實顯示「資料暫缺」／「無法取得」，絕不用假資料或參考價頂替；這條原則優先於畫面好不好看。
 
 ## 免責聲明
 
-本站所有資訊（含公開資料整理與 AI 生成內容）僅供研究參考，不構成任何投資建議。技術訊號與「技術訊號共振股」僅描述當下數據狀態，不是對未來走勢的預測。
+本站所有資訊（含公開資料整理與 AI 生成內容）僅供研究參考，不構成正式投資建議，使用者需自行判斷風險。AI 問答提供的具體看法與價位建議，是在「僅限已知密碼的少數使用者」這個存取限制前提下設計的（見上方「存取限制」），不適用於對外公開的一般用途。

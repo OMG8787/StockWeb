@@ -97,9 +97,31 @@ src/
 │
 └─ lib/
    ├─ data/                          資料層——所有股票資料的唯一進出口
-   │  ├─ index.ts                    對外統一介面：getQuote/getChart/getIndices/searchStocks/
-   │  │                              getFundamentals/getEarnings/getMultiSignalStocks/detectMarket/normalizeSymbol
-   │  │                              等，全部「抓不到資料就回 null，絕不產生假資料」
+   │  ├─ index.ts                    **2026-09-21 拆分後只剩47行**：純barrel，只做
+   │  │                              re-export，對外的匯出項目（getQuote/getChart/getIndices/
+   │  │                              searchStocks/getFundamentals/getEarnings/
+   │  │                              getMultiSignalStocks/detectMarket/normalizeSymbol…）逐項
+   │  │                              完全不變、呼叫端不用改任何 import。實際邏輯搬到下面幾個
+   │  │                              新檔案：
+   │  │  ├─ symbols.ts                detectMarket/normalizeSymbol/universeFor/resolveTwExchange
+   │  │  ├─ quote.ts                  getQuote/getMarketDepth，報價TTL邏輯
+   │  │  ├─ chart.ts                  getChart，分時圖
+   │  │  ├─ marketIndices.ts          getIndices/getTaifexNightFutures（大盤指數、台指期夜盤）
+   │  │  ├─ twMergedMaps.ts           mergeTwMaps（合併TWSE+TPEx兩份Map的共用邏輯）
+   │  │  ├─ companyData.ts            getFundamentals/getEarnings/getChips/getMaterialAnnouncements
+   │  │  ├─ marketQuoteMap.ts         全市場批次報價快取（給排行榜/篩選頁用）
+   │  │  ├─ search.ts                 SearchFilters/searchStocks
+   │  │  ├─ degradedCache.ts          cachedListWithDegradedEmptyTtl/cachedWithDegradedNullTtl
+   │  │  │                            （失敗結果只給短命TTL，不讓一次上游失敗污染全站到正常
+   │  │  │                            TTL滿——2026-09-21修`/api/indices`漏抓TAIEX時新增的
+   │  │  │                            單值版本，陣列版本更早就有）
+   │  │  ├─ momentum.ts               getMultiSignalStocks（技術訊號共振股）
+   │  │  ├─ techScreen.ts             getTechnicalScreen（多重技術指標篩選，全市場逐檔算）
+   │  │  ├─ volumeSurge.ts            getVolumeSurgeStocks（價漲量增+連漲天數）
+   │  │  ├─ valueScreen.ts            getValueScreen（全市場本益比/殖利率/股價淨值比排行）
+   │  │  ├─ chipsRanking.ts           getChipsRanking（三大法人/外資/投信買賣超排行）
+   │  │  └─ volumeBackfill.ts         成交量歷史一次性回填（見volumeHistory.ts）
+   │  │                              全部「抓不到資料就回 null，絕不產生假資料」的原則不變
    │  ├─ twse.ts                     台股（上市）資料抓取：TWSE 即時報價/K線/OpenAPI 基本面(含P/B)/月營收/
    │  │                              季報EPS/三大法人買賣超(legacy T86)/融資融券(MI_MARGN)/
    │  │                              每日重大訊息(t187ap04_L，注意「主旨 」欄位名尾端有個空格)；
@@ -135,8 +157,9 @@ src/
    │  │                              "TWSE"/"TPEx"/"Emerging"，只用於路由到正確的資料源，不影響
    │  │                              對外的 Market="TW"/"US" 型別；**興櫃只進完整清單、不進
    │  │                              capUniverse 那份批次抓報價的清單**，見該函式註解），
-   │  │                              各自分開設批次查報價用的清單上限（TWSE 500／TPEx 300，見下方
-   │  │                              工作日誌），美股約 150+ 檔精選跨產業大型股種子清單
+   │  │                              各自分開設批次查報價用的清單上限（**2026-09-15調高後**
+   │  │                              TWSE 1200／TPEx 900，見下方工作日誌），美股約 171 檔
+   │  │                              精選跨產業大型股種子清單（US_UNIVERSE，`universe.ts`）
    │  ├─ cache.ts                    共用 TTL 快取：cached()/cachedMap()/peekCached()/writeCached()，
    │  │                              Redis 優先、記憶體備援、single-flight 去重複、null 值也會被
    │  │                              正確快取（見工作日誌，這層踩過最多坑）
@@ -154,7 +177,20 @@ src/
    ├─ ai/                            AI 問答與每日快報
    │  ├─ provider.ts                 共用的 Gemini→Claude fallback 呼叫邏輯（callAiProviders），
    │  │                              處理對話歷史裁切、開頭必須是 user、合併連續同角色 turn
-   │  ├─ ask.ts                      /api/ask 的問答邏輯：組 system prompt、抓相關股票資料當 RAG context
+   │  ├─ ask.ts                      **2026-09-21 拆分後只剩356行**：/api/ask 的主要進入點，組
+   │  │                              system prompt、呼叫 callAiProviders，其餘職責搬到下面幾個
+   │  │                              新檔案（public API/呼叫端完全不用改，import 路徑都一樣）：
+   │  │  ├─ askTypes.ts               對外型別 AskResult／HoldingInput
+   │  │  ├─ symbolResolve.ts          從問句解析股票代號/公司名（guessSymbolsFromText）
+   │  │  ├─ intent.ts                 全部意圖判斷正則與函式（是不是在問排行榜/技術指標篩選/
+   │  │  │                            追問上文股票…）
+   │  │  ├─ grounding/stock.ts        單一個股資料組裝（buildStockGrounding）
+   │  │  ├─ grounding/movers.ts       排行榜/焦點資料組裝（buildMoversGrounding）
+   │  │  ├─ grounding/techScreen.ts   多重技術指標篩選資料組裝
+   │  │  ├─ grounding/holdings.ts     關注清單/持股資料組裝（含深度分析版本）
+   │  │  ├─ grounding/theme.ts        主題概念股資料組裝
+   │  │  ├─ grounding/indicators.ts   技術指標狀態→中文字串（跨上面幾個 grounding 檔共用）
+   │  │  └─ askFallback.ts            AI 掛掉時的退路組字＋內部標記過濾（sanitizeLeakedMarkers）
    │  ├─ brief.ts                    每日 AI 快報生成邏輯，以台北時間日期當快取 key，4 段式
    │  │                              （大盤與台美連動/台股焦點/美股焦點/近期重點回顧）
    │  ├─ newsfeed.ts                 重大新聞頁邏輯：getNewsFeed() 抓 fetchNewsFeedPool() 的
@@ -235,9 +271,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   的系統提示詞允許直接給明確個人看法/推薦。**這個前提很重要**：台灣證券投顧法規管的是「對不
   特定多數人」提供投資推介，判斷基準是網站有沒有做存取限制，不是使用者自己覺得是不是私人
   用途。如果之後把密碼保護拿掉、或網站又變成任何人都能進來，AI 問答務必要改回客觀數據描述、
-  不做買賣建議/漲跌預測的版本（`getMultiSignalStocks` 在 `lib/data/index.ts` 的註解本來就是
-  照這個原則設計的）——**不要因為看到這裡的舊版指示殘留就假設現在還是客觀中立的版本，先看
-  `lib/ai/ask.ts` 目前實際的系統提示詞內容再判斷。**
+  不做買賣建議/漲跌預測的版本（`getMultiSignalStocks` 在 `lib/data/momentum.ts` 的註解本來就是
+  照這個原則設計的——2026-09-21 `lib/data/index.ts` 拆分後，這個函式本體搬到 momentum.ts，
+  index.ts 現在只是re-export的barrel，不要再去那邊找函式本體或註解）——**不要因為看到這裡的
+  舊版指示殘留就假設現在還是客觀中立的版本，先看 `lib/ai/ask.ts` 目前實際的系統提示詞內容
+  再判斷。**
 - **雙市場一律用分頁，不並排**：`MarketTabs` 元件，全站慣例。
 - **這台本機開發環境（Windows PC）對外網路正常、能連到正式站**：跟這份文件更早版本記錄的
   「sandbox 連不到外部」不同（那是另一台/另一個環境的限制，不是這台）。這台機器上已經裝好
@@ -302,6 +340,22 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-09-21（十五續）：台指期夜盤白天「資料暫缺」根治——長效快照當退路，並修正repo內多處過時/錯誤記錄
+
+使用者問密碼存哪裡，順手發現`unlock/route.ts`註解說「repo是公開的」已經過時（repo在
+2026-09-20就改成私人了），使用者要求趁機會把整個repo過時/錯誤的記錄都改正確。修正範圍：
+①`unlock/route.ts`過時的公開/私人說明；②`PROGRESS.md`資料夾地圖沒反映ask.ts/data/index.ts
+的拆分結果（新增檔案清單）、`getMultiSignalStocks`註解位置指錯（已搬到momentum.ts）、台股
+清單上限沒同步更新（還寫著500/300舊數字，已改1200/900）、Playwright路徑寫著別台機器的
+使用者帳號`C:\Users\88691`（已修正說明改查`%LOCALAPPDATA%`）；③`README.md`大幅重寫——原本
+還寫著「公開Demo」「刻意不給買賣建議」，但網站早就改成密碼保護的私人工具、AI會直接給具體
+買賣建議，TPEx資料源描述還是舊的盤後端點，也完全沒提到興櫃/台指期夜盤/今日建議/內外盤/
+細分產業/語音輸入等後來加的功能，專案結構也沒反映拆分後的檔案——整份對照目前實際程式碼
+重寫。④順便真正修好「台指期夜盤白天資料暫缺」：新增一個24小時長效快照key，只在抓取真的
+成功時更新，即時抓取回傳null（不管是白天上游正常清空、還是暫時性失敗）時改讀這份快照當
+退路並強制把status覆寫成"closed"（不能沿用快照舊status或這次失敗回應裡的status，避免
+Opus提醒過的「空白列Status被誤判成trading」陷阱）。`tsc`/`eslint`/`build`皆通過。
 
 ### 2026-09-21（十四續）：Opus複查4項修正——3項確認通過，台指期夜盤查出更深的根因
 
@@ -1319,8 +1373,11 @@ MACD 0軸判讀、AI 問答新手化+整合更多面向，以及更早先 Opus �
 **2026-09-11 後續更新：這台機器的專案 `node_modules` 跟系統暫存資料夾裡的 `playwright` npm
 套件，實際上並不會一直保留**——這次同一天的對話裡，重新接續時發現 `node_modules` 整個不見了
 （`npm run build` 直接報 `next` 找不到），Playwright 的 npm 套件（不是瀏覽器執行檔本體）也
-一樣消失了，兩個都要重新 `npm install`。瀏覽器執行檔本體（`C:\Users\88691\AppData\Local\
-ms-playwright`）目前看來比較持久，但版本可能跟新安裝的 `playwright` npm 套件對不上（曾經
+一樣消失了，兩個都要重新 `npm install`。瀏覽器執行檔本體（`%LOCALAPPDATA%\ms-playwright`，
+這台機器目前的實際使用者資料夾是 `C:\Users\HCY\...`——**這裡原本寫的是另一個帳號
+`C:\Users\88691\...`，是舊筆記留下的錯誤路徑，2026-09-21 順手修正，之後不要照抄舊路徑，
+一律用 `%LOCALAPPDATA%\ms-playwright` 或直接查當下的 `$LOCALAPPDATA` 環境變數**）目前看來
+比較持久，但版本可能跟新安裝的 `playwright` npm 套件對不上（曾經
 發生新套件要 chromium-1243、本機只有 chromium-1234，要多跑一次 `npx playwright install
 chromium` 重新下載，約 1-2 分鐘）。**結論：不要假設上一輪裝好的東西這輪還在，每次開始品保
 流程前先跑 `npm run build` 確認能不能動，不能動就照上面步驟重裝，不用大驚小怪。**

@@ -1,3 +1,4 @@
+import { peekCached, writeCached } from "./cache";
 import { cachedWithDegradedNullTtl } from "./degradedCache";
 import type { IndexQuote, Market, TaifexFuturesQuote } from "./types";
 import { fetchTwseQuote } from "./twse";
@@ -152,21 +153,44 @@ export async function getIndices(): Promise<IndexQuote[]> {
   return results.filter((r): r is IndexQuote => r !== null);
 }
 
+/** 最後一次成功抓到的夜盤收盤快照，獨立於上面正常 20 秒 TTL 的即時快取之外，
+ *  存活時間要蓋過白天整段「上游把盤面清空」的空窗（見下方函式說明）。24 小時
+ *  保守抓：即使使用者連續好幾天沒開網站，重新打開時「上次收盤」也比什麼都
+ *  沒有好，且下一次夜盤一開盤，這個快照就會被真正即時的資料蓋過去，不會有
+ *  「用太舊的快照騙過使用者」的風險。 */
+const TAIFEX_LAST_KNOWN_TTL_MS = 24 * 60 * 60_000;
+const TAIFEX_LAST_KNOWN_KEY = "taifex:tx-night:last-known";
+
 /**
  * 台指期（TX，大台指）夜盤近月合約報價——見 lib/data/taifex.ts 開頭的完整資料源
  * 研究說明。跟 getIndices() 分開一個函式（而不是塞進 INDEX_DEFS），是因為這個
  * 資料需要額外的 status/asOf 欄位才能誠實呈現「交易中」跟「已收盤」的差異，
  * IndexQuote 型別沒有這兩個欄位。
  *
- * 2026-09-21：Opus 規則二實測抓到跟 getIndices() 一模一樣的雷——原本用 `cached()`
- * 把抓取失敗的 `null` 當成正常結果快取整個 `QUOTE_TTL_MS`，於是台指期夜盤卡片
- * 曾經連續 5 次載入（跨約15分鐘）都顯示「資料暫缺」，即使上游早就恢復也要等
- * 滿 TTL 才會重試。改成跟 getIndices() 同一套：抓取失敗先重試一次，失敗的
- * null 只快取 `INDEX_DEGRADED_TTL_MS`（3秒），並留下失敗訊息方便下次再發生時
- * 直接從 log 判斷原因，不用像這次一樣只能反覆間接量測猜測。
+ * 2026-09-21 第一輪：Opus 規則二實測抓到跟 getIndices() 一模一樣的雷——原本用
+ * `cached()` 把抓取失敗的 `null` 當成正常結果快取整個 `QUOTE_TTL_MS`。改成跟
+ * getIndices() 同一套：抓取失敗先重試一次，失敗的 null 只快取
+ * `INDEX_DEGRADED_TTL_MS`（3秒），並留下失敗訊息方便排查。
+ *
+ * 2026-09-21 第二輪（複查後發現這樣還不夠）：Opus 直接打上游確認，白天約
+ * 05:00~15:00 這段非夜盤時段，`mis.taifex.com.tw` 會把整個夜盤盤面的
+ * `CLastPrice` 等欄位清空回傳空字串——**這不是失敗，是上游本來的設計**，
+ * `fetchTaifexNightFutures()` 因此「正常」回傳 null，不會拋例外，上面第一輪
+ * 加的重試/降級TTL完全對不到這個情況，所以白天這約10小時卡片必然顯示
+ * 「資料暫缺」。單純顯示暫缺並沒有騙人（誠實反映「這個端點現在真的沒有
+ * 資料」），但比之前偶爾能看到的「最近一次夜盤收盤，資料時間X」體驗差一截。
+ *
+ * 修法：另外用一個長效 key（見上面 TAIFEX_LAST_KNOWN_KEY）記住「最後一次真正
+ * 成功抓到的收盤快照」，只在抓取真的成功時才更新它；即時抓取回傳 null 時
+ * （不管是白天的正常清空、還是真的暫時性失敗），改讀這個快照當退路，並且
+ * **強制把 status 覆寫成 "closed"**——不能直接沿用快照裡舊的 status，也不能
+ * 相信這次失敗回應裡的 status 欄位：Opus 提醒過白天那些清空的列，`Status`
+ * 欄位是空字串，`classifyStatus("")` 會被誤判成 "trading"，如果照抄就會變成
+ * 「顯示交易中卻沒有價格」的錯誤畫面，比純顯示暫缺更誤導人。只有真的從來沒
+ * 成功抓到過一次（例如網站剛部署的第一刻）才會落到最後的 null。
  */
 export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null> {
-  return cachedWithDegradedNullTtl<TaifexFuturesQuote>(
+  const live = await cachedWithDegradedNullTtl<TaifexFuturesQuote>(
     "taifex:tx-night",
     QUOTE_TTL_MS,
     INDEX_DEGRADED_TTL_MS,
@@ -177,7 +201,7 @@ export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null
         } catch (err) {
           if (attempt >= INDEX_FETCH_RETRIES) {
             console.warn(
-              `[taifex-night] 連續 ${attempt + 1} 次抓取失敗，這次回應為資料暫缺：`,
+              `[taifex-night] 連續 ${attempt + 1} 次抓取失敗，改讀最後一次成功快照：`,
               err instanceof Error ? err.message : err
             );
             return null;
@@ -187,4 +211,15 @@ export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null
       }
     }
   );
+
+  if (live) {
+    // 不用 await 卡住回應：這只是把「這次成功結果」順手存一份長效備份，不影響
+    // 這次要回給使用者的資料，失敗也無所謂（下次成功時還會再存一次）。
+    void writeCached(TAIFEX_LAST_KNOWN_KEY, live, TAIFEX_LAST_KNOWN_TTL_MS).catch(() => undefined);
+    return live;
+  }
+
+  const lastKnown = await peekCached<TaifexFuturesQuote>(TAIFEX_LAST_KNOWN_KEY);
+  if (!lastKnown) return null;
+  return { ...lastKnown, status: "closed" };
 }
