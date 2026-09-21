@@ -1,4 +1,4 @@
-import { cachedMap } from "./cache";
+import { cachedMapWithDegradedShortTtl } from "./degradedCache";
 import type { Market, Quote } from "./types";
 import { fetchTwseQuote, fetchTwseQuotesBatch } from "./twse";
 import { fetchTpexQuote, fetchTpexQuotesBatch } from "./tpex";
@@ -121,9 +121,36 @@ const MARKET_MAP_TTL_MS = 2 * 60_000;
  */
 const TW_LIVE_MARKET_MAP_TTL_MS = 60_000;
 
-// cachedMap, not cached: this value is a Map, and the Redis backend stores
-// JSON — a Map would come back from a shared-cache hit as an empty object.
+// 抓失敗/部分降級時只快取這麼短——見下方 getMarketQuoteMap() 的完整說明。
+// 3 秒跟 marketIndices.ts 的 INDEX_DEGRADED_TTL_MS 同一個量級：短到能自我
+// 修復，又不至於在上游真的降級時讓每個請求都各自重打一次全市場批次抓取。
+const MARKET_MAP_DEGRADED_TTL_MS = 3_000;
+// 回傳筆數低於「這個市場預期規模」的這個比例，就視為降級。50% 是刻意寬鬆的
+// 門檻——真正的批次抓取部分失敗，觀察到的是暴跌到個位數/低兩位數百分比
+// （例如實測過 0筆／50筆，對 universe 規模約 2000 筆），不是「差一點點」；
+// 訂在一半是為了確保絕對不會誤傷「今天剛好有幾十檔連不到」這種正常小幅波動。
+const MARKET_MAP_DEGRADED_RATIO = 0.5;
+
+/**
+ * 2026-09-21 追查「台股候選池（searchStocks 用成交金額排序）間歇性大幅縮水」
+ * （曾實測到同一個查詢在不同時刻分別回傳過 0筆／50筆／1535筆）時發現：這裡
+ * 原本用普通 `cachedMap()`，代表 `fetchMarketQuoteMap()` 萬一某次只成功抓到
+ * 一小部分（例如上游批次抓取部分失敗），這份殘缺的報價表會被當成正常結果
+ * 整個快取滿 TTL（盤中60秒／盤後120秒）——跟同一天稍早修的 `/api/indices`
+ * 漏抓TAIEX是同一種「失敗結果被當正常快取放大」的模式。改用
+ * `cachedMapWithDegradedShortTtl()`：拿到的筆數明顯低於這個市場的 universe
+ * 規模時，只快取 `MARKET_MAP_DEGRADED_TTL_MS`（3秒），讓系統能盡快自我修復，
+ * 不用乾等一整個正常TTL；筆數正常時維持原本的TTL不變。
+ */
 export async function getMarketQuoteMap(market: Market): Promise<Map<string, Quote>> {
   const ttl = market === "TW" && isTwQuoteWindow() ? TW_LIVE_MARKET_MAP_TTL_MS : MARKET_MAP_TTL_MS;
-  return cachedMap(`market-quotes:${market}`, ttl, () => fetchMarketQuoteMap(market));
+  const pool = await universeFor(market);
+  const expectedMin = pool.length * MARKET_MAP_DEGRADED_RATIO;
+  return cachedMapWithDegradedShortTtl(
+    `market-quotes:${market}`,
+    ttl,
+    MARKET_MAP_DEGRADED_TTL_MS,
+    (map) => map.size < expectedMin,
+    () => fetchMarketQuoteMap(market)
+  );
 }

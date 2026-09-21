@@ -87,3 +87,47 @@ export async function cachedWithDegradedNullTtl<T>(
     degradedNullInFlight.delete(key);
   }
 }
+
+/**
+ * 第三個變體：`Map` 版本，「降級」不是「完全空的」而是**筆數遠低於預期規模**
+ * （`isDegraded` 自己判斷，通常是「回傳筆數 < 預期規模的一半」這種寬鬆門檻，
+ * 只抓真的很嚴重的降級、不誤判成交量小年節前後這種正常波動）。
+ *
+ * 2026-09-21 追查「台股候選池（`searchStocks({market:"TW", sortBy:"turnover"})`）
+ * 間歇性大幅縮水」（曾經在不同時刻分別回傳過 0筆／50筆／1535筆）時發現：這條
+ * 路徑背後的 `getMarketQuoteMap()` 用的是普通 `cachedMap()`，代表萬一某次
+ * 全市場批次抓取只成功一部分（例如只抓到50檔），這份殘缺的報價表會被當成
+ * 正常結果整個快取滿 TTL（盤中60秒／盤後120秒）——跟 `/api/indices` 那次的
+ * 放大器問題是同一個模式，只是這裡的「壞」不是 null／空陣列，而是「筆數異常
+ * 偏低」。這個函式補上這一層防護：篩數正常才給正常 TTL，篩數異常偏低只給短
+ * 命的 `degradedTtlMs`，讓系統能盡快自我修復，不用乾等一整個正常 TTL。
+ *
+ * 儲存格式比照 `cachedMap()`：轉成 `Array<[K, V]>` 存（Map 本身不能直接
+ * JSON 序列化），讀出來再轉回 Map。
+ */
+const degradedMapInFlight = new Map<string, Promise<Array<[unknown, unknown]>>>();
+
+export async function cachedMapWithDegradedShortTtl<K, V>(
+  key: string,
+  ttlMs: number,
+  degradedTtlMs: number,
+  isDegraded: (map: Map<K, V>) => boolean,
+  load: () => Promise<Map<K, V>>
+): Promise<Map<K, V>> {
+  const hit = await peekCached<Array<[K, V]>>(key);
+  if (hit) return new Map(hit);
+  const pending = degradedMapInFlight.get(key);
+  if (pending) return new Map((await pending) as Array<[K, V]>);
+  const promise = (async () => {
+    const value = await load();
+    const entries = Array.from(value.entries());
+    await writeCached(key, entries, isDegraded(value) ? degradedTtlMs : ttlMs);
+    return entries;
+  })();
+  degradedMapInFlight.set(key, promise as Promise<Array<[unknown, unknown]>>);
+  try {
+    return new Map(await promise);
+  } finally {
+    degradedMapInFlight.delete(key);
+  }
+}
