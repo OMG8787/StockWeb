@@ -33,16 +33,35 @@ export const DEFAULT_INDICATOR_SETTINGS: ChartIndicatorSettings = {
 const STORAGE_KEY = "stockradar:chart-indicators";
 export const INDICATOR_SETTINGS_CHANGED_EVENT = "stockradar:chart-indicators-changed";
 
+// Cache the parsed settings keyed by the raw string, so repeated calls
+// return the same object reference when storage hasn't actually changed —
+// required for useSyncExternalStore (StockChart.tsx), which otherwise
+// treats a fresh object reference as a change on every render and can loop.
+// Same pattern as lib/watchlist.ts's getWatchlist().
+let cachedRaw: string | null = null;
+let cachedSettings: ChartIndicatorSettings = DEFAULT_INDICATOR_SETTINGS;
+
 export function getIndicatorSettings(): ChartIndicatorSettings {
   if (typeof window === "undefined") return DEFAULT_INDICATOR_SETTINGS;
+  let raw: string | null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_INDICATOR_SETTINGS;
-    const parsed = JSON.parse(raw);
-    return { ...DEFAULT_INDICATOR_SETTINGS, ...parsed };
+    raw = window.localStorage.getItem(STORAGE_KEY);
   } catch {
     return DEFAULT_INDICATOR_SETTINGS;
   }
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
+    if (!raw) {
+      cachedSettings = DEFAULT_INDICATOR_SETTINGS;
+    } else {
+      try {
+        cachedSettings = { ...DEFAULT_INDICATOR_SETTINGS, ...JSON.parse(raw) };
+      } catch {
+        cachedSettings = DEFAULT_INDICATOR_SETTINGS;
+      }
+    }
+  }
+  return cachedSettings;
 }
 
 export function setIndicatorSettings(settings: ChartIndicatorSettings) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   CandlestickSeries,
   ColorType,
@@ -25,6 +25,11 @@ import {
   type ChartIndicatorSettings,
 } from "@/lib/chartIndicatorSettings";
 import SignalTags from "./SignalTags";
+
+function subscribeToIndicatorSettings(callback: () => void) {
+  window.addEventListener(INDICATOR_SETTINGS_CHANGED_EVENT, callback);
+  return () => window.removeEventListener(INDICATOR_SETTINGS_CHANGED_EVENT, callback);
+}
 
 // Only used before the first client-side read of the CSS custom properties.
 const FALLBACK_PALETTE = {
@@ -117,7 +122,22 @@ export default function StockChart({
   const [candles, setCandles] = useState<Candle[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [indicators, setIndicators] = useState<ChartIndicatorSettings>(DEFAULT_INDICATOR_SETTINGS);
+  // useSyncExternalStore (not useState+useEffect+manual event listener):
+  // this value lives in localStorage, shared across every chart on the page
+  // and updated from outside React (the settings panel below, in principle
+  // another tab). getIndicatorSettings() is safe to call as the snapshot
+  // getter because it caches by the raw localStorage string and returns the
+  // same object reference when nothing changed — a fresh object on every
+  // call would make React think the store changed on every render and loop
+  // (see lib/watchlist.ts's getWatchlist() for the same pattern/footnote).
+  // getServerSnapshot always returns the same DEFAULT_INDICATOR_SETTINGS
+  // reference so server-rendered markup and the first client render agree
+  // before localStorage is ever read.
+  const indicators = useSyncExternalStore(
+    subscribeToIndicatorSettings,
+    getIndicatorSettings,
+    () => DEFAULT_INDICATOR_SETTINGS
+  );
   const [showSettings, setShowSettings] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -146,22 +166,13 @@ export default function StockChart({
     formatRef.current = { currency, market };
   }, [currency, market]);
 
-  // Global (not per-stock) setting: load once on mount, and keep in sync if
-  // it's changed from elsewhere (e.g. this same chart's own settings panel
-  // updates it, or in principle another tab). Deliberately loaded via an
-  // effect (not directly in useState's initializer) so server-rendered
-  // markup and the first client render agree before localStorage is read.
-  useEffect(() => {
-    setIndicators(getIndicatorSettings());
-    const onChange = () => setIndicators(getIndicatorSettings());
-    window.addEventListener(INDICATOR_SETTINGS_CHANGED_EVENT, onChange);
-    return () => window.removeEventListener(INDICATOR_SETTINGS_CHANGED_EVENT, onChange);
-  }, []);
-
   function toggleIndicator(key: keyof ChartIndicatorSettings) {
-    const next = { ...indicators, [key]: !indicators[key] };
-    setIndicators(next);
-    setIndicatorSettings(next);
+    // No local setState call needed: setIndicatorSettings() writes to
+    // localStorage and dispatches INDICATOR_SETTINGS_CHANGED_EVENT, which
+    // the useSyncExternalStore subscription above already reacts to — this
+    // chart (and any other chart on the page) re-renders with the new
+    // settings from that, the same as if the change came from another tab.
+    setIndicatorSettings({ ...indicators, [key]: !indicators[key] });
   }
 
   useEffect(() => {
@@ -174,6 +185,18 @@ export default function StockChart({
     // button didn't do anything" rather than "still loading." isLoading
     // drives a visible overlay for exactly that gap, on top of whichever
     // chart is still showing.
+    //
+    // This is a genuine "synchronize with an external system" effect (fetch
+    // a new chart on symbol/market/range change), not the "derive state
+    // from props" case the react-hooks/set-state-in-effect rule is meant to
+    // catch — there's no prop this isLoading flag could instead be computed
+    // from, it's tracking an in-flight network request that only this
+    // effect knows about. The other set-state-in-effect this file used to
+    // have (mirroring chartIndicatorSettings' localStorage) was a real
+    // instance of the rule's target case and got removed by switching that
+    // one to useSyncExternalStore instead; this one doesn't have an
+    // equivalent external-store refactor available.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     fetch(`/api/chart/${encodeURIComponent(symbol)}?range=${range}&market=${market}`)
       .then(async (res) => {
