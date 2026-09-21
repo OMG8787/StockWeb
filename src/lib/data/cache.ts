@@ -219,7 +219,17 @@ export async function peekCached<T>(key: string): Promise<T | undefined> {
   if (kvEnabled && redis) {
     try {
       const hit = await redis.get<CacheEnvelope>(key);
-      if (isEnvelope(hit) && hit.e > Date.now()) return hit.v as T;
+      if (isEnvelope(hit) && hit.e > Date.now()) {
+        // Backfilled into the in-memory copy for whatever TTL is actually
+        // left, exactly as runCached() already does on a Redis hit — without
+        // this, every caller of a peek-based cache pays a Redis round trip on
+        // *every* request instead of only after its TTL runs out. That was
+        // tolerable for the original peek callers (the whole-market universe,
+        // per-news-item summaries), but not once `/api/indices` started using
+        // this path (5 index keys × every homepage render and every poll).
+        writeMemory(key, hit.v, hit.e - Date.now());
+        return hit.v as T;
+      }
     } catch {
       // Redis unreachable; treat as a miss
     }

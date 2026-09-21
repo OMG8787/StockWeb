@@ -45,3 +45,45 @@ export async function cachedListWithDegradedEmptyTtl<T>(
     degradedEmptyInFlight.delete(key);
   }
 }
+
+/**
+ * 同一個概念的單值版本：抓到資料才給正常 TTL，抓不到（`null`）只給一個很短的
+ * 降級 TTL。
+ *
+ * 2026-09-21 為了修 `/api/indices` 間歇性漏掉台股加權指數（TAIEX）而加。原本
+ * `getIndices()` 是用 `cached()` 逐檔快取，抓失敗時 `catch` 回傳的 `null`
+ * **會被當成正常結果**寫進記憶體快取**跟共用的 Redis**，存活整個 TTL
+ * （台股盤中 60 秒、其餘 20 秒）。也就是說上游只要掉一次連線，全站每一位
+ * 訪客的首頁大盤卡片就會有最長 60 秒都顯示「大盤指數目前無法取得」，即使
+ * 上游下一秒就恢復了也一樣——這正是那個 bug 被觀察到的樣子（同一時間直接打
+ * 上游 t00 明明有資料）。
+ *
+ * 注意 `peekCached()` 對「沒有這個 key」回傳 `undefined`、對「這個 key 存的
+ * 就是 null」回傳 `null`，兩者可以區分，所以這裡用 `!== undefined` 判斷命中，
+ * 不能沿用上面陣列版的 `if (hit)`（`null` 是 falsy，會被誤判成 miss、讓降級
+ * 快取形同不存在）。
+ */
+const degradedNullInFlight = new Map<string, Promise<unknown>>();
+
+export async function cachedWithDegradedNullTtl<T>(
+  key: string,
+  ttlMs: number,
+  degradedTtlMs: number,
+  load: () => Promise<T | null>
+): Promise<T | null> {
+  const hit = await peekCached<T | null>(key);
+  if (hit !== undefined) return hit;
+  const pending = degradedNullInFlight.get(key);
+  if (pending) return (await pending) as T | null;
+  const promise = (async () => {
+    const value = await load();
+    await writeCached(key, value, value === null ? degradedTtlMs : ttlMs);
+    return value;
+  })();
+  degradedNullInFlight.set(key, promise);
+  try {
+    return (await promise) as T | null;
+  } finally {
+    degradedNullInFlight.delete(key);
+  }
+}

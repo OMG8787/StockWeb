@@ -3,7 +3,7 @@ import tls from "node:tls";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
-import { TW_INDUSTRY_NAMES } from "./twse";
+import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES } from "./twse";
 
 // TPEx (Taipei Exchange / 證券櫃檯買賣中心) public data endpoints for 上櫃
 // (OTC mainboard) stocks. Confirmed live during this module's construction —
@@ -390,22 +390,22 @@ export async function fetchTpexQuotesBatch(stockNos: string[]): Promise<Map<stri
   const map = new Map<string, Quote>();
   if (stockNos.length === 0) return map;
 
+  // 併發上限跟 TWSE 那邊共用同一個常數（同一台上游主機，理由見
+  // twse.ts 的 MIS_BATCH_CONCURRENCY 說明）。
   const chunks = chunk(stockNos, OTC_QUOTE_BATCH_CHUNK_SIZE);
-  const results = await Promise.all(
-    chunks.map(async (group) => {
-      const chExpr = group.map((s) => `otc_${s}.tw`).join("|");
-      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
-      try {
-        const res = await fetchWithTimeout(url, 6000, {
-          headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-        });
-        const data = (await res.json()) as { msgArray?: MisRow[] };
-        return data.msgArray ?? [];
-      } catch {
-        return [];
-      }
-    })
-  );
+  const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
+    const chExpr = group.map((s) => `otc_${s}.tw`).join("|");
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
+    try {
+      const res = await fetchWithTimeout(url, 6000, {
+        headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
+      });
+      const data = (await res.json()) as { msgArray?: MisRow[] };
+      return data.msgArray ?? [];
+    } catch {
+      return [];
+    }
+  });
   for (const row of results.flat()) {
     const quote = rowToOtcQuote(row);
     if (quote) map.set(row.c, quote);

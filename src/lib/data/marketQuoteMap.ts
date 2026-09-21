@@ -27,10 +27,15 @@ async function fetchMarketQuoteMap(market: Market): Promise<Map<string, Quote>> 
   if (market === "TW") {
     // Two separate exchanges behind one "TW" batch: each gets its own
     // request and its own try/catch so a TWSE or TPEx outage only costs
-    // that exchange's symbols, not the whole TW screen. TPEx's own batch
-    // fetch is always ONE whole-market request regardless of how many TPEx
-    // symbols are in `pool` (see tpex.ts's fetchTpexQuoteSnapshot) — unlike
-    // TWSE's, it isn't chunked/concurrency-sensitive at all.
+    // that exchange's symbols, not the whole TW screen.
+    //
+    // 注意這兩邊現在都打**同一台**上游主機（`mis.twse.com.tw`，TPEx 報價在
+    // 2026-09 從 end-of-day 的 tpex.org.tw 換過來之後就是如此——這段原本寫著
+    // 「TPEx 永遠只有一個整市場請求、跟併發無關」已經過時了），而且是並行的，
+    // 所以兩邊的分塊併發上限共用同一個常數 `MIS_BATCH_CONCURRENCY`（見
+    // twse.ts）。這一次全市場更新對該主機造成的同時連線數，正是
+    // `/api/indices` 間歇性漏掉 TAIEX 的根因之一，完整說明見
+    // marketIndices.ts 的 getIndices()。
     const twsePool = pool.filter((e) => e.exchange !== "TPEx").map((e) => e.symbol);
     const tpexPool = pool.filter((e) => e.exchange === "TPEx").map((e) => e.symbol);
     const [twseBatch, tpexBatch] = await Promise.all([

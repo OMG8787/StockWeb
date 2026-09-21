@@ -124,26 +124,48 @@ export async function fetchTwseQuote(stockNo: string): Promise<Quote> {
  */
 const QUOTE_BATCH_CHUNK_SIZE = 50;
 
+/**
+ * 同時最多幾塊在飛。原本是無上限的 `Promise.all(chunks.map(...))`，也就是一次
+ * 全市場報價更新就對 `mis.twse.com.tw` 開約 22 個同時連線；`tpex.ts` 的
+ * `fetchTpexQuotesBatch()` 打的是**同一台主機**、又同時開約 18 個
+ * （兩者在 `marketQuoteMap.ts` 裡是並行的），合計約 40 個。
+ *
+ * 2026-09-21 追查「`/api/indices` 間歇性獨缺 TAIEX」時實測確認：MIS 被併發量
+ * 惹到時不會回 429，而是靜默關掉連線（Node 端 `fetch failed / other side
+ * closed`）或直接卡到逾時，而且會把來源 IP 短暫封鎖數分鐘——夾在同一波併發裡
+ * 送出的單檔 t00 查詢因此常常是被丟掉的那一個。完整根因見
+ * `marketIndices.ts` 的 `getIndices()` 說明。
+ *
+ * 這個上限套用在**每一個呼叫端**，所以 TWSE+TPEx 同時跑時真正的天花板是
+ * 兩倍（16 個），不是 8 個——刻意用兩個獨立的 `mapWithConcurrency` 而不是一個
+ * 跨檔案的共用號誌，是為了不讓全市場批次把「使用者正在看的那一檔個股報價」
+ * 也一起排隊卡住。16 相對於原本的 40 已經是 2.5 倍的收斂，而分波送出對這個
+ * 端點的實測總耗時影響很小（每塊本來就是幾百毫秒等級）。
+ *
+ * 這也跟這個檔案裡 `MONTH_FETCH_CONCURRENCY`、以及 `cache.ts` 的
+ * `mapWithConcurrency()` 說明所寫的同一個原則一致：對單一上游無上限扇出，
+ * 正是會把整站連坐拖進限流的那種行為。
+ */
+export const MIS_BATCH_CONCURRENCY = 8;
+
 export async function fetchTwseQuotesBatch(stockNos: string[]): Promise<Map<string, Quote>> {
   const map = new Map<string, Quote>();
   if (stockNos.length === 0) return map;
 
   const chunks = chunk(stockNos, QUOTE_BATCH_CHUNK_SIZE);
-  const results = await Promise.all(
-    chunks.map(async (group) => {
-      const chExpr = group.map((s) => `tse_${s}.tw`).join("|");
-      const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
-      try {
-        const res = await fetchWithTimeout(url, 6000, {
-          headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-        });
-        const data = (await res.json()) as { msgArray?: MisRow[] };
-        return data.msgArray ?? [];
-      } catch {
-        return [];
-      }
-    })
-  );
+  const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
+    const chExpr = group.map((s) => `tse_${s}.tw`).join("|");
+    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
+    try {
+      const res = await fetchWithTimeout(url, 6000, {
+        headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
+      });
+      const data = (await res.json()) as { msgArray?: MisRow[] };
+      return data.msgArray ?? [];
+    } catch {
+      return [];
+    }
+  });
   for (const row of results.flat()) {
     const quote = rowToQuote(row);
     if (quote) map.set(row.c, quote);
