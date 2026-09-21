@@ -106,7 +106,7 @@ export const FINE_INDUSTRY_GROUPS: FineIndustryGroup[] = [
   { label: "零售通路", market: "TW", symbols: ["2912", "5903", "2903", "2915"] },
   { label: "觀光旅遊", market: "TW", symbols: ["2731", "2707", "2705", "5706"] },
   { label: "營建／資產", market: "TW", symbols: ["2542", "5522", "2597", "2504"] },
-  { label: "軟體／資訊服務", market: "TW", symbols: ["6214", "5203", "2471", "6183", "3029"] },
+  { label: "軟體／資訊服務", market: "TW", symbols: ["6214", "5203", "2471", "6183", "3029", "6811"] },
   { label: "遊戲／數位內容", market: "TW", symbols: ["3293", "6180", "5478"] },
 
   // ── 美股：官方 GICS 的 Technology 一格塞了晶片、設備、軟體、硬體，

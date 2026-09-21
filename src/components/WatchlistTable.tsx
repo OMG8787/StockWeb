@@ -444,6 +444,21 @@ function HoldingRow({
     });
   }
 
+  // 2026-09-21 Opus 規則二實測抓到的真實bug：填好持有股數/購買價格後，如果在
+  // 欄位還focus著的狀態下就按F5重新整理（沒有先點別的地方讓欄位blur），輸入的
+  // 購買價格會完全不見——因為原本唯一的寫入時機是 onBlur，使用者打完字但還沒
+  // blur 就離開頁面，這次輸入就從沒真正寫進 localStorage 過。這跟這個元件自己
+  // 註解宣稱的「編輯直接寫進localStorage、沒有另外的儲存步驟」設計本身矛盾——
+  // 打完字之後應該很快就自動存檔，不該要靠使用者剛好做了「跳到下一格」這個
+  // 動作才存到。改成打完字停下來一小段時間後自動存檔（debounce，不是每個按鍵
+  // 都存，避免每敲一下就寫一次localStorage並觸發全清單重繪），onBlur 繼續保留
+  // 當作「立刻跳到下一格」時的即時儲存，兩者互不衝突。
+  useEffect(() => {
+    const timer = setTimeout(commit, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- commit 是純粹讀 shares/costBasis 算出結果再呼叫 updateHolding，這兩個已經是效果真正的依賴
+  }, [shares, costBasis]);
+
   const sharesNum = Number(shares);
   const costNum = Number(costBasis);
   const hasHoldingInput = shares.trim() !== "" && costBasis.trim() !== "" && Number.isFinite(sharesNum) && Number.isFinite(costNum);

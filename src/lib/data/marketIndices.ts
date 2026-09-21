@@ -1,4 +1,3 @@
-import { cached } from "./cache";
 import { cachedWithDegradedNullTtl } from "./degradedCache";
 import type { IndexQuote, Market, TaifexFuturesQuote } from "./types";
 import { fetchTwseQuote } from "./twse";
@@ -157,15 +156,35 @@ export async function getIndices(): Promise<IndexQuote[]> {
  * 台指期（TX，大台指）夜盤近月合約報價——見 lib/data/taifex.ts 開頭的完整資料源
  * 研究說明。跟 getIndices() 分開一個函式（而不是塞進 INDEX_DEFS），是因為這個
  * 資料需要額外的 status/asOf 欄位才能誠實呈現「交易中」跟「已收盤」的差異，
- * IndexQuote 型別沒有這兩個欄位。快取沿用跟其他即時報價一樣的 QUOTE_TTL_MS，
- * 抓不到（含近月合約還沒開出成交價）一律回傳 null，不用參考價頂替。
+ * IndexQuote 型別沒有這兩個欄位。
+ *
+ * 2026-09-21：Opus 規則二實測抓到跟 getIndices() 一模一樣的雷——原本用 `cached()`
+ * 把抓取失敗的 `null` 當成正常結果快取整個 `QUOTE_TTL_MS`，於是台指期夜盤卡片
+ * 曾經連續 5 次載入（跨約15分鐘）都顯示「資料暫缺」，即使上游早就恢復也要等
+ * 滿 TTL 才會重試。改成跟 getIndices() 同一套：抓取失敗先重試一次，失敗的
+ * null 只快取 `INDEX_DEGRADED_TTL_MS`（3秒），並留下失敗訊息方便下次再發生時
+ * 直接從 log 判斷原因，不用像這次一樣只能反覆間接量測猜測。
  */
 export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null> {
-  return cached<TaifexFuturesQuote | null>("taifex:tx-night", QUOTE_TTL_MS, async () => {
-    try {
-      return await fetchTaifexNightFutures();
-    } catch {
-      return null;
+  return cachedWithDegradedNullTtl<TaifexFuturesQuote>(
+    "taifex:tx-night",
+    QUOTE_TTL_MS,
+    INDEX_DEGRADED_TTL_MS,
+    async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await fetchTaifexNightFutures();
+        } catch (err) {
+          if (attempt >= INDEX_FETCH_RETRIES) {
+            console.warn(
+              `[taifex-night] 連續 ${attempt + 1} 次抓取失敗，這次回應為資料暫缺：`,
+              err instanceof Error ? err.message : err
+            );
+            return null;
+          }
+          await sleep(INDEX_RETRY_DELAY_MS);
+        }
+      }
     }
-  });
+  );
 }
