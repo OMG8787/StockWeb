@@ -26,11 +26,27 @@ function sma(values: number[], period: number): (number | null)[] {
   return result;
 }
 
-function ema(values: number[], period: number): number[] {
+/**
+ * 指數移動平均——**必須跟 lib/signals.ts 的 `ema()` 完全同一套算法**，
+ * 否則圖上的 MACD 副圖會跟技術訊號標籤講不同的話。種子用前 `period` 根的
+ * 簡單移動平均（教科書標準做法），前 `period − 1` 根回 `null`；輸入開頭
+ * 帶 `null`（MACD 訊號線的情形）也支援。詳細理由見 signals.ts 的註解。
+ */
+function ema(values: (number | null)[], period: number): (number | null)[] {
   const k = 2 / (period + 1);
-  const result: number[] = [values[0]];
-  for (let i = 1; i < values.length; i++) {
-    result.push(values[i] * k + result[i - 1] * (1 - k));
+  const result: (number | null)[] = new Array(values.length).fill(null);
+  let start = 0;
+  while (start < values.length && values[start] == null) start++;
+  if (values.length - start < period) return result;
+  let sum = 0;
+  for (let i = start; i < start + period; i++) sum += values[i] as number;
+  let prev = sum / period;
+  result[start + period - 1] = prev;
+  for (let i = start + period; i < values.length; i++) {
+    const v = values[i];
+    if (v == null) break;
+    prev = v * k + prev * (1 - k);
+    result[i] = prev;
   }
   return result;
 }
@@ -99,29 +115,34 @@ export interface MacdSeries {
 }
 
 /** EMA12 − EMA26, its EMA9 signal line, and their difference as a histogram
- *  — same parameters as lib/signals.ts's computeMacdCross. EMA warm-up means
- *  the first ~26 bars are numerically noisy (not enough history for EMA26
- *  to have converged); trimmed to start at the same MIN_BARS threshold
- *  signals.ts uses before treating the signal line as meaningful. */
+ *  — same parameters as lib/signals.ts's computeMacdCross. EMA 用 SMA 種子
+ *  之後，訊號線最早要到第 34 根才有有效值；這裡仍沿用 signals.ts 的
+ *  MIN_BARS 門檻當作「資料夠不夠」的判斷，並且只畫真的有值的點。 */
 export function computeMacdSeries(candles: Candle[]): MacdSeries {
   const MIN_BARS = 50;
   if (candles.length < MIN_BARS) return { macd: [], signal: [], histogram: [] };
   const closes = candles.map((c) => c.close);
   const ema12 = ema(closes, 12);
   const ema26 = ema(closes, 26);
-  const macdLine = ema12.map((v, i) => v - ema26[i]);
+  const macdLine = closes.map((_, i) => {
+    const fast = ema12[i];
+    const slow = ema26[i];
+    return fast == null || slow == null ? null : fast - slow;
+  });
   const signalLine = ema(macdLine, 9);
   const macd: IndicatorPoint[] = [];
   const signal: IndicatorPoint[] = [];
   const histogram: IndicatorPoint[] = [];
-  // Skip the same warm-up window signals.ts implicitly relies on being past
-  // (MIN_BARS) so the plotted line doesn't open with visibly-wrong EMA
-  // warm-up noise before that point.
+  // 維持原本從 MIN_BARS 之後才開始畫的行為（跟 signals.ts 判讀交叉的
+  // 資料範圍一致），並額外跳過沒有有效值的點。
   for (let i = MIN_BARS - 1; i < candles.length; i++) {
+    const m = macdLine[i];
+    const s = signalLine[i];
+    if (m == null || s == null) continue;
     const time = candles[i].time;
-    macd.push({ time, value: macdLine[i] });
-    signal.push({ time, value: signalLine[i] });
-    histogram.push({ time, value: macdLine[i] - signalLine[i] });
+    macd.push({ time, value: m });
+    signal.push({ time, value: s });
+    histogram.push({ time, value: m - s });
   }
   return { macd, signal, histogram };
 }
