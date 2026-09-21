@@ -13,6 +13,7 @@ import {
   searchStocks,
   type ChipsRankingItem,
   type MomentumItem,
+  type ValueScreen,
 } from "@/lib/data";
 import type { Chips, Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
 import type { Signal } from "@/lib/signals";
@@ -41,11 +42,21 @@ const MOMENTUM_LIMIT = 8;
 const GAINER_CANDIDATE_LIMIT = 6;
 const CHIP_CANDIDATE_LIMIT = 6;
 const TRUST_CANDIDATE_LIMIT = 4;
+// 2026-09-21 使用者反映今日建議/AI問答推薦的幾乎全是當天漲停/大漲的標的，感覺
+// 只看動能、不是真的整合各方資訊——查證後確認候選名單原本只有「技術訊號共振
+// （本身也偏動能，見 momentum.ts 同日修正）／今日漲幅榜／法人籌碼」三種來源，
+// 全部都跟「今天的價格表現」掛勾，本益比/殖利率/股價淨值比這些「基本面便宜但
+// 今天沒有大漲」的股票，就算資料裡有算（見 getValueScreen），也從來沒有機會被
+// 納入候選名單、更不可能出現在「已篩過的結果」裡——不是 AI 選擇忽略，是候選池
+// 從一開始就沒放進去。新增這三份估值排行當作候選來源，跟其他來源一樣要通過
+// 下面的「面向支持數」門檻才會被列進合格名單，不是「便宜就直接推薦」。
+const VALUE_CANDIDATE_LIMIT = 4;
 // 體檢表的總長度上限。每一檔的四個面向全部來自「整個市場一次抓回來再查表」的既有快取
 // （fundamentals:TW:all、chips:TW:institutional、earnings:TW:revenue、
 // announcements:TW:all），所以多一檔幾乎不花額外的網路成本，真正的限制是 prompt 長度
-// 跟 AI 一次能認真讀完的資訊量。
-const CANDIDATE_LIMIT = 16;
+// 跟 AI 一次能認真讀完的資訊量。從16調高到22，讓新增的估值類候選來源有實際空間，
+// 不會被動能類來源早早佔滿名額（見 buildCandidates 裡的加入順序）。
+const CANDIDATE_LIMIT = 22;
 // 流動性下限，跟 getValueScreen 的 VALUE_SCREEN_MIN_TURNOVER_TWD 同一個理由：漲幅榜
 // 前幾名常常被「一天只成交幾萬元的殭屍股」佔滿，那種股票就算列出來也買不到、賣不掉，
 // 拿來當建議或反例都沒有意義。
@@ -238,7 +249,8 @@ async function buildCandidates(
   twMomentum: MomentumItem[],
   gainers: Array<{ symbol: string; name: string; price: number; changePercent: number }>,
   chipsRanking: { foreignBuy: ChipsRankingItem[]; institutionalBuy: ChipsRankingItem[]; trustBuy: ChipsRankingItem[] },
-  newsFeed: NewsFeed
+  newsFeed: NewsFeed,
+  valueScreen: ValueScreen
 ): Promise<ScoredCandidate[]> {
   const base = new Map<string, Candidate>();
   const add = (
@@ -269,6 +281,13 @@ async function buildCandidates(
   };
 
   twMomentum.slice(0, MOMENTUM_LIMIT).forEach((m) => add(m, "技術訊號共振清單", m.signals));
+  // 估值類來源刻意排在漲幅榜/籌碼之前加入：base.size 到達 CANDIDATE_LIMIT 後，
+  // 後面才呼叫的 add() 對新股票會被靜默捨棄（見上面 add() 的實作），所以先加入
+  // 才能確保這些「今天沒有大漲、但基本面便宜」的股票真的有機會佔到候選名額，
+  // 不會每次都被動能類來源先佔滿。
+  valueScreen.lowPe.slice(0, VALUE_CANDIDATE_LIMIT).forEach((s, i) => add(s, `低本益比排行第${i + 1}名`));
+  valueScreen.highYield.slice(0, VALUE_CANDIDATE_LIMIT).forEach((s, i) => add(s, `高殖利率排行第${i + 1}名`));
+  valueScreen.lowPb.slice(0, VALUE_CANDIDATE_LIMIT).forEach((s, i) => add(s, `低股價淨值比排行第${i + 1}名`));
   gainers.slice(0, GAINER_CANDIDATE_LIMIT).forEach((g, i) => add(g, `今日漲幅榜第${i + 1}名`));
   chipsRanking.foreignBuy.slice(0, CHIP_CANDIDATE_LIMIT).forEach((s, i) => add(s, `外資買超榜第${i + 1}名`));
   chipsRanking.institutionalBuy.slice(0, CHIP_CANDIDATE_LIMIT).forEach((s, i) => add(s, `三大法人買超榜第${i + 1}名`));
@@ -360,7 +379,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
   const usTargets = usMomentum.slice(0, US_ENRICH_LIMIT);
   const usExtras = new Map<string, { fundamentals: Fundamentals | null; earnings: Earnings | null }>();
   const [candidates] = await Promise.all([
-    buildCandidates(twMomentum, liquidGainers, chipsRanking, newsFeed),
+    buildCandidates(twMomentum, liquidGainers, chipsRanking, newsFeed, valueScreen),
     Promise.all(
       usTargets.map(async (s) => {
         const [fundamentals, earnings] = await Promise.all([
