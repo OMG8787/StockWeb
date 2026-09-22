@@ -1,5 +1,6 @@
 import { cached } from "@/lib/data/cache";
-import { describeTaifexNightFutures, getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips } from "@/lib/data";
+import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips } from "@/lib/data";
+import { buildMarketOverviewText } from "./marketOverview";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
@@ -90,10 +91,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       `【市場狀態】台股目前${marketStatusLabel(twStatus)}；美股目前${marketStatusLabel(usStatus)}（美股與台股交易時段不重疊，寫美股段落時以美股自己的狀態為準，不要套用台股的狀態）`,
       "",
       "【大盤概況（台股＋美股）】",
-      indices.length > 0
-        ? indices.map((i) => `${i.name}：${i.price}（${i.change >= 0 ? "+" : ""}${i.changePercent}%）`).join("\n")
-        : "（大盤指數目前無法取得）",
-      describeTaifexNightFutures(taifexFutures),
+      buildMarketOverviewText(indices, taifexFutures),
       "",
       "【台股漲幅前8】", listStocks(twGainers.slice(0, 8)),
       "【台股跌幅前8】", listStocks(twLosers.slice(0, 8)),

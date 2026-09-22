@@ -500,7 +500,34 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 3. `/api/cron/warm-cache`裡有4項（`searchStocks`TW/US、`getMultiSignalStocks`TW/US、
    `getIndices()`）沒有包這支路由自己宣稱的`warm()`錯誤隔離機制，任一項拋錯會讓整個
    `Promise.all`直接中止、回應退化成籠統的503——補上跟其他項目一致的包法。
-`tsc`/`eslint`/`build`皆通過。AI層/元件那份的發現詳見下一則工作日誌。
+`tsc`/`eslint`/`build`皆通過。
+
+**AI層/元件那份的發現，已修復的部分**：
+1. 「【大盤概況（台股＋美股）】」內文組裝邏輯原本在`ask.ts`/`actionBrief.ts`/`brief.ts`
+   三處各自重複一份幾乎相同的程式碼，抽成共用函式`buildMarketOverviewText()`
+   （新檔`lib/ai/marketOverview.ts`），三處改成呼叫它。
+2. `SiteHeader.tsx`桌機版／手機版導覽列原本各自硬寫一次完全相同的5個項目，改成
+   共用陣列`NAV_ITEMS`搭配`.map()`渲染，兩處只差className。
+
+**看過但判斷不值得處理／風險大於效益，故意不動的部分**：
+- `indicators.ts`的`describeTechState`/`describeIndicatorState`/`describeHoldingTechnical`
+  三個函式各自重複組裝MACD/KD交叉描述——三處輸出格式跟詳細程度是真的不一樣（帶不帶
+  KD區間位置、帶不帶K/D精確值），硬合併容易在參數化過程中不小心改動某處原本的措辭，
+  對AI回答品質的風險大於重複程式碼本身的維護成本；改成在三個函式加上「必須同步更新」
+  的提醒註解，比照本站對`signals.ts`/`indicators.ts`的`ema()`已經採用的處理方式。
+- `SearchClient.tsx`的`SectorMultiSelect`/`VolumeTrendMultiSelect`結構相似，但左右
+  對齊方式不同是先前真的修過的排版bug（`left-0`避免192px選單超出視窗），只有2個
+  呼叫端，強行合併成通用元件風險大於效益，維持現狀。
+- `actionBrief.ts`（570行，職責混雜）、`ChatWidget.tsx`（518行，語音輸入邏輯可抽成
+  獨立hook）、`StockChart.tsx`（新增一個技術指標要同步改5處，可考慮表格驅動）、
+  6個元件各自手刻「一次性fetch」樣板（可抽共用hook）——這幾項是較大範圍的重構，
+  效益存在但需要更完整的回歸測試才能安心動手，這次先不做，留在這裡供之後評估。
+- 巡查時額外發現`SiteHeader.tsx`有一個既存（跟這次改動無關）的
+  `react-hooks/set-state-in-effect` lint錯誤（搜尋建議框的debounce effect），
+  `npm run build`本身不受影響（linter設定沒有把它當成build失敗條件），但獨立跑
+  `eslint`會報錯——記錄在這裡，之後有空可以處理，不算這次地毯式檢查的必修項目。
+
+`tsc`/`build`皆通過（上述SiteHeader.tsx既有lint錯誤跟這次改動的3個檔案無關）。
 
 ### 2026-09-22：AI問答面板捲動位置修正
 

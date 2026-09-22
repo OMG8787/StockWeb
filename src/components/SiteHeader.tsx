@@ -13,6 +13,17 @@ interface SymbolSuggestion {
   exchange?: "TWSE" | "TPEx";
 }
 
+/** 桌機／手機兩份導覽列原本各自硬寫一次完全一樣的5個項目，只有className不同——
+ *  2026-09-22 地毯式審計發現這是「同一份清單兩處各寫一次」的例子，改成共用陣列
+ *  搭配.map()渲染，新增/修改一個導覽項目只要改這裡一處，不會漏改其中一個裝置版本。 */
+const NAV_ITEMS: Array<{ href: string; label: string }> = [
+  { href: "/", label: "首頁" },
+  { href: "/action", label: "今日建議" },
+  { href: "/highlights", label: "每日焦點" },
+  { href: "/news", label: "重大新聞" },
+  { href: "/search", label: "搜尋 / 篩選" },
+];
+
 /** 使用者看得懂的市場別標籤（內部的 exchange 欄位不直接曝光）。 */
 function marketLabel(item: SymbolSuggestion): string {
   if (item.market === "US") return "美股";
@@ -197,21 +208,15 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
         </Link>
 
         <nav className="hidden sm:flex items-center gap-1 text-sm">
-          <Link href="/" className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)">
-            首頁
-          </Link>
-          <Link href="/action" className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)">
-            今日建議
-          </Link>
-          <Link href="/highlights" className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)">
-            每日焦點
-          </Link>
-          <Link href="/news" className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)">
-            重大新聞
-          </Link>
-          <Link href="/search" className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)">
-            搜尋 / 篩選
-          </Link>
+          {NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)"
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
 
         <div ref={boxRef} className="relative ml-auto flex-1 max-w-sm">
@@ -279,21 +284,15 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
           is a familiar enough mobile pattern and avoids a bigger layout
           rework for what's still a short list. */}
       <nav className="flex sm:hidden items-center gap-1 overflow-x-auto px-4 pb-2 text-sm">
-        <Link href="/" className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)">
-          首頁
-        </Link>
-        <Link href="/action" className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)">
-          今日建議
-        </Link>
-        <Link href="/highlights" className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)">
-          每日焦點
-        </Link>
-        <Link href="/news" className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)">
-          重大新聞
-        </Link>
-        <Link href="/search" className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)">
-          搜尋 / 篩選
-        </Link>
+        {NAV_ITEMS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)"
+          >
+            {item.label}
+          </Link>
+        ))}
       </nav>
     </header>
   );

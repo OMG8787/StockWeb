@@ -6,6 +6,14 @@ import { computeIndicatorState, computeSignals } from "@/lib/signals";
 // （K/D 幾點、RSI 幾點、MACD 在 0 軸哪一側），而不是只寫有沒有訊號——這樣
 // AI 才有辦法回答「KD 剛交叉但還在低檔」「RSI 還沒過熱」這種帶數值條件的
 // 追問，也讓它引用的每個數字都有出處、不需要自己編。
+// 2026-09-22 地毯式審計提醒：這個檔案裡 describeTechState()／describeIndicatorState()／
+// describeHoldingTechnical() 三個函式各自重複組裝一次「MACD/KD 交叉狀態 → 中文描述」的
+// if/else，沒有抽成共用函式——刻意保留分開，不是忘記合併：三處的輸出格式跟詳細程度
+// 真的不一樣（describeTechState 帶KD區間位置、describeIndicatorState 不帶但列K/D精確值、
+// describeHoldingTechnical 更精簡），硬合併成一個共用函式容易在參數化的過程中不小心
+// 改動某一處原本的措辭，對AI回答品質的風險大於重複程式碼本身的維護成本。**新增交叉
+// 狀態種類或調整任一處措辭時，記得檢查這三個函式是不是都需要同步更新**，避免同一檔
+// 股票在不同區塊出現不一致的說法。
 export function describeTechState(item: TechScreenItem): string {
   const s = item.state;
   const parts: string[] = [];

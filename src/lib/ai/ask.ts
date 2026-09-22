@@ -1,4 +1,5 @@
-import { describeTaifexNightFutures, findInUniverse, getIndices, getTaifexNightFutures } from "@/lib/data";
+import { findInUniverse, getIndices, getTaifexNightFutures } from "@/lib/data";
+import { buildMarketOverviewText } from "./marketOverview";
 import type { Market } from "@/lib/data";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { callAiProviders } from "@/lib/ai/provider";
@@ -139,15 +140,7 @@ export async function answerQuestion(
     await Promise.all([
       Promise.all(targets.map((t) => buildStockGrounding(t))),
       Promise.all([getIndices(), getTaifexNightFutures().catch(() => null)])
-        .then(([indices, taifexFutures]) => {
-          const indexLines =
-            indices.length === 0
-              ? "（大盤指數目前無法取得）"
-              : indices.map((i) => `${i.name}：${i.price}（${i.change >= 0 ? "+" : ""}${i.changePercent}%）`).join("\n");
-          // 台指期夜盤跟前面的加權指數/道瓊等現貨指數不同，是「盤後衍生性商品」，
-          // 一定要附帶交易中/已收盤狀態跟資料時間，不能讓 AI 誤把它講成即時現貨指數。
-          return `${indexLines}\n${describeTaifexNightFutures(taifexFutures)}`;
-        })
+        .then(([indices, taifexFutures]) => buildMarketOverviewText(indices, taifexFutures))
         .catch(() => ""),
       wantsMovers ? buildMoversGrounding() : Promise.resolve(""),
       wantsTechScreen ? buildTechScreenGrounding().catch(() => "") : Promise.resolve(""),

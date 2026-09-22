@@ -1,6 +1,6 @@
 import { cached } from "@/lib/data/cache";
+import { buildMarketOverviewText } from "./marketOverview";
 import {
-  describeTaifexNightFutures,
   getChips,
   getChipsRanking,
   getEarnings,
@@ -402,10 +402,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
 
   const text = [
     "【大盤概況（台股＋美股）】",
-    indices.length > 0
-      ? indices.map((i) => `${i.name}：${i.price}（${i.change >= 0 ? "+" : ""}${i.changePercent}%）`).join("\n")
-      : "（大盤指數目前無法取得）",
-    describeTaifexNightFutures(taifexFutures),
+    buildMarketOverviewText(indices, taifexFutures),
     "",
     "【今日台股候選股「多面向體檢表」——這是你做買進判斷的主要依據】",
     "候選來源刻意混合四種挑法：技術訊號共振清單、今日漲幅榜、三大法人買超榜、投信買超榜，所以這份名單裡同時有「多面向都到位的標的」跟「只有單一面向亮眼、其他面向沒跟上的假訊號」，請自己分辨，不要因為某檔出現在名單上就當成推薦。",
