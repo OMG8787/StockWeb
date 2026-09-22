@@ -77,7 +77,7 @@ const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: H
 /** 本站自行整理的細分產業分類說明，排序按鈕/選單都掛同一段提示，避免使用者
  *  誤以為這是交易所的官方產業別（見 lib/fineIndustry.ts 開頭的完整說明）。 */
 const FINE_INDUSTRY_HINT =
-  "把實際做的內容相近的股票排在一起（例如載板、矽光子/CPO、散熱、被動元件），比官方的「半導體業」「光電業」更細。此分類為本站整理、盡力而為，非官方權威分類，也沒有涵蓋全部股票（對不到的會排在最後）。";
+  "把實際做的內容相近的股票排在一起（例如載板、矽光子/CPO、散熱、被動元件），比官方的「半導體業」「光電業」更細。此分類為本站整理、盡力而為，非官方權威分類，也沒有涵蓋全部股票——沒收錄到的股票會改顯示交易所官方的產業別（排序時排在最後）。";
 
 function sortForField(items: HoldingItem[], field: HeldSortField, dir: "asc" | "desc"): HoldingItem[] {
   if (field === "fineIndustry") return sortByFineIndustry(items);

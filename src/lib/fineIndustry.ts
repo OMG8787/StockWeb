@@ -167,11 +167,28 @@ const OTHER_RANK = Number.MAX_SAFE_INTEGER;
 export interface FineIndustrySortable {
   symbol: string;
   market: Market;
+  /** 交易所/資料源自己的官方產業別（例如「半導體業」「光電業」）。用來在這檔股票
+   *  沒有被下面手動整理的細分族群收錄時，當一個「至少是真實分類」的退路——見
+   *  fineIndustryOf() 的說明，不能沒有這個欄位就直接顯示「其他」。 */
+  sector: string;
 }
 
-/** 這檔股票的細分族群名稱；對不到就是「其他」。 */
+/**
+ * 這檔股票的細分族群名稱。
+ *
+ * 2026-09-22 使用者反映：關注清單裡很多檔都顯示「其他」，要求要「明確標示細部是
+ * 做什麼產業」。根因是這份細分表本來就刻意「只收關注清單裡實際比較可能出現的
+ * 主流公司」（見檔案開頭說明），逐一手動擴充到涵蓋全台股近2000檔不切實際、也
+ * 永遠會有漏網之魚。真正該修的不是硬擠更多股票進手動表，而是**退路不該是一個
+ * 完全沒有資訊量的「其他」**——沒被這份表收錄的股票，退回顯示它在交易所自己
+ * 資料裡真實的官方產業別（`sector`，例如「半導體業」「光電業」），這永遠存在
+ * 且永遠是真的，只是顆粒度比手動整理的細分類粗一些，但比「其他」有意義得多。
+ * 只有連官方產業別都是空字串（資料源本身缺這欄）才會真的顯示「其他」。
+ */
 export function fineIndustryOf(item: FineIndustrySortable): string {
-  return INDEX.get(`${item.market}:${item.symbol.toUpperCase()}`)?.label ?? OTHER_FINE_INDUSTRY;
+  const curated = INDEX.get(`${item.market}:${item.symbol.toUpperCase()}`)?.label;
+  if (curated) return curated;
+  return item.sector.trim() || OTHER_FINE_INDUSTRY;
 }
 
 function rankOf(item: FineIndustrySortable): number {
