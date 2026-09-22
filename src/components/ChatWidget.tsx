@@ -77,6 +77,10 @@ export default function ChatWidget() {
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // 指向「目前這一輪對話裡，使用者剛送出的那則問題」的DOM節點——見下面那個
+  // scroll useEffect：問完問題後要把畫面捲到「使用者的問題在最上面」，不是
+  // 捲到最下面，讓人可以直接往下看AI的完整回答，不用先看到答案最後一段。
+  const lastUserMessageRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // 使用者按下🎤開始講話「當下」輸入框裡已經有的文字（例如自己先打一半、或從個股頁
@@ -105,8 +109,20 @@ export default function ChatWidget() {
     return () => window.removeEventListener(ASK_ABOUT_EVENT, handleAskAbout);
   }, []);
 
+  // 使用者反映：問完問題、AI回覆出現時，畫面會自動捲到最下面（等於先看到答案的
+  // 結尾），應該要捲到「使用者剛剛問的那句話」在最上面，方便從頭往下讀完整答案。
+  //
+  // 故意在兩個時機都呼叫（不是只呼叫一次）：①送出問題當下（此時答案還沒回來，
+  // 讓使用者不用乾等，馬上看到自己的問題被捲上去）；②loading 結束、答案已經
+  // 接在問題後面渲染出來的那一刻。只呼叫①的話，實測會卡在一個尷尬的中間位置——
+  // ①發生時對話內容還很短（答案還沒出現），瀏覽器把問題捲到最上面時已經頂到
+  // 「目前可捲動範圍」的上限，等答案接著長出來、可捲動範圍變大了，捲動位置卻
+  // 不會自動跟著往下修正，問題就懸在畫面中間而不是最上緣。②再呼叫一次
+  // scrollIntoView，這時答案的完整高度都已經算進可捲動範圍，才能真正把問題
+  // 貼齊到最上面。ref 指向「目前這串訊息裡最後一則使用者訊息」，不論當下最後一則
+  // 是使用者本人的問題、還是緊接著的AI回答，都會是同一個節點，兩次呼叫互不衝突。
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    lastUserMessageRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
   }, [messages, loading]);
 
   // 輸入框改成 textarea 後要隨內容自動增高，設上限高度、超過就內部捲動。這個 effect
@@ -298,18 +314,35 @@ export default function ChatWidget() {
     }
   }
 
+  // 「最後一則使用者訊息」的索引，不論當下是使用者剛送出問題（最後一則本身就是它）
+  // 還是AI已經接著回完話（它變成倒數第二則）——見上面那個捲動 useEffect 為什麼要
+  // 認的是同一個節點。
+  let lastUserIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      lastUserIndex = i;
+      break;
+    }
+  }
+
   return (
     <div className="fixed bottom-4 right-4 z-50">
-      {open && (
-        // Fixed px, not rem: this box's own size is deliberately independent
-        // of the site-wide root font-size (globals.css) — sizing it in rem
-        // meant a global text-size increase silently grew this floating
-        // panel too (448px -> 504px tall), which could push it past the top
-        // of a modest browser window since it's anchored to the bottom
-        // (fixed bottom-4 right-4) with nothing to shrink it back down,
-        // showing as the widget being cut off / not fully visible. A
-        // max-height safety clamp on top of the fixed size means this can't
-        // recur even if the root font-size changes again later.
+      {/* 使用者反映：關閉面板（按✕）再重新打開，畫面會跳回去而不是留在關閉前看到的
+          位置。原本這裡是 `{open && (...)}`，關閉時整個面板連同裡面的scrollRef DOM
+          節點一起被卸載，捲動位置當然保不住；重新打開等於從零生一個全新節點，捲動
+          位置永遠是0。改成一直保留這個節點，只用 `hidden` 切換顯示/隱藏（不是卸載/
+          重新掛載），瀏覽器原生就會記住隱藏前的捲動位置，重新顯示時完全不用自己
+          額外處理。 */}
+      <div className={open ? "" : "hidden"}>
+        {/* Fixed px, not rem: this box's own size is deliberately independent
+            of the site-wide root font-size (globals.css) — sizing it in rem
+            meant a global text-size increase silently grew this floating
+            panel too (448px -> 504px tall), which could push it past the top
+            of a modest browser window since it's anchored to the bottom
+            (fixed bottom-4 right-4) with nothing to shrink it back down,
+            showing as the widget being cut off / not fully visible. A
+            max-height safety clamp on top of the fixed size means this can't
+            recur even if the root font-size changes again later. */}
         <div className="mb-3 flex h-[448px] max-h-[calc(100vh-6rem)] w-[352px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-(--gridline) bg-(--surface-1) shadow-xl">
           <div className="flex items-center justify-between border-b border-(--gridline) px-4 py-3">
             <div>
@@ -380,7 +413,11 @@ export default function ChatWidget() {
               </div>
             )}
             {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                key={i}
+                ref={i === lastUserIndex ? lastUserMessageRef : undefined}
+                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+              >
                 <div
                   className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                     m.role === "user" ? "bg-(--accent) text-white" : "bg-(--page-plane) text-(--text-primary)"
@@ -460,7 +497,7 @@ export default function ChatWidget() {
             <p className="mt-1 text-[11px] text-(--text-muted)">按 Enter 傳送，Shift+Enter 換行</p>
           </div>
         </div>
-      )}
+      </div>
 
       <button
         onClick={() => setOpen((o) => !o)}
