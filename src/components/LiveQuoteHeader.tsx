@@ -76,8 +76,17 @@ export default function LiveQuoteHeader({ initialQuote }: { initialQuote: Quote 
           ，漲跌是拿最近成交價跟「前日均價」比出來的，而且
           <span className="font-semibold">沒有漲跌幅上下限</span>
           ，一天漲跌好幾成都可能發生，成交量通常也很少。
-          {quote.priceNote && <span className="mt-1 block">※ {quote.priceNote}。</span>}
         </p>
+      )}
+
+      {/* priceNote 之前寫在上面 emerging 專屬區塊裡面，導致上市/上櫃股票
+          （twse.ts/tpex.ts 在成交量 0 時附的中價估算揭露）永遠顯示不出來——
+          quote.board 對這兩種股票根本不是 "emerging"，整段條件式直接跳過。
+          Playwright 實測抓到：3632 研勤的 API 回應確實有 priceNote，但畫面
+          上完全看不到任何說明文字。改成獨立區塊、不綁 board，任何市場的
+          priceNote 都能顯示。 */}
+      {quote.priceNote && (
+        <p className="mt-2 text-xs text-(--text-secondary)">※ {quote.priceNote}。</p>
       )}
 
       <dl className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
