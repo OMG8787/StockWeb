@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { SearchItem } from "@/lib/data";
 import { formatPercent, formatPrice, formatTurnover, formatVolume, priceDirectionClass } from "@/lib/format";
+import { FINE_INDUSTRY_HINT, fineIndustryOf } from "@/lib/fineIndustry";
 import WatchlistButton from "./WatchlistButton";
 
 export default function StockTable({ items, emptyLabel }: { items: SearchItem[]; emptyLabel?: string }) {
@@ -15,7 +16,9 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
           <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
             <th className="w-8" />
             <th className="py-2 pr-4 font-medium">代碼 / 名稱</th>
-            <th className="py-2 pr-4 font-medium">產業</th>
+            <th className="py-2 pr-4 font-medium" title={FINE_INDUSTRY_HINT}>
+              產業
+            </th>
             <th className="py-2 pr-4 font-medium text-right">股價</th>
             <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
             <th className="py-2 pr-4 font-medium text-right">成交量</th>
@@ -37,7 +40,7 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
                   {item.market === "TW" ? "台股" : "美股"}
                 </span>
               </td>
-              <td className="py-2.5 pr-4 text-(--text-secondary)">{item.sector}</td>
+              <td className="py-2.5 pr-4 text-(--text-secondary)">{fineIndustryOf(item)}</td>
               <td className="py-2.5 pr-4 text-right tabular-nums">
                 {formatPrice(item.price, item.market === "TW" ? "TWD" : "USD")}
               </td>

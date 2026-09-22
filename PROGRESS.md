@@ -399,6 +399,19 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 光罩2338→半導體業、順德2351→半導體業、信驊5274→半導體業、雍智科技6683→半導體業，全部
 正確顯示、無一顯示「自選」，`/api/quote`回應也都確認帶`sector`。正式結案。
 
+### 2026-09-22：搜尋結果／焦點排行也套用細分產業，不再只顯示籠統的官方分類
+
+使用者反映：修好「自選」問題後，搜尋(`/search`)跟焦點排行(`LiveMoversBoard`)的「產業」
+欄還是顯示「電機機械」「半導體業」「貨櫃航運」這種太籠統的官方分類，要看的是像關注
+清單那樣「實際做的內容相近」的細分族群（例如IC設計、載板、矽晶圓）。根因：這兩處都
+用`StockTable.tsx`渲染，直接印`item.sector`（官方分類），完全沒有走`fineIndustry.ts`
+的`fineIndustryOf()`（只有`WatchlistTable.tsx`有走）。修法：`StockTable.tsx`改用
+`fineIndustryOf(item)`，`SearchItem`本身就有`symbol`/`market`/`sector`欄位、直接符合
+`fineIndustryOf`要的形狀，不用改資料層。同時把原本寫死在`WatchlistTable.tsx`裡的
+`FINE_INDUSTRY_HINT`說明文字搬到`fineIndustry.ts`匯出共用，兩處表頭提示文字保證一致、
+不會之後改一邊忘了改另一邊。搜尋/篩選條件（`sector`下拉選單）維持用官方分類篩選，
+只有顯示欄位改成細分產業，不影響篩選邏輯。`tsc`/`eslint`/`build`皆通過。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回
