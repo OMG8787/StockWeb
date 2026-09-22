@@ -26,6 +26,10 @@ interface MisRow {
   trade?: { z?: string };
 }
 
+/** 跟 emerging.ts 的 NO_TRADE_NOTE 同一種「不騙人」揭露，措辭配合上市股情境調整。
+ *  只在今天累積成交量真的是 0 張時才會用到——見 rowToQuote 內的判斷。 */
+const NO_TRADE_MID_ESTIMATE_NOTE = "今日尚無成交，顯示的漲跌幅是用目前委買委賣中間價估算，並非實際成交價格";
+
 /** First (best) price out of MIS's "_"-separated bid/ask depth string. */
 function bestDepthPrice(depth: string | undefined): number | undefined {
   if (!depth) return undefined;
@@ -72,6 +76,11 @@ function rowToQuote(row: MisRow): Quote | null {
   }
   const change = last - prevClose;
   const known = findInUniverse(row.c, "TW");
+  // MIS's v is in 張 (board lots); STOCK_DAY's 成交股數 (used for chart
+  // volume) is in raw shares. Normalize to shares here so a stock's
+  // headline volume and its chart's volume bars are the same unit and
+  // don't disagree by 1000x.
+  const volumeShares = (parseInt(row.v, 10) || 0) * 1000;
 
   return {
     symbol: row.c,
@@ -84,13 +93,13 @@ function rowToQuote(row: MisRow): Quote | null {
     high: round2(parseFloat(row.h) || last),
     low: round2(parseFloat(row.l) || last),
     prevClose: round2(prevClose),
-    // MIS's v is in 張 (board lots); STOCK_DAY's 成交股數 (used for chart
-    // volume) is in raw shares. Normalize to shares here so a stock's
-    // headline volume and its chart's volume bars are the same unit and
-    // don't disagree by 1000x.
-    volume: (parseInt(row.v, 10) || 0) * 1000,
+    volume: volumeShares,
     currency: "TWD",
     updatedAt: new Date().toISOString(),
+    // 今天一張都沒成交的冷門股，上面算出來的 last/change 其實是委買賣中價
+    // 估算，不是真的成交價變動——沒有這個註記，畫面/AI會把估算值講成好像
+    // 真的漲跌過。見 NO_TRADE_MID_ESTIMATE_NOTE 定義處的說明。
+    priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
   };
 }
 

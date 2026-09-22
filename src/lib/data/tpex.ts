@@ -323,6 +323,9 @@ function bestDepthPrice(depth: string | undefined): number | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
+/** 跟 twse.ts 的同名常數必須保持一致措辭——見那邊的說明，這裡是上櫃版本。 */
+const NO_TRADE_MID_ESTIMATE_NOTE = "今日尚無成交，顯示的漲跌幅是用目前委買委賣中間價估算，並非實際成交價格";
+
 function rowToOtcQuote(row: MisRow): Quote | null {
   const prevClose = parseFloat(row.y);
   if (!Number.isFinite(prevClose)) return null; // no real data at all for this code
@@ -352,6 +355,7 @@ function rowToOtcQuote(row: MisRow): Quote | null {
   }
   const change = last - prevClose;
   const known = findInUniverse(row.c, "TW");
+  const volumeShares = (parseInt(row.v, 10) || 0) * 1000;
 
   return {
     symbol: row.c,
@@ -364,9 +368,10 @@ function rowToOtcQuote(row: MisRow): Quote | null {
     high: round2(parseFloat(row.h) || last),
     low: round2(parseFloat(row.l) || last),
     prevClose: round2(prevClose),
-    volume: (parseInt(row.v, 10) || 0) * 1000,
+    volume: volumeShares,
     currency: "TWD",
     updatedAt: new Date().toISOString(),
+    priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
   };
 }
 

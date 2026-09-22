@@ -109,6 +109,14 @@ export async function searchStocks(filters: SearchFilters): Promise<SearchItem[]
 
   const sortBy = filters.sortBy ?? "changePercent";
   const sortDir = filters.sortDir ?? "desc";
+  // 今天一張都沒成交的冷門股，漲跌幅其實是用委買賣中價估算出來的（見
+  // twse.ts/tpex.ts rowToQuote 的 priceNote），不是真實成交價變動。放進
+  // 「照漲跌幅排序」的排行榜（首頁焦點排行、/search 預設或明確按漲跌幅排序）
+  // 會顯示看起來像真實漲跌的雜訊。使用者直接用關鍵字/代號查某一檔時
+  // （filters.query 有值）完全不受影響，仍然照樣找得到、看得到報價。
+  if (sortBy === "changePercent" && !filters.query) {
+    items = items.filter((i) => i.volume > 0);
+  }
   items.sort((a, b) => {
     const diff = a[sortBy] - b[sortBy];
     return sortDir === "desc" ? -diff : diff;
