@@ -45,6 +45,13 @@ export interface Quote {
   priceNote?: string;
 }
 
+/** twse.ts/tpex.ts 共用：今天累積成交量為0時，rowToQuote()算出來的價格/漲跌其實是
+ *  委買賣中價估算，不是真的成交價變動——見兩邊呼叫處的完整說明。原本兩個檔案各自
+ *  宣告一份一模一樣的字串常數，`tpex.ts`裡甚至留了「必須跟twse.ts保持一致」的提醒
+ *  註解，代表這是已知會忘記同步更新的重複維護風險，2026-09-22 地毯式審計時改成
+ *  共用同一份，改一次兩邊都生效。 */
+export const NO_TRADE_MID_ESTIMATE_NOTE = "今日尚無成交，顯示的漲跌幅是用目前委買委賣中間價估算，並非實際成交價格";
+
 export interface Candle {
   /** Daily ranges: a plain "YYYY-MM-DD" calendar date. The "today" intraday
    *  range instead puts a full ISO timestamp here (date+time+offset) — the

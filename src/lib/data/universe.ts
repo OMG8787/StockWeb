@@ -601,6 +601,30 @@ export async function getTwUniverse(): Promise<UniverseEntry[]> {
   return capped;
 }
 
+/**
+ * 呼叫這個函式一次，確保 `findInUniverse()`／`searchUniverseByQuery()`／
+ * `sectorsFor()` 這幾個同步讀取函式讀到的是真正完整的官方股票清單，不是一份
+ * 只有幾十檔的內建SEED清單。
+ *
+ * 為什麼需要這個：上面 `twFullCompanySnapshot`／`twUniverseSnapshot` 這兩個
+ * 模組層級變數只有在 `getTwUniverse()` 真的執行完一次之後才會是完整清單，在那
+ * 之前是很小的SEED。這幾個同步函式的簽名完全看不出這個前置條件，是這個檔案
+ * 最容易被忘記的一個地雷——2026-09-14（`searchUniverseByQuery`，美利達查不到）
+ * 跟 2026-09-22（`findInUniverse`，關注清單產業別查不到信驊等股票）已經各自在
+ * 不同呼叫端咬過一次。與其要求每個新呼叫端都自己記得寫`await getTwUniverse()
+ * .catch(() => undefined)`這串（現有的`/api/sectors`、`/api/symbol-lookup`、
+ * `symbolResolve.ts`都是各自手寫這行，容易漏），統一呼叫這個具名函式，之後
+ * `grep -rn "ensureTwUniverseWarm"` 就能一眼看出哪些進入點已經處理過。
+ *
+ * 這份資料是 Redis 快取（跨所有無伺服器實例共用），非冷啟動時這裡幾乎是免費的
+ * 快取命中，可以放心在任何用得到上述三個函式的 async 進入點呼叫，不用擔心效能。
+ */
+export async function ensureTwUniverseWarm(): Promise<void> {
+  await getTwUniverse().catch(() => undefined);
+}
+
+/** 呼叫前必須先 `await ensureTwUniverseWarm()`（見上方說明），否則市場為 "TW"
+ *  時查到的可能只是SEED清單、漏掉大量非超大型權值股。 */
 export function findInUniverse(symbol: string, market?: Market): UniverseEntry | undefined {
   const upper = symbol.toUpperCase();
   const pool = market === "US" ? US_UNIVERSE : market === "TW" ? twFullCompanySnapshot : [...twFullCompanySnapshot, ...US_UNIVERSE];
@@ -789,6 +813,7 @@ export function findAllSymbolsByName(text: string, limit: number): UniverseEntry
  * 比對用 matchCandidates()，所以美股的中文俗名（特斯拉、輝達…）跟去掉 Inc./Corp.
  * 的簡稱一樣都查得到，跟 AI 問答那邊認得的名稱範圍一致。
  */
+/** 呼叫前必須先 `await ensureTwUniverseWarm()`，理由同 `findInUniverse()` 上方的說明。 */
 export function searchUniverseByQuery(query: string, limit: number): UniverseEntry[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
@@ -822,6 +847,8 @@ export function searchUniverseByQuery(query: string, limit: number): UniverseEnt
   return scored.slice(0, limit).map((s) => s.entry);
 }
 
+/** market==="TW" 時呼叫前必須先 `await ensureTwUniverseWarm()`，理由同
+ *  `findInUniverse()` 上方的說明；market==="US" 讀的是靜態內建清單，不受影響。 */
 export function sectorsFor(market: Market): string[] {
   const pool = market === "TW" ? twUniverseSnapshot : US_UNIVERSE;
   const set = new Set(pool.map((e) => e.sector));

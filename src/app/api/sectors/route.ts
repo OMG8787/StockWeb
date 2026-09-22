@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sectorsFor, getTwUniverse } from "@/lib/data";
+import { sectorsFor, ensureTwUniverseWarm } from "@/lib/data";
 import type { Market } from "@/lib/data";
 
 export async function GET(req: NextRequest) {
@@ -8,6 +8,6 @@ export async function GET(req: NextRequest) {
   // Market and widen the sectorsFor()/cache-key space with garbage values.
   const marketParam = req.nextUrl.searchParams.get("market");
   const market: Market = marketParam === "US" ? "US" : "TW";
-  if (market === "TW") await getTwUniverse(); // ensure sectorsFor sees the full official list, not just the seed
+  if (market === "TW") await ensureTwUniverseWarm(); // sectorsFor() 需要完整清單，不能只有SEED
   return NextResponse.json({ sectors: sectorsFor(market) });
 }

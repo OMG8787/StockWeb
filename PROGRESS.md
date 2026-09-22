@@ -482,6 +482,26 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
    比對，4種組合輸出字串逐字元完全相同（8918~10179字不等）。`tsc`/`eslint`/`build`
    三項重構皆通過。
 
+### 2026-09-22：地毯式審計第一批修復——資料層3項
+
+派2個Explore agent地毯式審查`lib/data/`+`api/`跟`lib/ai/`+`components/`找「容易散落
+多處忘記同步改」的結構性風險，資料層那份回報3項，全部修好：
+1. `NO_TRADE_MID_ESTIMATE_NOTE`原本在`twse.ts`/`tpex.ts`各自宣告一份一模一樣的字串
+   （`tpex.ts`裡甚至留了「必須跟twse.ts保持一致」的提醒註解——這正是「已知風險但
+   沒真正解決」的例子），搬到`types.ts`共用匯出，兩邊改用同一份。
+2. `findInUniverse`/`searchUniverseByQuery`/`sectorsFor`這幾個同步函式的「呼叫前必須
+   先warm」前提，原本`/api/sectors`、`/api/symbol-lookup`各自手寫`await getTwUniverse()
+   .catch(...)`並各自留長註解提醒自己（`/api/symbol-lookup`那段還點名這是2026-09-14
+   「美利達查不到」的舊坑，代表這個地雷已經咬過兩次不同呼叫端）。新增具名函式
+   `ensureTwUniverseWarm()`（`universe.ts`），這3個同步函式的JSDoc也都加上明確警告，
+   四個呼叫端（`quote.ts`、`symbolResolve.ts`、`/api/sectors`、`/api/symbol-lookup`）
+   統一改用這個具名函式，之後`grep -rn ensureTwUniverseWarm`就能一眼看出哪些進入點
+   已經處理過。
+3. `/api/cron/warm-cache`裡有4項（`searchStocks`TW/US、`getMultiSignalStocks`TW/US、
+   `getIndices()`）沒有包這支路由自己宣稱的`warm()`錯誤隔離機制，任一項拋錯會讓整個
+   `Promise.all`直接中止、回應退化成籠統的503——補上跟其他項目一致的包法。
+`tsc`/`eslint`/`build`皆通過。AI層/元件那份的發現詳見下一則工作日誌。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回

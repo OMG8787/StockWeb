@@ -1,4 +1,4 @@
-import { findAllSymbolsByName, getTwUniverse } from "@/lib/data";
+import { findAllSymbolsByName, ensureTwUniverseWarm } from "@/lib/data";
 import type { Market } from "@/lib/data";
 
 // The negative lookahead keeps a plain year mention ("2025年台股展望") from
@@ -66,21 +66,16 @@ const STOPWORDS = new Set([
 const MAX_COMPARE_TARGETS = 4;
 
 export async function guessSymbolsFromText(text: string): Promise<{ symbol: string; market: Market }[]> {
-  // findSymbolByName/findAllSymbolsByName read a module-level snapshot that
-  // only gets populated once getTwUniverse() has actually run in this
-  // process — true even after the universe.ts fix that made that snapshot
-  // cover the full official TWSE+TPEx listing rather than a small seed. A
-  // plain single-stock chat question never otherwise calls getTwUniverse()
-  // (only searchStocks/momentum/etc. do), so on Vercel — many short-lived
-  // serverless instances, each with its own copy of that module-level
-  // variable — a request could easily land on an instance that never
-  // happened to run it, silently falling back to a tiny seed list and
-  // failing to find anything but the most obvious large caps. Awaiting it
-  // here is cheap regardless: the underlying data is Redis-cached (shared
-  // across every instance, unlike the in-memory snapshot itself), so this
-  // is a fast cache hit on any instance that isn't the very first to ever
-  // run cold.
-  await getTwUniverse().catch(() => undefined);
+  // findSymbolByName/findAllSymbolsByName 讀的模組層級快照要 warm 過才完整
+  // （見 ensureTwUniverseWarm() 的完整說明）。這裡跟 lib/data/quote.ts 的
+  // getQuote() 各自獨立呼叫一次同一個 warm 函式——**不是多餘的重複，兩處都要
+  // 保留**：這裡 warm 的時機比 getQuote() 更早（問句一進來、還沒解析出任何
+  // 股票代號、getQuote() 根本還沒被呼叫過），純聊天問句如果只靠 getQuote()
+  // 那份 warm，會漏掉「先解析代號」這一步本身也依賴同一份快照的情況。
+  // ensureTwUniverseWarm() 內部是 Redis 快取，非冷啟動時這裡是免費的快取
+  // 命中，兩處都呼叫沒有效能疑慮。2026-09-22 地毯式審計時特別留這段說明，
+  // 避免以後有人「清理重複程式碼」時誤刪其中一處，重新製造出同一類bug。
+  await ensureTwUniverseWarm();
 
   const seen = new Set<string>();
   const candidates: Array<{ symbol: string; market: Market; index: number }> = [];

@@ -1,6 +1,7 @@
 import https from "node:https";
 import tls from "node:tls";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
+import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
 import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES } from "./twse";
@@ -322,9 +323,6 @@ function bestDepthPrice(depth: string | undefined): number | undefined {
   const value = parseFloat(depth.split("_")[0]);
   return Number.isFinite(value) && value > 0 ? value : undefined;
 }
-
-/** 跟 twse.ts 的同名常數必須保持一致措辭——見那邊的說明，這裡是上櫃版本。 */
-const NO_TRADE_MID_ESTIMATE_NOTE = "今日尚無成交，顯示的漲跌幅是用目前委買委賣中間價估算，並非實際成交價格";
 
 function rowToOtcQuote(row: MisRow): Quote | null {
   const prevClose = parseFloat(row.y);

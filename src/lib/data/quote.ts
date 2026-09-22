@@ -7,7 +7,7 @@ import { fetchUsQuote } from "./us";
 import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth";
 import { isTwQuoteWindow } from "@/lib/pollingSchedule";
 import { detectMarket, normalizeSymbol, resolveTwExchange } from "./symbols";
-import { getTwUniverse } from "./universe";
+import { ensureTwUniverseWarm } from "./universe";
 
 export const QUOTE_TTL_MS = 20_000;
 /**
@@ -57,16 +57,14 @@ async function fetchTwQuote(symbol: string): Promise<Quote> {
 export async function getQuote(symbolInput: string, marketHint?: Market): Promise<Quote | null> {
   const symbol = normalizeSymbol(symbolInput);
   const market = marketHint ?? detectMarket(symbol);
-  // findInUniverse()（universe.ts）讀的是一個模組層級的同步快照，在
-  // getTwUniverse() 第一次真的在這個無伺服器實例執行過之前，只是一份很小的
-  // 內建SEED清單——2026-09-22 實測踩到的真實bug：/api/quote/[symbol] 查完
-  // 報價後想附加真實sector，因為沒有先warm這份快取，SEED以外的股票悄悄查
-  // 不到、退回錯誤的預設值。與其要求每個下游呼叫端各自記得warm一次（容易
-  // 忘記，就是這次bug的根因），這裡在唯一的單檔報價入口統一做一次，
+  // findInUniverse()（universe.ts）讀的是一個模組層級的同步快照，warm之前
+  // 只是一份很小的內建SEED清單——2026-09-22 實測踩到的真實bug：/api/quote/
+  // [symbol] 查完報價後想附加真實sector，因為沒有先warm，SEED以外的股票
+  // 悄悄查不到、退回錯誤的預設值。這裡在唯一的單檔報價入口統一warm一次，
   // 任何呼叫getQuote()之後才用findInUniverse()查這檔股票資料的地方都能
-  // 直接受益，不用自己再操心這個前置條件。這份資料是Redis快取（跨所有
-  // 實例共用），非冷啟動時這裡幾乎是免費的快取命中，不會拖慢報價查詢。
-  if (market === "TW") await getTwUniverse().catch(() => undefined);
+  // 直接受益，不用自己再操心這個前置條件（見 ensureTwUniverseWarm() 的
+  // 完整說明）。
+  if (market === "TW") await ensureTwUniverseWarm();
   return cached(`quote:${market}:${symbol}`, quoteTtlMs(market), async () => {
     try {
       return market === "TW" ? await fetchTwQuote(symbol) : await fetchUsQuote(symbol);

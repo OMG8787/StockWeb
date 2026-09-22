@@ -25,7 +25,15 @@
 
 export * from "./types";
 export type { MarketDepth } from "./yahooTwMarketDepth";
-export { sectorsFor, getTwUniverse, findSymbolByName, findAllSymbolsByName, findInUniverse, searchUniverseByQuery } from "./universe";
+export {
+  sectorsFor,
+  getTwUniverse,
+  ensureTwUniverseWarm,
+  findSymbolByName,
+  findAllSymbolsByName,
+  findInUniverse,
+  searchUniverseByQuery,
+} from "./universe";
 export type { UniverseEntry } from "./universe";
 export { describeTaifexNightFutures } from "./taifex";
 

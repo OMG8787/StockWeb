@@ -1,4 +1,5 @@
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
+import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
 
@@ -25,10 +26,6 @@ interface MisRow {
   // 見下方 rowToQuote 內的說明。
   trade?: { z?: string };
 }
-
-/** 跟 emerging.ts 的 NO_TRADE_NOTE 同一種「不騙人」揭露，措辭配合上市股情境調整。
- *  只在今天累積成交量真的是 0 張時才會用到——見 rowToQuote 內的判斷。 */
-const NO_TRADE_MID_ESTIMATE_NOTE = "今日尚無成交，顯示的漲跌幅是用目前委買委賣中間價估算，並非實際成交價格";
 
 /** First (best) price out of MIS's "_"-separated bid/ask depth string. */
 function bestDepthPrice(depth: string | undefined): number | undefined {

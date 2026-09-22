@@ -64,10 +64,14 @@ export async function GET(req: NextRequest) {
 
   try {
     await Promise.all([
-      searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" }),
-      searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" }),
-      getMultiSignalStocks("TW"),
-      getMultiSignalStocks("US"),
+      // 2026-09-22 地毯式審計抓到：這4項原本沒包 warm()，任何一項拋錯會讓整個
+      // Promise.all直接中止、回應只剩籠統的「預熱失敗」503，跟這支路由自己
+      // 在上面說明裡宣稱的「每一項獨立降級、結果都要能回報出來」設計互相矛盾。
+      // 補上跟其他項目一致的處理方式。
+      warm("search TW", searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" })),
+      warm("search US", searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" })),
+      warm("multi-signal TW", getMultiSignalStocks("TW")),
+      warm("multi-signal US", getMultiSignalStocks("US")),
       // AI 問答「多重技術指標篩選」用的全市場指標快照（成交金額前120/60檔各抓
       // 一次3個月K線）——這是這支 cron 裡最昂貴的一項，正是為什麼要在背景預熱：
       // 真正的使用者問「有沒有MACD跟KD都黃金交叉的股票」時就直接讀快取，不用
@@ -75,7 +79,7 @@ export async function GET(req: NextRequest) {
       // 其他預熱項目。
       warm("technical screen TW", getTechnicalScreen("TW")),
       warm("technical screen US", getTechnicalScreen("US")),
-      getIndices(),
+      warm("indices", getIndices()),
       warm("daily brief", getDailyBrief()),
       warm("action brief", getActionBrief()),
       warm("news feed", getNewsFeed()),
