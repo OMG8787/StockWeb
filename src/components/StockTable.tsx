@@ -14,6 +14,7 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
+            <th className="w-8 pr-1 text-right font-medium">#</th>
             <th className="w-8" />
             <th className="py-2 pr-4 font-medium">代碼 / 名稱</th>
             <th className="py-2 pr-4 font-medium" title={FINE_INDUSTRY_HINT}>
@@ -26,8 +27,11 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
+          {items.map((item, index) => (
             <tr key={`${item.market}:${item.symbol}`} className="border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
+              {/* 目前看到第幾個——單純反映這次排序/篩選結果裡的順位，不是股票的
+                  固定編號，改排序或篩選條件後會跟著這次的新順序從1重新算過。 */}
+              <td className="py-2.5 pr-1 text-right tabular-nums text-(--text-muted)">{index + 1}</td>
               <td className="py-2.5 pl-1">
                 <WatchlistButton symbol={item.symbol} market={item.market} name={item.name} />
               </td>

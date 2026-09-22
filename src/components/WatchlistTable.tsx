@@ -180,8 +180,10 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           table into a stacked mobile layout. sm: hides it once the table
           actually fits without scrolling. */}
       <p className="text-[13px] text-(--text-muted) sm:hidden">← 可左右滑動查看持有股數／購買價格／損益 →</p>
-      {held.length > 0 && <DraggableGroup title="持有中" items={held} sortable market={held[0].market} group="held" />}
-      <DraggableGroup title={held.length > 0 ? "僅關注（未持有）" : undefined} items={unheld} market={market} group="unheld" />
+      {held.length > 0 && (
+        <DraggableGroup title={`持有中（${held.length}）`} items={held} sortable market={held[0].market} group="held" />
+      )}
+      <DraggableGroup title={`僅關注（未持有）（${unheld.length}）`} items={unheld} market={market} group="unheld" />
     </div>
   );
 }
@@ -342,6 +344,7 @@ function DraggableGroup({
         <table className={`w-full text-sm ${sortable ? "min-w-[960px]" : "min-w-[800px]"}`}>
           <thead>
             <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
+              <th className="w-8 pr-1 text-right font-medium">#</th>
               <th className="w-6" />
               <th className="w-8" />
               <th className="py-2 pr-4 font-medium">代碼 / 名稱</th>
@@ -386,12 +389,13 @@ function DraggableGroup({
             </tr>
           </thead>
           <tbody>
-            {order.map((key) => {
+            {order.map((key, index) => {
               const item = byKey.get(key);
               if (!item) return null;
               return (
                 <HoldingRow
                   key={key}
+                  rowNumber={index + 1}
                   item={item}
                   showHoldingColumns={sortable}
                   rowRef={(el) => {
@@ -412,6 +416,7 @@ function DraggableGroup({
 }
 
 function HoldingRow({
+  rowNumber,
   item,
   showHoldingColumns,
   rowRef,
@@ -419,6 +424,10 @@ function HoldingRow({
   onHandlePointerMove,
   onHandlePointerUp,
 }: {
+  /** 這一列在目前排序/篩選結果裡的順位（從1開始）——單純反映畫面上「目前看到
+   *  第幾個」，不是股票的固定ID，改排序或拖曳後會跟著重新算過，不會維持原本
+   *  的數字跟著股票走。 */
+  rowNumber: number;
   item: HoldingItem;
   showHoldingColumns: boolean;
   rowRef: (el: HTMLTableRowElement | null) => void;
@@ -476,6 +485,7 @@ function HoldingRow({
 
   return (
     <tr ref={rowRef} className="border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
+      <td className="py-2.5 pr-1 text-right tabular-nums text-(--text-muted)">{rowNumber}</td>
       <td className="py-2.5 pl-1">
         <button
           type="button"

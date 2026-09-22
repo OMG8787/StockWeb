@@ -435,6 +435,20 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 也非空白；額外查證聯茂/精材等既有細分分類與/search排行榜皆未受影響，無regression。
 正式結案。
 
+### 2026-09-22：關注清單持有/未持有各別顯示檔數＋所有股票清單加上序號
+
+使用者要求：①關注清單「持有中」「僅關注（未持有）」兩組標題各自附上目前檔數；
+②所有列出股票的地方（關注清單、搜尋、焦點排行）都加上1、2、3...序號，且改排序/
+篩選後要從1重新排。做法：`WatchlistTable.tsx`把兩個`DraggableGroup`的`title`改成
+`` `持有中（${held.length}）` ``/`` `僅關注（未持有）（${unheld.length}）` ``
+（後者原本held.length===0時會整個不顯示標題，這次改成一律顯示，因為使用者現在
+一定要看到檔數）；兩個表格（`WatchlistTable.tsx`的`DraggableGroup`、`StockTable.tsx`）
+的`<tbody>`map都新增一個`#`欄位，直接用陣列目前的index（`order.map((key, index) =>`／
+`items.map((item, index) =>`）當序號——這樣改排序/拖曳/篩選時，父層重新算出新陣列，
+序號自然跟著從1重新編號，不需要額外邏輯維護一份獨立的排名狀態。`StockTable.tsx`
+同時服務`/search`、首頁焦點排行、`/highlights`三個地方，改一處全部套用。`tsc`/
+`eslint`/`build`皆通過。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回
