@@ -177,9 +177,13 @@ src/
    ├─ ai/                            AI 問答與每日快報
    │  ├─ provider.ts                 共用的 Gemini→Claude fallback 呼叫邏輯（callAiProviders），
    │  │                              處理對話歷史裁切、開頭必須是 user、合併連續同角色 turn
-   │  ├─ ask.ts                      **2026-09-21 拆分後只剩356行**：/api/ask 的主要進入點，組
-   │  │                              system prompt、呼叫 callAiProviders，其餘職責搬到下面幾個
-   │  │                              新檔案（public API/呼叫端完全不用改，import 路徑都一樣）：
+   │  ├─ ask.ts                      **2026-09-22 再次拆分後約120行**：/api/ask 的主要進入點，
+   │  │                              組grounding、組出`system`陣列、呼叫callAiProviders，其餘
+   │  │                              職責搬到下面幾個新檔案（public API/呼叫端完全不用改）：
+   │  │  ├─ askSystemPrompt.ts        **2026-09-22新增**：系統提示詞裡每一條規則各自獨立成一個
+   │  │  │                            具名常數（RULE_NO_FABRICATE、RULE_HOLDINGS_LIGHT…），要改
+   │  │  │                            哪條AI行為直接grep常數名稱定位，不用在整段密集中文裡
+   │  │  │                            找對地方；ask.ts只是把這些常數依序組回`system`陣列
    │  │  ├─ askTypes.ts               對外型別 AskResult／HoldingInput
    │  │  ├─ symbolResolve.ts          從問句解析股票代號/公司名（guessSymbolsFromText）
    │  │  ├─ intent.ts                 全部意圖判斷正則與函式（是不是在問排行榜/技術指標篩選/
@@ -206,6 +210,11 @@ src/
    │  └─ types.ts                    ChatTurn 等共用型別
    │
    ├─ auth.ts                        NextAuth 設定（Google Provider）
+   ├─ fineIndustry.ts                 細分產業排序/查詢邏輯（fineIndustryOf/sortByFineIndustry），
+   │                                 純資料（300+組分類）拆到 fineIndustryGroups.ts，這裡只留邏輯
+   ├─ fineIndustryGroups.ts           **2026-09-22新增**：細分產業分類表的純資料（FINE_INDUSTRY_
+   │                                 GROUPS），跟fineIndustry.ts的邏輯分開，改排序/比對邏輯時
+   │                                 不用把這一大串資料也讀進上下文
    ├─ watchlist.ts                   自選股清單邏輯（localStorage），含可選的 costBasis/shares
    │                                 持股成本欄位跟 updateHolding()
    ├─ watchlistStore.ts              登入後自選股的伺服器端 Redis 儲存
@@ -451,6 +460,27 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 兩組各自的#欄獨立從1編號（不會接續變4、5、6）；持有中/僅關注改排序、/search改排序
 欄位/方向/套用篩選、焦點排行台美股頁籤，序號都正確從1重新連號；版面對齊無錯位。
 正式結案。
+
+### 2026-09-22：三項結構性重構——回應使用者對「改東西要快、不要大範圍搜索」的要求
+
+使用者問「現在的分層能不能讓你快速對症下藥、少花token」，據實回報今天實際碰到的兩個
+真實摩擦點後，使用者要求優化這兩項、外加一次全站地毯式檢查（見下方另一則工作日誌）。
+三項重構如下，皆為**純結構重組，內容/行為零改動**（每項都有另外寫程式驗證前後輸出
+逐字元相同，不是只憑肉眼檢查）：
+1. **`findInUniverse()`的隱藏前置條件**：改在唯一的單檔報價入口`getQuote()`
+   （`lib/data/quote.ts`）內部統一warm一次TW universe快取，取代要求每個下游呼叫端
+   各自記得warm（這正是當天`/api/quote/[symbol]`那個bug的根因類型）。`/api/quote/
+   [symbol]/route.ts`原本的手動warm呼叫因此可以移除，改由`getQuote()`保證。
+2. **`fineIndustry.ts`資料/邏輯分離**：300+組分類資料搬到新檔`fineIndustryGroups.ts`，
+   `fineIndustry.ts`只留`fineIndustryOf()`/`sortByFineIndustry()`等邏輯函式（529行→
+   92行），之後改排序邏輯不用把一大串資料也讀進上下文。
+3. **`ask.ts`系統提示詞拆成具名常數**：新檔`askSystemPrompt.ts`，原本33個擠在一個陣列
+   字面值裡的規則（含2個依對話情境切換分支的三元判斷）各自變成`RULE_XXX`具名常數，
+   `ask.ts`本身從包含這一大段提示詞降到約120行。**驗證方式**：寫程式把改動前
+   的33個陣列元素原始碼、跟改動後33個具名常數的原始碼，分別在
+   `wantsHoldingsAnalysis`/`wantsSingleStockAnalysis`兩個布林值的全部4種組合下求值
+   比對，4種組合輸出字串逐字元完全相同（8918~10179字不等）。`tsc`/`eslint`/`build`
+   三項重構皆通過。
 
 ### 2026-09-22：AI問答面板捲動位置修正
 
