@@ -6,7 +6,15 @@ import type { Market } from "@/lib/data";
 // no reserved range, so any bare number in that span is otherwise ambiguous
 // with a year, and "20XX年" is by far the most common way one shows up in a
 // question that isn't about a specific stock at all.
-const SYMBOL_PATTERN = /\b\d{4,6}\b(?!\s*年)|\b[A-Z]{1,5}\b/g;
+// 美股代號至少要2個字母才算數（原本是1~5個）。2026-09-22 Opus驗證時意外測到：
+// 訊息編碼錯誤送出的亂碼文字裡，任何孤立的大寫英文字母（例如亂碼剛好夾雜一個
+// 「S」）都會被這個正則式當成一檔真實美股代號（S=SentinelOne、O=Realty Income
+// 等），讓AI一本正經地分析一檔完全不相關的股票。真人在中文語境裡打字，幾乎
+// 不會單獨打一個孤立大寫字母來指名股票（想問Visa/Ford會直接打公司名稱，
+// 名稱比對走另一條路徑`findAllSymbolsByName`，不受這裡影響）；代價是T/F/V/C/D/O
+// 這幾檔本來就有的真實單字母代號，改成只能用公司名稱查、不能只打裸代號，
+// 這個犧牲遠比「亂碼/雜訊文字誤觸發分析無關股票」的風險划算。
+const SYMBOL_PATTERN = /\b\d{4,6}\b(?!\s*年)|\b[A-Z]{2,5}\b/g;
 
 // SYMBOL_PATTERN 會把句子裡任何 1-5 個大寫英文字母當成可能的美股代號，所以任何
 // 「長得像代號、其實是專有名詞縮寫」的字都要在這裡擋掉，否則會被當成一檔查不到的
@@ -111,7 +119,7 @@ export async function guessSymbolsFromText(text: string): Promise<{ symbol: stri
         candidates.push({ symbol: m, market: "TW", index: upper.indexOf(m) });
       } else if (
         !STOPWORDS.has(m) &&
-        /^[A-Z]{1,5}$/.test(m) &&
+        /^[A-Z]{2,5}$/.test(m) &&
         !matchedNameSubstrings.some((name) => name.includes(m.toLowerCase()))
       ) {
         seen.add(m);
