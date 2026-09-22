@@ -394,7 +394,10 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 的`guessSymbolsFromText()`早就踩過、也修過的同一類坑（那邊的解法是先await一次
 `getTwUniverse()`），但`/api/quote/[symbol]`這次新增的sector查詢沒有套用同樣的修法。
 補上：TW市場先`await getTwUniverse()`（Redis快取，非冷啟動時幾乎免費）再查
-`findInUniverse()`。`tsc`/`eslint`/`build`皆通過。
+`findInUniverse()`。`tsc`/`eslint`/`build`皆通過。**Opus瀏覽器複查（`58142c0`）用使用者
+實際回報失敗的7檔重測**：恩德1528→電機機械、和益1709→化學工業、全友2305→電腦及週邊設備業、
+光罩2338→半導體業、順德2351→半導體業、信驊5274→半導體業、雍智科技6683→半導體業，全部
+正確顯示、無一顯示「自選」，`/api/quote`回應也都確認帶`sector`。正式結案。
 
 ### 2026-09-22：AI問答面板捲動位置修正
 
