@@ -143,7 +143,14 @@ export default function WatchlistSection() {
           // 報價欄位全部為 null 的「佔位列」，由 WatchlistTable 顯示成
           // 「資料暫缺」——名稱/代號/市場都拿 localStorage 裡的關注清單資料，
           // 不需要報價也一定有。2026-09-21 根治，取代原本只有重試的緩解措施。
-          const fetchOnce = async (): Promise<Quote | null> => {
+          // /api/quote/[symbol] 這條路由是伺服器端執行，可以直接查官方股票
+          // 清單附加真實產業別（跟 /api/search 的批次資料同一個來源）回傳；
+          // 不能直接在 client 端 import findInUniverse 來查——那個函式所在的
+          // lib/data 模組圖會把 node:tls 之類的 server-only 依賴一起拉進
+          // 瀏覽器端 bundle，導致 build 失敗（實測驗證過）。之前這裡寫死
+          // 「自選」，就算 fineIndustry.ts 找不到細分族群、想退回官方產業別
+          // 當備案，備案本身也是假的、等於沒用。
+          const fetchOnce = async (): Promise<(Quote & { sector?: string }) | null> => {
             try {
               const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
               return res.ok ? await res.json() : null;
@@ -175,7 +182,7 @@ export default function WatchlistSection() {
             symbol: q.symbol,
             market: q.market,
             name: q.name,
-            sector: "自選",
+            sector: q.sector || "自選",
             price: q.price,
             changePercent: q.changePercent,
             volume: q.volume,

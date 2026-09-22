@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getQuote } from "@/lib/data";
+import { getQuote, findInUniverse } from "@/lib/data";
 import type { Market } from "@/lib/data";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ symbol: string }> }) {
@@ -18,7 +18,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ symb
     if (!quote) {
       return NextResponse.json({ error: "目前無法取得即時報價" }, { status: 503 });
     }
-    return NextResponse.json(quote);
+    // Quote 本身沒有 sector 欄位（單檔即時報價的上游端點不會回產業別），但
+    // 關注清單需要真實產業別來取代寫死的「自選」——這裡另外查一次官方股票
+    // 清單附加上去，不動 Quote 型別本身（避免影響其他用到 getQuote 的地方）。
+    const sector = findInUniverse(quote.symbol, quote.market)?.sector;
+    return NextResponse.json(sector ? { ...quote, sector } : quote);
   } catch (err) {
     console.error("[quote] getQuote failed:", err);
     return NextResponse.json({ error: "取得報價時發生錯誤" }, { status: 500 });

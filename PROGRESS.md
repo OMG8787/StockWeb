@@ -341,6 +341,30 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-22：關注清單產業別真正接上真實資料（取代寫死的「自選」）
+
+使用者反映關注清單很多股票產業欄位顯示「其他」。第一步（`0f5d14c`）把`fineIndustry.ts`
+找不到細分族群時的退路，從空洞的「其他」改成退回股票的官方`sector`欄位——但驗證時（用
+未收錄的億豐8464測試）發現畫面顯示的是「自選」而不是官方產業別，才找到真正根因：
+`WatchlistSection.tsx`的`onFetch`一直對每一列的`sector`欄位寫死`"自選"`字串，因為它用的
+單檔`/api/quote/[symbol]`端點本身根本沒有回傳`sector`。修法：在`/api/quote/[symbol]`
+（伺服器端執行）額外用`findInUniverse()`查官方股票清單附加`sector`到回傳JSON，前端改讀
+這個真實值。**注意**：不能直接在`WatchlistSection.tsx`（client component）裡`import
+findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等server-only依賴一起拉進
+瀏覽器端bundle，導致`next build`直接失敗（Turbopack報`does not support external modules`），
+必須讓查詢留在API路由裡完成，前端只讀回傳的欄位。`tsc`/`eslint`/`build`皆通過。
+
+### 2026-09-22：AI問答面板捲動位置修正
+
+使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回
+最上面而不是保留原本位置。修法：捲動改成`scrollIntoView({block:"start"})`鎖定「最後一則
+使用者訊息」，且在送出問題、答案渲染完成兩個時機都各呼叫一次（只呼叫一次會卡在答案還沒
+長出來時的可捲動範圍上限，答案出現後不會自動修正）；面板從`{open && (...)}`（關閉會整個
+卸載DOM、捲動位置歸零）改成一直掛著、用`hidden` class切換顯示，讓瀏覽器原生記住捲動位置。
+本地Playwright實測：問完第二題後，問題泡泡離容器頂端只差-0.5px（近乎貼齊，800~3000ms多次
+取樣皆穩定非動畫殘影）；關閉再打開前後捲動位置完全相同（1530→1530）。`tsc`/`eslint`/
+`build`皆通過，已上線（`d3635c7`）。
+
 ### 2026-09-22：台指期夜盤白天空窗期修法正式驗證通過
 
 08:46（白天空窗期內）直接curl正式站`/api/taifex-futures`，正確回傳最後一次夜盤收盤快照
