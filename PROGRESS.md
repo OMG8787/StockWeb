@@ -385,6 +385,17 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 瀏覽器端bundle，導致`next build`直接失敗（Turbopack報`does not support external modules`），
 必須讓查詢留在API路由裡完成，前端只讀回傳的欄位。`tsc`/`eslint`/`build`皆通過。
 
+**第二輪修正（同一天）**：Opus瀏覽器複查當下用的測試股（8464/9945/2504）都正確顯示，
+但推上線後使用者實測發現整份關注清單裡還是有一半股票顯示「自選」（信驊5274、恩德1528、
+順德2351、光罩2338、全友2305、雍智科技6683、和益1709），另一半正常（聯電2303、宏碁資訊
+6811、長榮2603、陽明2609）。根因：`findInUniverse()`讀的`twFullCompanySnapshot`是模組
+層級的同步快照，在`getTwUniverse()`第一次真的在該無伺服器實例執行過之前，只是一份很小的
+內建SEED清單——顯示正常的那幾檔剛好都在SEED裡，顯示「自選」的都不在。這是`symbolResolve.ts`
+的`guessSymbolsFromText()`早就踩過、也修過的同一類坑（那邊的解法是先await一次
+`getTwUniverse()`），但`/api/quote/[symbol]`這次新增的sector查詢沒有套用同樣的修法。
+補上：TW市場先`await getTwUniverse()`（Redis快取，非冷啟動時幾乎免費）再查
+`findInUniverse()`。`tsc`/`eslint`/`build`皆通過。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回
