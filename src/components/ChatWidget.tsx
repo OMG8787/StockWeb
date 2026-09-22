@@ -289,7 +289,14 @@ export default function ChatWidget() {
     }
   }
 
-  async function send(question: string, holdings?: ReturnType<typeof getWatchlist>) {
+  // holdings 預設一律讀當下的關注清單，不用每個呼叫端自己記得傳——之前只有
+  // 「分析我的關注清單」按鈕會傳，一般用打字問的問題（例如「有沒有虧損的股票
+  // 該停損？」）完全沒帶這份資料，導致 AI 只能照實回答「沒有讀取持股的權限」，
+  // 讓使用者誤以為這是系統做不到的事，其實只是那次請求沒帶資料過去——本站
+  // 後端（ask.ts 的 buildHoldingsGrounding）本來就支援輕量、非按鈕觸發的持股
+  // 問法，只是前端一直沒有把資料接上。預設參數在每次呼叫當下才求值，不會
+  // 讀到舊的關注清單快照。
+  async function send(question: string, holdings: ReturnType<typeof getWatchlist> = getWatchlist()) {
     const trimmed = question.trim();
     if (!trimmed || loading) return;
     const history = messages.map((m) => ({ role: m.role, content: m.text }));
