@@ -94,6 +94,6 @@ export function getMarketStatus(scope: MarketScope, now: Date = new Date()): Mar
 
 export function marketStatusLabel(status: MarketStatus): string {
   if (status === "open") return "盤中";
-  if (status === "pre-market") return "試搓中（08:30-09:00，尚未正式開盤）";
+  if (status === "pre-market") return "試撮中（08:30-09:00，尚未正式開盤）";
   return "已收盤";
 }

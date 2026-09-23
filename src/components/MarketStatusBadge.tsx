@@ -2,7 +2,7 @@ import { marketStatusLabel, type MarketStatus } from "@/lib/marketStatus";
 
 export default function MarketStatusBadge({ status }: { status: MarketStatus }) {
   const open = status === "open";
-  // "試搓中" gets its own pulsing dot (something IS actively updating —
+  // "試撮中" gets its own pulsing dot (something IS actively updating —
   // TWSE is publishing trial-match data) but not the full accent color
   // "open" gets, since no real trade has actually happened yet — visually
   // between "open" and "closed" rather than identical to either.

@@ -139,6 +139,7 @@ export default function StockChart({
     () => DEFAULT_INDICATOR_SETTINGS
   );
   const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -165,6 +166,28 @@ export default function StockChart({
   useEffect(() => {
     formatRef.current = { currency, market };
   }, [currency, market]);
+
+  // 2026-09-23 Opus地毯式巡檢抓到：「技術線」設定選單原本只能靠再點一次
+  // ⚙按鈕才會收合，點選單以外的地方或按Esc都沒反應，選單會一直蓋住K線圖
+  // 右側的價格軸。比照SiteHeader.tsx搜尋建議清單「點外面收起」的既有做法，
+  // 補上點外部/按Esc關閉。
+  useEffect(() => {
+    if (!showSettings) return;
+    function onPointerDown(e: MouseEvent | TouchEvent) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setShowSettings(false);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowSettings(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [showSettings]);
 
   function toggleIndicator(key: keyof ChartIndicatorSettings) {
     // No local setState call needed: setIndicatorSettings() writes to
@@ -644,7 +667,7 @@ export default function StockChart({
             chart even with a box checked — a visible-but-nonfunctional
             control is more confusing than no control at all. */}
         {!isIntraday && (
-        <div className="relative">
+        <div className="relative" ref={settingsRef}>
           <button
             onClick={() => setShowSettings((v) => !v)}
             className="rounded-md border border-(--gridline) px-3 py-1.5 text-sm font-medium text-(--text-secondary) hover:bg-(--page-plane)"

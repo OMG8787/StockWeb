@@ -280,6 +280,13 @@ export async function fetchEmergingQuote(stockNo: string): Promise<Quote> {
   const xml = await misTpexPost("/Quote.asmx/GETQ20", { SymbolID: stockNo }, 5000);
   const symbol = xmlTag(xml, "SymbolID");
   if (!symbol) throw new Error(`No emerging quote for ${stockNo}`);
+  // 2026-09-23 Opus地毯式巡檢抓到：今天完全沒有成交時，TradeStatisticTime
+  // 是空的，taipeiStampToIso()的時間部分會補成00:00:00，畫面顯示「更新
+  // 時間：.../.../... 00:00:00」——看起來像凌晨成交，其實只是「沒有真實
+  // 成交時間可用」，這裡改成誠實地用「現在」（這次成功查到這筆資料的時間）
+  // 頂替，不去暗示一個不存在的成交時刻。真的有成交時間時（多數情況）
+  // 照舊使用真實值。
+  const tradeTime = xmlTag(xml, "TradeStatisticTime");
   const quote = buildEmergingQuote({
     symbol,
     name: xmlTag(xml, "SymbolName") ?? stockNo,
@@ -288,7 +295,7 @@ export async function fetchEmergingQuote(stockNo: string): Promise<Quote> {
     high: emergingNumber(xmlTag(xml, "TradeStatisticHigh")),
     low: emergingNumber(xmlTag(xml, "TradeStatisticLow")),
     totalVolume: emergingNumber(xmlTag(xml, "TradeStatisticTtlVol")),
-    updatedAt: taipeiStampToIso(xmlTag(xml, "TradeDay"), xmlTag(xml, "TradeStatisticTime")),
+    updatedAt: tradeTime ? taipeiStampToIso(xmlTag(xml, "TradeDay"), tradeTime) : new Date().toISOString(),
   });
   if (!quote) throw new Error(`No emerging quote for ${stockNo}`);
   return quote;
@@ -303,8 +310,15 @@ export async function fetchEmergingQuote(stockNo: string): Promise<Quote> {
  */
 export async function fetchEmergingQuotesSnapshot(): Promise<Map<string, Quote>> {
   const xml = await misTpexPost("/Quote.asmx/GETQ30", { CatID: "" }, 9000);
-  const tradeDay = xmlTag(xml, "TradeDay");
   const map = new Map<string, Quote>();
+  // 2026-09-23 Opus地毯式巡檢抓到：這支端點沒有逐檔的成交時間欄位，只有
+  // 整個市場共用的TradeDay（純日期）。原本硬套taipeiStampToIso(tradeDay,
+  // undefined)，時間部分永遠補成00:00:00，畫面上顯示「更新時間：.../.../...
+  // 00:00:00」，看起來像是「凌晨成交」這種不存在、會誤導人的假時間。改成
+  // 跟twse.ts/tpex.ts批次快照同樣的慣例：直接用「現在」（實際抓取這批資料
+  // 的當下）當updatedAt，誠實反映「這是我們上次成功抓到這批資料的時間」，
+  // 不去假裝知道逐檔的真實成交時刻。
+  const fetchedAt = new Date().toISOString();
   for (const [, block] of xml.matchAll(/<Q30List>([\s\S]*?)<\/Q30List>/g)) {
     const symbol = xmlTag(block, "SymbolID");
     if (!isEmergingStockCode(symbol)) continue;
@@ -316,7 +330,7 @@ export async function fetchEmergingQuotesSnapshot(): Promise<Map<string, Quote>>
       high: emergingNumber(xmlTag(block, "TradeStatisticHigh")),
       low: emergingNumber(xmlTag(block, "TradeStatisticLow")),
       totalVolume: emergingNumber(xmlTag(block, "TradeTtlVol")),
-      updatedAt: taipeiStampToIso(tradeDay, undefined),
+      updatedAt: fetchedAt,
     });
     if (quote) map.set(quote.symbol, quote);
   }

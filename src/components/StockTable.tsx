@@ -10,8 +10,15 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <>
+      {/* 2026-09-23 Opus地毯式巡檢抓到：這個表格原本沒有min-width，手機375px
+          寬度下瀏覽器會把全部欄位硬擠進容器，「產業」欄的中文字被壓成一字寬
+          直排、單列高度被撐到快200px。比照WatchlistTable.tsx已經用的做法：
+          給表格一個最小寬度＋overflow-x-auto讓它橫向捲動，並加同一句提示文字，
+          不要讓瀏覽器用「擠壓每一欄」的方式硬塞進窄螢幕。 */}
+      <p className="text-[13px] text-(--text-muted) sm:hidden">← 可左右滑動查看完整欄位 →</p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm">
         <thead>
           <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
             <th className="w-8 pr-1 text-right font-medium">#</th>
@@ -75,6 +82,7 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
           ))}
         </tbody>
       </table>
-    </div>
+      </div>
+    </>
   );
 }

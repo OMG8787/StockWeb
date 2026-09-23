@@ -62,7 +62,7 @@ export default function LiveQuoteHeader({ initialQuote }: { initialQuote: Quote 
         {status === "closed" && !emerging && "（非交易時段，顯示最近一次收盤資訊）"}
         {status === "closed" && emerging && "（非交易時段，顯示最近一次成交資訊。興櫃交易時間為 09:00-15:00）"}
         {status === "open" && emerging && "（興櫃交易時間為 09:00-15:00，比上市櫃晚 1.5 小時收盤）"}
-        {status === "pre-market" && "（08:30-09:00試搓時段，尚未正式開盤，以下數字僅供參考）"}
+        {status === "pre-market" && "（08:30-09:00試撮時段，尚未正式開盤，以下數字僅供參考）"}
       </p>
 
       {/* 興櫃專屬說明。興櫃跟上市/上櫃是完全不同的交易制度，如果不講清楚，

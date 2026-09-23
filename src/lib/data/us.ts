@@ -96,6 +96,10 @@ interface YahooChartResult {
     currency: string;
     symbol: string;
     regularMarketPrice: number;
+    /** UNIX秒——`regularMarketPrice`這個報價本身的時間戳。用來判斷下面
+     *  `indicators.quote[0]`那份日K陣列的最後一根，到底是不是真的對得上
+     *  `regularMarketPrice`同一個交易日——見`fetchUsQuote()`裡的完整說明。 */
+    regularMarketTime?: number;
     previousClose?: number;
     chartPreviousClose?: number;
     regularMarketVolume?: number;
@@ -154,16 +158,50 @@ async function fetchYahooChart(symbol: string, range: ChartRange): Promise<Yahoo
  * bars in `indicators.quote[0]` are present regardless of range, so this
  * reads today's (last) bar and yesterday's (second-to-last) bar from there
  * instead and only falls back to `meta` if a bar is somehow missing.
+ *
+ * 2026-09-23 Opus地毯式巡檢抓到的真實bug：原本判斷「哪一根是今天」的邏輯是
+ * `while (closes[todayIdx] == null) todayIdx--`——但Yahoo在盤中/剛收盤這段
+ * 期間，今天這根K棒的open/high/low往往已經有真實數值、**close卻常常還是
+ * null**（要等他們後端正式結算才會補上），這個while迴圈只要看到close是
+ * null就直接跳過整根，於是把「今天」誤判成「昨天」，導致open/high/low
+ * 全部拿到昨天的數字，但`price`（來自`meta.regularMarketPrice`，永遠是
+ * 最新即時報價）仍然是今天的——現價因此常常落在顯示出來的當日最高/最低
+ * 區間之外；連帶`prevClose`往回推一根，變成前天的收盤價，導致個股頁算出
+ * 來的漲跌幅跟`/news`等別處用批次報價算出來的漲跌幅對不起來（實測JPM等
+ * 8/10檔美股都有這個問題，MSFT/META因為當時剛好K線資料已經補齊而正常）。
+ *
+ * 正確做法：不能用「close是不是null」判斷這根是不是今天，要用這根K棒自己
+ * 的時間戳（`result.timestamp`，跟`indicators.quote[0]`同長度、逐根對應）
+ * 跟`regularMarketPrice`自己的時間戳（`meta.regularMarketTime`）比對，
+ * 兩者換算成美東時間的日期是否相同——這樣「今天」的定義才會跟`price`本身
+ * 用的是同一把尺，不會各自對到不同交易日。真的對到今天的那一根，就算
+ * close是null，open/high/low還是可以放心使用（原本的`?? meta.xxx`備援
+ * 繼續保留，處理它們自己也是null的情況）；如果最後一根根本不是今天（例如
+ * 盤前、Yahoo還沒生出今天的K棒），改成完全依賴meta裡的即時欄位。
  */
+function usEasternDateKey(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
 export async function fetchUsQuote(symbol: string): Promise<Quote> {
   const result = await fetchYahooChart(symbol, "1m");
   const meta = result.meta;
   const bars = result.indicators.quote[0];
   const closes = bars.close;
+  const timestamps = result.timestamp ?? [];
 
-  let todayIdx = closes.length - 1;
-  while (todayIdx >= 0 && closes[todayIdx] == null) todayIdx--;
-  let prevIdx = todayIdx - 1;
+  const lastIdx = closes.length - 1;
+  const lastBarIsToday =
+    lastIdx >= 0 &&
+    meta.regularMarketTime != null &&
+    timestamps[lastIdx] != null &&
+    usEasternDateKey(timestamps[lastIdx]) === usEasternDateKey(meta.regularMarketTime);
+  // -1 代表「今天這根K棒根本還不存在」，open/high/low下面會整個改用meta欄位。
+  const todayIdx = lastBarIsToday ? lastIdx : -1;
+  // 往回找「今天」前面第一個有真實收盤價的交易日——lastBarIsToday時從
+  // lastIdx-1開始找（跳過今天這根，即使它剛好有值也不該拿來當自己的昨收）；
+  // 不是今天時，lastIdx本身就已經是最近一個收盤日，從它自己開始找即可。
+  let prevIdx = lastBarIsToday ? lastIdx - 1 : lastIdx;
   while (prevIdx >= 0 && closes[prevIdx] == null) prevIdx--;
 
   const prevClose = prevIdx >= 0 ? closes[prevIdx]! : meta.previousClose ?? meta.chartPreviousClose ?? meta.regularMarketPrice;

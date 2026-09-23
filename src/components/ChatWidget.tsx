@@ -1,13 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ASK_ABOUT_EVENT, type AskAboutDetail } from "@/lib/chatEvents";
-import { getWatchlist } from "@/lib/watchlist";
+import { getWatchlist, WATCHLIST_CHANGED_EVENT } from "@/lib/watchlist";
 import MarkdownLite from "./MarkdownLite";
 
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+}
+
+// 2026-09-23 Opus地毯式巡檢抓到的真實bug：畫面渲染時直接呼叫getWatchlist()
+// （不是透過useSyncExternalStore），SSR當下localStorage不存在、getWatchlist()
+// 回傳[]，client端hydration時卻讀到真正的清單內容，兩次渲染結果不一致，只要
+// 關注清單非空，**每一頁**都會噴React hydration錯誤（#418）——因為ChatWidget
+// 掛在root layout、面板用hidden切換而非卸載，這個錯誤不限於AI問答面板本身
+// 打開的時候。改用WatchlistSection.tsx/WatchlistTable.tsx已經在用的同一套
+// useSyncExternalStore模式：伺服器端快照固定回傳EMPTY，跟client端訂閱
+// WATCHLIST_CHANGED_EVENT保持同步，就不會有SSR/CSR不一致的問題。
+const EMPTY_WATCHLIST: ReturnType<typeof getWatchlist> = [];
+
+function subscribeToWatchlist(callback: () => void) {
+  window.addEventListener(WATCHLIST_CHANGED_EVENT, callback);
+  return () => window.removeEventListener(WATCHLIST_CHANGED_EVENT, callback);
 }
 
 const SUGGESTIONS = ["2330 最近走勢如何？", "AAPL 現在多少錢？", "今天大盤表現如何？"];
@@ -69,6 +84,7 @@ const VOICE_ERROR_MESSAGES: Record<string, string> = {
 };
 
 export default function ChatWidget() {
+  const watchlist = useSyncExternalStore(subscribeToWatchlist, getWatchlist, () => EMPTY_WATCHLIST);
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -130,12 +146,20 @@ export default function ChatWidget() {
   // 但這裡統一處理即可），還包括語音辨識填入文字、「問AI關於」預填問句、送出後清空——
   // 這些都是用 setInput() 直接改 state，不會經過 textarea 自己的 onChange，如果只在
   // onChange 裡調整高度，這些情境就會被漏掉、長文字被裁切看不到。
+  // 2026-09-23 Opus地毯式巡檢抓到：面板第一次打開時輸入框會被壓扁成21px、
+  // placeholder文字被裁切，要等使用者打字才會自動修正回42px。根因是這個effect
+  // 原本只依賴[input]——面板用hidden class切換顯示/隱藏（不是卸載/重新掛載，
+  // 見上面關閉/打開保留捲動位置那段說明），面板還是hidden狀態時量到的
+  // scrollHeight是0，打開面板本身（open從false變true）不會觸發這個effect
+  // 重新量測，所以停留在錯誤的0px直到下一次input改變。補上open依賴，面板
+  // 打開的那一刻（DOM的hidden class已經移除、有真正的版面可以量測）就會
+  // 重新算一次正確高度。
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, CHAT_TEXTAREA_MAX_HEIGHT_PX)}px`;
-  }, [input]);
+  }, [input, open]);
 
   // 徹底收掉目前這個語音辨識實例：先把 callback 拆掉再 stop()。
   // 拆 callback 是必要的——stop() 之後瀏覽器仍會非同步補發一次 onend，如果那時
@@ -395,16 +419,16 @@ export default function ChatWidget() {
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {messages.length === 0 && (
               <div className="space-y-2">
-                {getWatchlist().length > 0 && (
+                {watchlist.length > 0 && (
                   <button
-                    onClick={() => send("幫我分析一下我關注清單裡的每一檔股票", getWatchlist())}
+                    onClick={() => send("幫我分析一下我關注清單裡的每一檔股票", watchlist)}
                     // text-(--accent) on bg-(--accent-soft) measured 3.34:1 light /
                     // 2.23:1 dark — both under WCAG AA's 4.5:1 for text. text-primary
                     // on the same background clears 14.87:1 / 8.10:1 while the
                     // border+background still read as the same accent-tinted button.
                     className="block w-full rounded-md border border-(--accent) bg-(--accent-soft) px-3 py-2 text-left text-xs font-medium text-(--text-primary) hover:opacity-90"
                   >
-                    📋 分析我的關注清單（{getWatchlist().length} 檔）
+                    📋 分析我的關注清單（{watchlist.length} 檔）
                   </button>
                 )}
                 <p className="text-xs text-(--text-muted)">試試看這樣問：</p>

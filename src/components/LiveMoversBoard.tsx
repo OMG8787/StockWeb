@@ -50,12 +50,12 @@ export default function LiveMoversBoard({ market, initialItems }: { market: Mark
         {status === "closed" && (
           <p className="text-xs text-(--text-muted)">非交易時段，以下為最近一次收盤資訊</p>
         )}
-        {/* 08:30 起就會開始輪詢（試搓時段 TWSE/TPEx 已在公布模擬撮合價），所以
+        {/* 08:30 起就會開始輪詢（試撮時段 TWSE/TPEx 已在公布模擬撮合價），所以
             這裡不再宣稱「以下為昨日收盤資訊」——那句話在有試撮價回來時會變成
             不實描述。改用跟 LiveQuoteHeader 一致的誠實措辭：不保證是哪一種價格，
             只明說尚未正式開盤、數字僅供參考。 */}
         {status === "pre-market" && (
-          <p className="text-xs text-(--text-muted)">08:30-09:00試搓時段，尚未正式開盤，以下數字僅供參考</p>
+          <p className="text-xs text-(--text-muted)">08:30-09:00試撮時段，尚未正式開盤，以下數字僅供參考</p>
         )}
       </div>
       <StockTable items={items} />

@@ -546,6 +546,46 @@ AbortController取消重抓）、`StockChart.tsx`（symbol/range/market變動要
 `tsc`/`eslint`/`build`皆通過。同時把這次歸納出的判斷準則寫進CLAUDE.md規則九，
 之後改程式碼要主動套用這些原則，不用等到大掃除。
 
+### 2026-09-23：全站地毯式bug巡檢——8項發現，7項已修（1項為AI措辭已加強提示詞）
+
+Opus agent實測正式站（未測已修過的關注清單/搜尋/AI問答/產業分類），找到8個問題，
+依嚴重度修復：
+1. **【高】美股個股頁現價落在當日最高/最低之外，漲跌幅跟/news對不上**：根因是
+   `us.ts`的`fetchUsQuote()`用「close是不是null」判斷哪根K棒是「今天」——但Yahoo
+   在盤中/剛收盤這段時間，今天這根K棒常常open/high/low已經有值、**close卻還是
+   null**（後端要等一段時間才結算），原邏輯一看到close是null就跳過整根，誤把
+   昨天當今天，導致open/high/low全部拿到昨天的數字，`price`卻仍是今天的即時值
+   （來自`meta.regularMarketPrice`），連帶`prevClose`也多推一天。改用K棒自己的
+   時間戳（`timestamp`陣列）跟`meta.regularMarketTime`的美東時間日期比對，才是
+   正確的「這根是不是今天」判斷依據，不看close是否為null。用真實Yahoo資料驗證
+   10檔美股（含8檔原本壞掉的）修復後全部`price`落在`[low,high]`區間內。
+2. **【高】關注清單一旦非空，每一頁都噴React hydration錯誤**：`ChatWidget.tsx`
+   在render階段直接呼叫`getWatchlist()`（不是`useSyncExternalStore`），SSR回傳
+   `[]`、client端讀到真實清單，兩次渲染不一致。改用`WatchlistSection.tsx`已經在
+   用的`useSyncExternalStore`+`WATCHLIST_CHANGED_EVENT`訂閱模式。
+3. **【中】AI問答輸入框首次開啟被壓扁成21px**：自動增高的`useEffect`只依賴
+   `[input]`，面板用`hidden`切換顯示（不是卸載重掛載）時，面板還隱藏的當下量到
+   的`scrollHeight`是0，打開面板本身不會觸發重新量測。補上`open`依賴。
+4. **【中】手機375px下「焦點排行」/「搜尋結果」表格產業欄被壓成一字寬直排**：
+   `StockTable.tsx`原本沒有`min-width`，比照`WatchlistTable.tsx`加上
+   `min-w-[720px]`＋橫向捲動提示。
+5. **【低】使用者可見文案「試搓」應為「試撮」**：4個使用者可見字串＋3處程式碼
+   註解，全部修正。
+6. **【低】技術線設定選單點外部/按Esc不會關閉**：比照`SiteHeader.tsx`搜尋建議
+   清單的既有做法，補上點外部/Esc關閉。
+7. **【低】興櫃股票今日無成交時顯示「更新時間 00:00:00」**：`emerging.ts`的
+   `fetchEmergingQuote()`/`fetchEmergingQuotesSnapshot()`在沒有真實成交時間可用
+   時，原本硬套`taipeiStampToIso(tradeDay, undefined)`把時間部分補成00:00:00，
+   看起來像凌晨成交的假時間。改成比照`twse.ts`批次快照的慣例，沒有真實時間時
+   直接用「現在」（成功查到這筆資料的時間）。
+8. **【低，AI措辭類，非決定性bug】`/action`出現語意不通的句子**：AI在術語解釋
+   括號前自己加了一句過渡語（「股價淨值比等指標中，本益比代表...」）造成語句
+   破碎。這類AI生成內容無法用程式碼「修好」保證不再發生，已在`actionBrief.ts`
+   的系統提示詞加一條規則明講「括號解釋前不要自己加過渡語」，比照先前「0軸」
+   措辭bug的處理方式（給AI一個明確可照抄的正確示範，而不是空泛地說「不要寫錯」）。
+
+`tsc`/`eslint`/`build`皆通過。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回
