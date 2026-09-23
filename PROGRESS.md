@@ -350,6 +350,21 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-23：全站地毯式優化——3項結構優化＋4項延伸拆分＋8項bug修復，Opus複查全通過
+
+延續前一輪「地毯式檢查」要求：先做3項小優化（universe warm-up集中成`ensureTwUniverseWarm()`、
+`fineIndustry.ts`拆出`fineIndustryGroups.ts`資料檔、`ask.ts`系統提示詞拆成`askSystemPrompt.ts`
+具名常數），接著做全專案結構健檢抓到的4項延伸重構：①`actionBrief.ts`（572行）依職責拆成
+`actionScoring.ts`（純評分邏輯）／`actionGrounding.ts`（候選組裝＋文字組裝）／`actionBrief.ts`
+（只剩prompt與orchestration），②`ChatWidget.tsx`／`StockChart.tsx`／`StockTable.tsx`等元件的
+UI小修（設定選單點外部關閉、手機版表格可橫向捲動提示），③`useFetchOnce`共用hook取代3處重複
+fetch樣板，④新增`CLAUDE.md`規則九，把這次學到的8條程式碼結構原則寫下來，之後不用等累積到
+需要大掃除才處理。同時派agent做全站地毯式bug巡檢，修復8項問題（2高：美股現價落在高低區間外
+的日期比對邏輯、關注清單非空時的hydration錯誤；2中：AI問答輸入框首次開啟被壓扁、375px手機版
+產業欄被壓縮；3低：試搓→試撮錯字、技術線設定選單點外部不會關閉、興櫃股票時間戳顯示00:00:00；
+1提示詞：AI在術語解釋括號前多插一句過渡語）。所有變更都跑過`tsc`/`eslint`/`build`，並派Opus
+agent用真實headless Chromium操作正式站逐項複查全部8項bug修復，全數通過、未發現新問題。
+
 ### 2026-09-22：興櫃盤中即時性正式驗證通過（延續2026-09-20收錄時的未驗證項目）
 
 2026-09-20收錄興櫃當天是週日無法驗證盤中即時性，這次在真正交易時段（09:34~09:49，
