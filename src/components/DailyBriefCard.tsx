@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { DailyBrief } from "@/lib/ai/brief";
+import { useFetchOnce } from "@/lib/useFetchOnce";
 import MarkdownLite from "./MarkdownLite";
 
 /**
@@ -23,20 +24,9 @@ import MarkdownLite from "./MarkdownLite";
 const COLLAPSED_HEIGHT_PX = 220;
 
 export default function DailyBriefCard() {
-  const [brief, setBrief] = useState<DailyBrief | null>(null);
-  const [failed, setFailed] = useState(false);
+  const { data, failed } = useFetchOnce<{ brief: DailyBrief }>("/api/daily-brief");
+  const brief = data?.brief ?? null;
   const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/daily-brief")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data) => !cancelled && setBrief(data.brief))
-      .catch(() => !cancelled && setFailed(true));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5">

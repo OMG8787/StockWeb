@@ -534,6 +534,18 @@ findInUniverse`來查——試過一次，`lib/data`模組圖會把`node:tls`等
 建議清單正常；首頁/`/action`的大盤概況與台指期夜盤資訊完整無缺漏；AI問答引用大盤數字
 正確、夜盤狀態標示格式正確。未發現任何回歸，正式結案。
 
+### 2026-09-22：地毯式審計第二批修復——共用fetch hook（優化清單4項之1）
+
+使用者要求把先前評估「效益存在但風險需要更完整測試」的4項優化全部做完，依風險排序
+從最安全的開始。新增`lib/useFetchOnce.ts`（`{data, failed}`共用hook），取代
+`ActionBriefCard.tsx`/`DailyBriefCard.tsx`/`MomentumSection.tsx`三處各自手刻的
+「掛載時抓一次、處理loading/失敗、卸載後不更新state」樣板。**刻意排除**
+`NewsFeedList.tsx`（有分頁載入更多）、`SearchClient.tsx`（篩選變動要用
+AbortController取消重抓）、`StockChart.tsx`（symbol/range/market變動要重新抓）
+這三個——它們的抓取語意本質上更複雜，硬塞進同一個hook會犧牲清晰度，維持各自實作。
+`tsc`/`eslint`/`build`皆通過。同時把這次歸納出的判斷準則寫進CLAUDE.md規則九，
+之後改程式碼要主動套用這些原則，不用等到大掃除。
+
 ### 2026-09-22：AI問答面板捲動位置修正
 
 使用者反映問完問題AI回覆後畫面會跳到最下面（先看到答案結尾），且關閉面板再打開會跳回

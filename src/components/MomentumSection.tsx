@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import MarketTabs from "./MarketTabs";
 import MomentumTable from "./MomentumTable";
 import type { MomentumItem } from "@/lib/data";
+import { useFetchOnce } from "@/lib/useFetchOnce";
 
 /**
  * Fetched client-side rather than server-rendered like the boards above it:
@@ -17,23 +17,14 @@ import type { MomentumItem } from "@/lib/data";
  * loaded, decouples this section from that spinner entirely.
  */
 export default function MomentumSection() {
-  const [tw, setTw] = useState<MomentumItem[] | null>(null);
-  const [us, setUs] = useState<MomentumItem[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/momentum?market=TW")
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => !cancelled && setTw(data.items ?? []))
-      .catch(() => !cancelled && setTw([]));
-    fetch("/api/momentum?market=US")
-      .then((r) => (r.ok ? r.json() : { items: [] }))
-      .then((data) => !cancelled && setUs(data.items ?? []))
-      .catch(() => !cancelled && setUs([]));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // 原本失敗時直接把狀態設成空陣列（不特別區分「還在載入」跟「抓失敗」，UI只
+  // 分「還沒有資料（顯示骨架）」跟「有資料（可能是空陣列）」兩種），這裡用
+  // useFetchOnce的{data,failed}狀態換算回同樣的語意：failed時當空陣列處理，
+  // 其餘情況沿用data.items（還沒抓完時data是null，UI照舊顯示骨架）。
+  const twState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=TW");
+  const usState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=US");
+  const tw = twState.data ? (twState.data.items ?? []) : twState.failed ? [] : null;
+  const us = usState.data ? (usState.data.items ?? []) : usState.failed ? [] : null;
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">

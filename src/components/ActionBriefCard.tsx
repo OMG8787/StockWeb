@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { ActionBrief } from "@/lib/ai/actionBrief";
+import { useFetchOnce } from "@/lib/useFetchOnce";
 import MarkdownLite from "./MarkdownLite";
 
 /**
@@ -13,19 +13,8 @@ import MarkdownLite from "./MarkdownLite";
  * collapse/expand treatment is needed here.
  */
 export default function ActionBriefCard() {
-  const [brief, setBrief] = useState<ActionBrief | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/action-brief")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("failed"))))
-      .then((data) => !cancelled && setBrief(data.actionBrief))
-      .catch(() => !cancelled && setFailed(true));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data, failed } = useFetchOnce<{ actionBrief: ActionBrief }>("/api/action-brief");
+  const brief = data?.actionBrief ?? null;
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5">
