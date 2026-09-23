@@ -377,6 +377,11 @@ hook檔案後就會被抓到，追查後確認是規則對「跨檔案抽出的e
 實測：8個指標checkbox全部勾選後子圖高度(750px)、顏色、K線圖疊圖全部正確，並用`git stash`
 比對確認過程中發現的「切到當日／切回日K的race condition會噴lightweight-charts格式錯誤」是
 重構前就存在的既有bug、不是這次拆分引入的，記錄到下方已知問題、暫不在此次任務範圍內處理。
+**正式站另派Opus複查通過**：8指標全開/全關、美股MACD+RSI、切換1年/10年皆正常，並額外對每個
+指標分別單獨勾選、用canvas像素色彩統計逐一比對，證實5種顏色都正確對應各自指標、無錯接，
+子圖順序（MACD→RSI→KD）也與宣告順序相符，全程console零error。至此「4項都做」（actionBrief
+拆分／ChatWidget語音hook／useFetchOnce共用hook／StockChart table-driven指標）全部完成並
+複查通過，本輪地毯式優化＋bug巡檢結案。
 
 ### 2026-09-22：興櫃盤中即時性正式驗證通過（延續2026-09-20收錄時的未驗證項目）
 
