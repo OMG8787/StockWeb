@@ -364,6 +364,12 @@ fetch樣板，④新增`CLAUDE.md`規則九，把這次學到的8條程式碼結
 產業欄被壓縮；3低：試搓→試撮錯字、技術線設定選單點外部不會關閉、興櫃股票時間戳顯示00:00:00；
 1提示詞：AI在術語解釋括號前多插一句過渡語）。所有變更都跑過`tsc`/`eslint`/`build`，並派Opus
 agent用真實headless Chromium操作正式站逐項複查全部8項bug修復，全數通過、未發現新問題。
+`actionBrief.ts`拆分後另派Opus複查`/action`頁面實際運作正常（通過）。`ChatWidget.tsx`的語音
+輸入狀態機（~260行 Web Speech API 管理＋自動重啟邏輯）也拆成獨立的`src/lib/useVoiceInput.ts`
+hook；拆分途中發現一個新版eslint規則`react-hooks/set-state-in-effect`的已知落差——同一段
+「面板關閉時同步收麥克風＋清狀態」的effect邏輯留在原元件檔案裡不會被這條規則抓到，搬進獨立
+hook檔案後就會被抓到，追查後確認是規則對「跨檔案抽出的effect」判斷較嚴格、不是重構引入的
+新行為問題，加了針對性的`eslint-disable-next-line`並附註原因後解決。
 
 ### 2026-09-22：興櫃盤中即時性正式驗證通過（延續2026-09-20收錄時的未驗證項目）
 
