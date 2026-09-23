@@ -1076,4 +1076,15 @@ Hyatt Hotels 跟 `E` Eni 這兩個誤判，都跟真正提問內容完全無關�
 上寫含中文的 API 測試，都要用檔案 + `--data-binary @檔案` 的寫法，不要用 `-d '...內嵌字串'`，
 避免浪費時間追查根本不存在的假 bug。**
 
+**2026-09-23：這台機器已裝好 Playwright MCP，之後派QA agent不用再各自手刻瀏覽器操作腳本**：
+今天連續好幾個Opus驗證agent都各自回報「沒有Playwright MCP工具可用，改用專案內的Playwright
+以腳本方式驅動」，代表在此之前這台機器只有裸的`playwright` npm套件、沒有把它包成MCP
+工具讓agent直接呼叫，每次都要重新寫一份`page.goto`/`page.evaluate`之類的腳本，浪費時間也
+容易手滑寫錯。已經用`claude mcp add playwright -- npx @playwright/mcp@latest`（local
+scope，這台機器＋這個專案）裝好官方Playwright MCP伺服器，`claude mcp list`確認已連線
+（Connected）。**之後派瀏覽器驗證/測試類的agent，可以直接在指示裡提到「你有Playwright
+MCP工具可以用」，讓它優先用MCP工具操作（例如`browser_navigate`/`browser_click`/
+`browser_snapshot`這類），不用自己重新架設Playwright腳本環境**；如果agent回報還是說沒有
+這個工具，先用`claude mcp list`確認連線狀態是不是掉了，不用假設是agent能力問題。
+
 如果你接手後又發現了新問題，**除了修正之外，記得也在這份文件的「工作日誌」補一筆，並更新這個章節。**
