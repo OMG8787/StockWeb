@@ -14,7 +14,7 @@ import {
 } from "lightweight-charts";
 import type { Candle, ChartRange } from "@/lib/data";
 import { computeSignals } from "@/lib/signals";
-import { computeBollingerSeries, computeKdSeries, computeMacdSeries, computeMaSeries, computeRsiSeries } from "@/lib/indicators";
+import { applyIndicatorData, INDICATOR_DEFS, type IndicatorSeries } from "@/lib/chartIndicatorDefs";
 import { formatPrice, formatVolume } from "@/lib/format";
 import { readChartPalette, subscribeToTheme } from "@/lib/theme";
 import {
@@ -40,6 +40,7 @@ const FALLBACK_PALETTE = {
   priceUpSoft: "#e3494880",
   priceDownSoft: "#00830080",
   textMuted: "#898781",
+  accent: "#2a78d6",
 };
 
 const RANGE_LABELS: Record<ChartRange, string> = {
@@ -55,40 +56,6 @@ const RANGE_LABELS: Record<ChartRange, string> = {
   "10y": "10年",
 };
 const RANGES: ChartRange[] = ["today", "5d", "10d", "1m", "3m", "6m", "1y", "2y", "5y", "10y"];
-
-// Fixed, saturated colors chosen to read reasonably against both the light
-// and dark chart backgrounds — deliberately NOT theme-adjusted the way the
-// candlestick/gridline palette below is, since these just need to be
-// distinguishable from each other and from the candles, not match either
-// theme's accent scheme specifically.
-const MA_COLORS: Record<"ma5" | "ma10" | "ma20" | "ma60", string> = {
-  ma5: "#f59e0b",
-  ma10: "#3b82f6",
-  ma20: "#a855f7",
-  ma60: "#14b8a6",
-};
-const BOLLINGER_COLOR = "#6b7280";
-const MACD_COLOR = "#3b82f6";
-const MACD_SIGNAL_COLOR = "#f59e0b";
-const RSI_COLOR = "#a855f7";
-const KD_K_COLOR = "#3b82f6";
-const KD_D_COLOR = "#f59e0b";
-
-const INDICATOR_LABELS: Array<{ key: keyof ChartIndicatorSettings; label: string }> = [
-  { key: "ma5", label: "MA5" },
-  { key: "ma10", label: "MA10" },
-  { key: "ma20", label: "MA20" },
-  { key: "ma60", label: "MA60" },
-  { key: "bollinger", label: "布林通道" },
-  { key: "macd", label: "MACD" },
-  { key: "rsi", label: "RSI" },
-  { key: "kd", label: "KD" },
-];
-// These three need their own sub-pane (a different value range than price);
-// order here fixes which pane index each one gets (pane 1, 2, 3...) whenever
-// it's enabled, so recreating the chart after a settings change always
-// produces the same, stable layout instead of panes shuffling around.
-const SUB_PANE_INDICATORS: Array<"macd" | "rsi" | "kd"> = ["macd", "rsi", "kd"];
 
 // The numeric branch used to slice down to just a date ("YYYY-MM-DD"),
 // which was harmless while nothing ever actually fed lightweight-charts a
@@ -152,11 +119,11 @@ export default function StockChart({
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const lineSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const maSeriesRef = useRef<Partial<Record<"ma5" | "ma10" | "ma20" | "ma60", ISeriesApi<"Line">>>>({});
-  const bollingerSeriesRef = useRef<{ upper?: ISeriesApi<"Line">; middle?: ISeriesApi<"Line">; lower?: ISeriesApi<"Line"> }>({});
-  const macdSeriesRef = useRef<{ macd?: ISeriesApi<"Line">; signal?: ISeriesApi<"Line">; histogram?: ISeriesApi<"Histogram"> }>({});
-  const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const kdSeriesRef = useRef<{ k?: ISeriesApi<"Line">; d?: ISeriesApi<"Line"> }>({});
+  // 每個技術指標建立出來的series，用INDICATOR_DEFS的key查表——MA/RSI是單一條線
+  // （key固定叫"line"），Bollinger是upper/middle/lower，MACD是histogram/macd/signal，
+  // KD是k/d，各指標實際用哪些名字由 chartIndicatorDefs.ts 的 createSeries() 決定，
+  // 這裡不需要知道細節。
+  const indicatorSeriesRef = useRef<Partial<Record<keyof ChartIndicatorSettings, Record<string, IndicatorSeries>>>>({});
   const candleMapRef = useRef<Map<string, Candle>>(new Map());
   const currency = market === "TW" ? "TWD" : "USD";
   // Live values for the crosshair callback, which is registered once but
@@ -257,8 +224,8 @@ export default function StockChart({
   // a familiar indicator. Simpler and more honest to not offer them at all
   // for the one intraday range than to compute something technically
   // "there" but conceptually wrong.
-  const activeSubPanes = useMemo(
-    () => (isIntraday ? [] : SUB_PANE_INDICATORS.filter((k) => indicators[k])),
+  const activeSubPaneDefs = useMemo(
+    () => (isIntraday ? [] : INDICATOR_DEFS.filter((d) => d.pane === "sub" && indicators[d.key])),
     [indicators, isIntraday]
   );
 
@@ -340,74 +307,25 @@ export default function StockChart({
     seriesRef.current = series ?? null;
     lineSeriesRef.current = lineSeries ?? null;
     volumeRef.current = volume;
-    maSeriesRef.current = {};
-    bollingerSeriesRef.current = {};
-    macdSeriesRef.current = {};
-    rsiSeriesRef.current = null;
-    kdSeriesRef.current = {};
+    indicatorSeriesRef.current = {};
 
     // Price-pane overlays: moving averages and Bollinger bands share the
     // same value range as the candles, so they go on pane 0 alongside them.
-    // Skipped entirely for "today" — see activeSubPanes' comment above for
+    // Skipped entirely for "today" — see activeSubPaneDefs' comment above for
     // why these don't mean anything computed over a single day's minute
     // bars instead of many daily ones.
     if (!isIntraday) {
-      (["ma5", "ma10", "ma20", "ma60"] as const).forEach((key) => {
-        if (!indicators[key]) return;
-        maSeriesRef.current[key] = chart.addSeries(LineSeries, {
-          color: MA_COLORS[key],
-          lineWidth: 1,
-          priceLineVisible: false,
-          lastValueVisible: false,
-          crosshairMarkerVisible: false,
-        });
+      INDICATOR_DEFS.filter((def) => def.pane === "price" && indicators[def.key]).forEach((def) => {
+        indicatorSeriesRef.current[def.key] = def.createSeries(chart, palette, 0);
       });
-      if (indicators.bollinger) {
-        const opts = { lineWidth: 1 as const, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
-        bollingerSeriesRef.current.upper = chart.addSeries(LineSeries, { ...opts, color: BOLLINGER_COLOR });
-        bollingerSeriesRef.current.middle = chart.addSeries(LineSeries, { ...opts, color: BOLLINGER_COLOR, lineStyle: 2 });
-        bollingerSeriesRef.current.lower = chart.addSeries(LineSeries, { ...opts, color: BOLLINGER_COLOR });
-      }
     }
 
-    // Sub-panes: each gets a fixed index based on SUB_PANE_INDICATORS order
-    // among whichever of macd/rsi/kd are actually enabled this time.
-    activeSubPanes.forEach((key, i) => {
+    // Sub-panes: each gets a fixed index based on INDICATOR_DEFS order among
+    // whichever of macd/rsi/kd are actually enabled this time (activeSubPaneDefs
+    // preserves that relative order — see its useMemo above).
+    activeSubPaneDefs.forEach((def, i) => {
       const paneIndex = i + 1;
-      if (key === "macd") {
-        macdSeriesRef.current.histogram = chart.addSeries(
-          HistogramSeries,
-          { color: palette.textMuted, priceLineVisible: false, lastValueVisible: false },
-          paneIndex
-        );
-        macdSeriesRef.current.macd = chart.addSeries(
-          LineSeries,
-          { color: MACD_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
-          paneIndex
-        );
-        macdSeriesRef.current.signal = chart.addSeries(
-          LineSeries,
-          { color: MACD_SIGNAL_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
-          paneIndex
-        );
-      } else if (key === "rsi") {
-        rsiSeriesRef.current = chart.addSeries(
-          LineSeries,
-          { color: RSI_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
-          paneIndex
-        );
-      } else if (key === "kd") {
-        kdSeriesRef.current.k = chart.addSeries(
-          LineSeries,
-          { color: KD_K_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
-          paneIndex
-        );
-        kdSeriesRef.current.d = chart.addSeries(
-          LineSeries,
-          { color: KD_D_COLOR, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false },
-          paneIndex
-        );
-      }
+      indicatorSeriesRef.current[def.key] = def.createSeries(chart, palette, paneIndex);
     });
 
     chart.subscribeCrosshairMove((param) => {
@@ -489,7 +407,7 @@ export default function StockChart({
       lineSeriesRef.current = null;
       volumeRef.current = null;
     };
-    // Recreated on indicator-settings change (activeSubPanes derives from
+    // Recreated on indicator-settings change (activeSubPaneDefs derives from
     // it) — theme changes are handled separately below via applyOptions
     // rather than a full recreate. Also recreated when crossing into/out of
     // "today" specifically (isIntraday, not raw `range`) — that's what
@@ -584,52 +502,23 @@ export default function StockChart({
       }))
     );
 
-    // Indicator series are only present (in the refs) when their pane/line
-    // was actually created for the current settings — each is computed
-    // fresh from the full candle set (not incrementally), which is cheap
-    // enough at chart-load scale (at most a few thousand candles even for
-    // "10年") and avoids having to track partial-update state per series.
+    // Indicator series are only present (in the ref) when their pane/line was
+    // actually created for the current settings — each is computed fresh
+    // from the full candle set (not incrementally), which is cheap enough at
+    // chart-load scale (at most a few thousand candles even for "10年") and
+    // avoids having to track partial-update state per series.
     if (candles) {
-      (["ma5", "ma10", "ma20", "ma60"] as const).forEach((key) => {
-        const s = maSeriesRef.current[key];
-        if (!s) return;
-        const period = { ma5: 5, ma10: 10, ma20: 20, ma60: 60 }[key];
-        s.setData(computeMaSeries(candles, period).map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
+      INDICATOR_DEFS.forEach((def) => {
+        const seriesMap = indicatorSeriesRef.current[def.key];
+        if (!seriesMap) return;
+        applyIndicatorData(seriesMap, def.computeData(candles, paletteRef.current));
       });
-      if (bollingerSeriesRef.current.upper) {
-        const b = computeBollingerSeries(candles);
-        bollingerSeriesRef.current.upper.setData(b.upper.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-        bollingerSeriesRef.current.middle?.setData(b.middle.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-        bollingerSeriesRef.current.lower?.setData(b.lower.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-      }
-      if (macdSeriesRef.current.macd) {
-        const m = computeMacdSeries(candles);
-        macdSeriesRef.current.macd.setData(m.macd.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-        macdSeriesRef.current.signal?.setData(m.signal.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-        macdSeriesRef.current.histogram?.setData(
-          m.histogram.map((p) => ({
-            time: p.time as unknown as UTCTimestamp,
-            value: p.value,
-            color: p.value >= 0 ? paletteRef.current.priceUpSoft : paletteRef.current.priceDownSoft,
-          }))
-        );
-      }
-      if (rsiSeriesRef.current) {
-        rsiSeriesRef.current.setData(
-          computeRsiSeries(candles).map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value }))
-        );
-      }
-      if (kdSeriesRef.current.k) {
-        const kd = computeKdSeries(candles);
-        kdSeriesRef.current.k.setData(kd.k.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-        kdSeriesRef.current.d?.setData(kd.d.map((p) => ({ time: p.time as unknown as UTCTimestamp, value: p.value })));
-      }
     }
 
     chartRef.current.timeScale().fitContent();
   }, [chartData, themeTick, chartVersion, candles]);
 
-  // Same reasoning as activeSubPanes above: every one of these signals (MA
+  // Same reasoning as activeSubPaneDefs above: every one of these signals (MA
   // alignment, RSI, MACD, volume-vs-trailing-average) is defined in terms of
   // daily bars, so computing them against a single day's minute bars would
   // just produce a number shaped like a familiar signal without the
@@ -641,7 +530,7 @@ export default function StockChart({
 
   // Sub-panes each need real vertical room of their own, or MACD/RSI/KD
   // render squashed into a sliver under the price pane.
-  const chartHeight = 360 + activeSubPanes.length * 130;
+  const chartHeight = 360 + activeSubPaneDefs.length * 130;
 
   return (
     <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
@@ -662,7 +551,7 @@ export default function StockChart({
           ))}
         </div>
         {/* Hidden for "today" rather than shown-but-inert: every one of
-            these indicators is computed over daily bars (see activeSubPanes'
+            these indicators is computed over daily bars (see activeSubPaneDefs'
             comment), so none of them would actually appear on an intraday
             chart even with a box checked — a visible-but-nonfunctional
             control is more confusing than no control at all. */}
@@ -677,7 +566,7 @@ export default function StockChart({
           {showSettings && (
             <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border border-(--gridline) bg-(--surface-1) p-2 shadow-lg">
               <p className="mb-1 px-1 text-[13px] text-(--text-muted)">套用到所有股票的圖表</p>
-              {INDICATOR_LABELS.map(({ key, label }) => (
+              {INDICATOR_DEFS.map(({ key, label }) => (
                 <label key={key} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-(--page-plane)">
                   <input type="checkbox" checked={indicators[key]} onChange={() => toggleIndicator(key)} />
                   {label}

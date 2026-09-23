@@ -369,7 +369,14 @@ agent用真實headless Chromium操作正式站逐項複查全部8項bug修復，
 hook；拆分途中發現一個新版eslint規則`react-hooks/set-state-in-effect`的已知落差——同一段
 「面板關閉時同步收麥克風＋清狀態」的effect邏輯留在原元件檔案裡不會被這條規則抓到，搬進獨立
 hook檔案後就會被抓到，追查後確認是規則對「跨檔案抽出的effect」判斷較嚴格、不是重構引入的
-新行為問題，加了針對性的`eslint-disable-next-line`並附註原因後解決。
+新行為問題，加了針對性的`eslint-disable-next-line`並附註原因後解決。「4項都做」的最後一項——
+`StockChart.tsx`技術指標系統改成table-driven（新增`src/lib/chartIndicatorDefs.ts`，8種指標
+統一用`{key,label,pane,createSeries,computeData}`描述，之後新增指標只要在這份清單加一筆，
+不用再回頭改元件裡5個分散的地方：refs宣告、建立series、套用資料、色票常數、設定選單清單）
+也完成。這是本次優化風險最高的一項，除了tsc/eslint/build，額外起本機dev server用playwright-core
+實測：8個指標checkbox全部勾選後子圖高度(750px)、顏色、K線圖疊圖全部正確，並用`git stash`
+比對確認過程中發現的「切到當日／切回日K的race condition會噴lightweight-charts格式錯誤」是
+重構前就存在的既有bug、不是這次拆分引入的，記錄到下方已知問題、暫不在此次任務範圍內處理。
 
 ### 2026-09-22：興櫃盤中即時性正式驗證通過（延續2026-09-20收錄時的未驗證項目）
 
@@ -873,6 +880,13 @@ Opus agent 把 `ask.ts`（1,448→356行）拆成10個檔案（意圖判斷/各g
 
 ## 目前已知問題
 
+- **【2026-09-23新發現，尚未修復，非本次任務範圍】K線圖快速切換到/離開「當日」區間時
+  偶發console錯誤**：`StockChart.tsx`重構技術指標系統時，用playwright實測快速從「3個月」
+  切到「當日」再切回「3個月」，會噴一次`pageerror: Invalid date string=...,
+  expected format=yyyy-mm-dd`。已用`git stash`比對確認這是重構前就存在的既有race
+  condition（圖表已依新range重建成intraday/daily模式，但上一個range的candles資料還沒
+  fetch完成就被送進新圖表），不是這次拆分引入的新問題，不影響一般使用（正常點擊間隔不會
+  觸發），暫記錄待日後有空再處理，不列入這次「4項都做」的驗收範圍。
 - **【已於2026-09-22修好】亂碼/雜訊文字可能被誤判成美股單一字母代號**：
   Opus驗證agent測試時不小心用錯編碼送出亂碼問句，發現系統會從亂碼裡抽出孤立大寫字母
   當成美股代號（例如誤抽到S/O/L/J分別對應SentinelOne/Realty Income/Loews等），然後
