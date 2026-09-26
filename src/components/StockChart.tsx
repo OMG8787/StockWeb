@@ -87,6 +87,18 @@ export default function StockChart({
   const [range, setRange] = useState<ChartRange>("3m");
   const isIntraday = range === "today";
   const [candles, setCandles] = useState<Candle[] | null>(null);
+  // 記錄`candles`這批資料實際是哪個range抓回來的——不能直接拿當下的`range`/
+  // `isIntraday`來解讀它。快速切換range時（尤其today跟其他range之間切換），
+  // 抓取效果刻意讓`candles`保留上一個range的資料直到新的fetch完成（見下方
+  // fetch effect的註解，避免畫面在等待時整個變空白），但`range`state本身
+  // 已經立刻切換了——如果`chartData`拿當下最新的`range`去解讀舊資料的
+  // `c.time`格式（daily是純日期字串、today是完整ISO時間戳，兩種格式不能
+  // 混用），會餵給lightweight-charts格式不符的時間值直接噴錯
+  // （`Invalid date string=..., expected format=yyyy-mm-dd`）。用這個
+  // 額外state記住「candles實際的資料形狀」，資料形狀判斷永遠跟資料本身
+  // 綁在一起更新，不會有中間態。
+  const [candlesRange, setCandlesRange] = useState<ChartRange>("3m");
+  const isCandlesIntraday = candlesRange === "today";
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   // useSyncExternalStore (not useState+useEffect+manual event listener):
@@ -197,6 +209,7 @@ export default function StockChart({
       .then((data) => {
         if (cancelled) return;
         setCandles(data.candles);
+        setCandlesRange(range);
         setError(null);
       })
       .catch((err) => {
@@ -463,8 +476,11 @@ export default function StockChart({
   // range instead needs a REAL numeric UTCTimestamp (seconds) so
   // lightweight-charts can place points within a single day — a business-day
   // string has no time-of-day component at all.
+  // 用`isCandlesIntraday`（跟`candles`本身綁在一起更新）判斷資料形狀，
+  // 不能用`isIntraday`（跟著`range`立刻切換）——見上面`candlesRange`
+  // state的宣告註解，這是修好快速切換range時噴錯的關鍵。
   const toChartTime = (time: string): UTCTimestamp =>
-    isIntraday ? (Math.floor(new Date(time).getTime() / 1000) as UTCTimestamp) : (time as unknown as UTCTimestamp);
+    isCandlesIntraday ? (Math.floor(new Date(time).getTime() / 1000) as UTCTimestamp) : (time as unknown as UTCTimestamp);
 
   const chartData = useMemo(() => {
     if (!candles) return null;
@@ -483,7 +499,7 @@ export default function StockChart({
       })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candles, range]);
+  }, [candles, candlesRange]);
 
   useEffect(() => {
     candleMapRef.current = new Map((candles ?? []).map((c) => [c.time, c]));
