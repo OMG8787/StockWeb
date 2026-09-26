@@ -350,6 +350,12 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-27：「當日」切換race condition Opus正式站複查通過，正式結案
+
+Opus agent用Playwright在正式站`/stock/2330`監聽console/pageerror，做多組快速連點（完全不等待、
+40ms、150~800ms間隔，當日↔3個月/6個月/5日/1年/10年/1個月），再正常速度逐一切換10個區間並截圖。
+全程0個console錯誤，`Invalid date string`不再出現；當日為折線圖、其餘9個區間K棒正常顯示。
+
 ### 2026-09-27：修好K線圖快速切換到/離開「當日」的console錯誤（`d3c2268`）
 
 使用者指名要求修復已知問題清單裡記錄的這個race condition。根因：資料形狀判斷（daily
@@ -892,7 +898,7 @@ Opus agent 把 `ask.ts`（1,448→356行）拆成10個檔案（意圖判斷/各g
 
 ## 目前已知問題
 
-- **【已於2026-09-27修好，待Opus複查】K線圖快速切換到/離開「當日」區間時偶發console錯誤**：
+- **【已於2026-09-27修好，Opus正式站複查通過，正式結案】K線圖快速切換到/離開「當日」區間時偶發console錯誤**：
   根因是`chartData`的時間格式判斷用即時`range`，但`candles`資料在新range fetch完成前
   刻意保留舊range資料——快速切走「今日」時會用新range的daily格式去解讀還沒更新的
   intraday資料，餵給lightweight-charts格式不符的時間字串而噴錯。修法：新增`candlesRange`
