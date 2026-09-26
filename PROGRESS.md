@@ -350,6 +350,13 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-27：修好K線圖快速切換到/離開「當日」的console錯誤（`d3c2268`）
+
+使用者指名要求修復已知問題清單裡記錄的這個race condition。根因：資料形狀判斷（daily
+純日期字串 vs today完整ISO時間戳）用即時range，但candles刻意保留舊range資料到新fetch
+完成，中間會用錯的range去解讀舊資料格式。修法：新增`candlesRange` state跟candles綁定
+更新，格式判斷改用它。`tsc`/`eslint`/`build`皆通過，已派Opus agent複查。
+
 ### 2026-09-23：全站地毯式優化——3項結構優化＋4項延伸拆分＋8項bug修復，Opus複查全通過
 
 延續前一輪「地毯式檢查」要求：先做3項小優化（universe warm-up集中成`ensureTwUniverseWarm()`、
@@ -885,13 +892,12 @@ Opus agent 把 `ask.ts`（1,448→356行）拆成10個檔案（意圖判斷/各g
 
 ## 目前已知問題
 
-- **【2026-09-23新發現，尚未修復，非本次任務範圍】K線圖快速切換到/離開「當日」區間時
-  偶發console錯誤**：`StockChart.tsx`重構技術指標系統時，用playwright實測快速從「3個月」
-  切到「當日」再切回「3個月」，會噴一次`pageerror: Invalid date string=...,
-  expected format=yyyy-mm-dd`。已用`git stash`比對確認這是重構前就存在的既有race
-  condition（圖表已依新range重建成intraday/daily模式，但上一個range的candles資料還沒
-  fetch完成就被送進新圖表），不是這次拆分引入的新問題，不影響一般使用（正常點擊間隔不會
-  觸發），暫記錄待日後有空再處理，不列入這次「4項都做」的驗收範圍。
+- **【已於2026-09-27修好，待Opus複查】K線圖快速切換到/離開「當日」區間時偶發console錯誤**：
+  根因是`chartData`的時間格式判斷用即時`range`，但`candles`資料在新range fetch完成前
+  刻意保留舊range資料——快速切走「今日」時會用新range的daily格式去解讀還沒更新的
+  intraday資料，餵給lightweight-charts格式不符的時間字串而噴錯。修法：新增`candlesRange`
+  state跟`candles`同時更新，格式判斷改用「candles實際對應的range」。`tsc`/`eslint`/
+  `build`皆通過（`d3c2268`）。
 - **【已於2026-09-22修好】亂碼/雜訊文字可能被誤判成美股單一字母代號**：
   Opus驗證agent測試時不小心用錯編碼送出亂碼問句，發現系統會從亂碼裡抽出孤立大寫字母
   當成美股代號（例如誤抽到S/O/L/J分別對應SentinelOne/Realty Income/Loews等），然後
