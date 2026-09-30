@@ -640,9 +640,14 @@ export async function fetchTpexInstitutionalTradingAll(): Promise<Map<string, Ch
 // ---------------------------------------------------------------------------
 
 interface TpexMarginRow {
+  Date?: string;
   SecuritiesCompanyCode: string;
   MarginPurchaseBalance: string;
   MarginPurchaseBalancePreviousDay: string;
+  /** 融資限額（張）——算融資使用率用。同一列的 MarginPurchaseUtilizationRate 是
+   *  櫃買中心「無條件捨去」到小數兩位的值，本站統一自己用 餘額÷限額 四捨五入算
+   *  （跟市面看盤軟體一致，見 chipsRatios.ts），所以不直接用那個欄位。 */
+  MarginPurchaseQuota?: string;
   ShortSaleBalance: string;
   ShortSaleBalancePreviousDay: string;
 }
@@ -666,6 +671,8 @@ export async function fetchTpexMarginTradingAll(): Promise<Map<string, Chips>> {
       marginBalanceChange: marginBalance != null && marginPrev != null ? marginBalance - marginPrev : undefined,
       shortBalance,
       shortBalanceChange: shortBalance != null && shortPrev != null ? shortBalance - shortPrev : undefined,
+      marginQuota: parseTpexNumber(row.MarginPurchaseQuota),
+      marginDate: row.Date && row.Date.length === 7 ? rocCompactToIso(row.Date) : undefined,
     });
   }
   return map;

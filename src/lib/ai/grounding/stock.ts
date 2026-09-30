@@ -1,9 +1,10 @@
-import { getChart, getChips, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
+import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
 import type { Market } from "@/lib/data";
 import { fetchNews, fetchNewsMulti } from "@/lib/data/news";
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState } from "./indicators";
+import { describeChipsRatios } from "./chipsRatios";
 
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined }
@@ -23,7 +24,7 @@ export async function buildStockGrounding(
   // surfaces English-language wire coverage (Reuters/Bloomberg/MarketWatch)
   // that the zh-TW edition mostly doesn't carry.
   const newsQuery = `${quote.name} ${quote.symbol}`;
-  const [earnings, news, fundamentals, chips, announcements] = await Promise.all([
+  const [earnings, news, fundamentals, chips, announcements, chipsRatios] = await Promise.all([
     getEarnings(quote.symbol, quote.market).catch(() => null),
     (quote.market === "US" ? fetchNewsMulti(newsQuery, 4, ["zh-TW", "en-US"]) : fetchNews(newsQuery, 8)).catch(
       () => []
@@ -31,6 +32,8 @@ export async function buildStockGrounding(
     getFundamentals(quote.symbol, quote.market).catch(() => null),
     getChips(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
+    // 美股直接回 null（沒有這些資料），不會多打任何上游。
+    getChipsRatios(quote.symbol, quote.market).catch(() => null),
   ]);
 
   const changeLabel = quote.change >= 0 ? "上漲" : "下跌";
@@ -129,6 +132,8 @@ export async function buildStockGrounding(
     }
     if (parts.length > 0) lines.push(`籌碼面（${chips.date ?? "最近交易日"}）：${parts.join("；")}`);
   }
+  const chipsRatiosText = describeChipsRatios(chipsRatios);
+  if (chipsRatiosText) lines.push(chipsRatiosText);
 
   if (announcements.length > 0) {
     const shown = announcements.slice(0, 3).map((a) => `- ${a.date}：${a.subject.length > 80 ? `${a.subject.slice(0, 80)}…` : a.subject}`);

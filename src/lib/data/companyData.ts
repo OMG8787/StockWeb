@@ -100,7 +100,8 @@ export async function getChips(symbolInput: string, marketHint?: Market): Promis
       cachedMap("chips:TW:institutional", CHIPS_TTL_MS, () =>
         mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll)
       ),
-      cachedMap("chips:TW:margin", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll)),
+      // v2（2026-09-30）：每檔多了 marginQuota/marginDate，換 key 避免讀到舊形狀的快取。
+      cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll)),
     ]);
     const institutional = institutionalMap.get(symbol);
     const margin = marginMap.get(symbol);

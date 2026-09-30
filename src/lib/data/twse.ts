@@ -379,36 +379,57 @@ export async function fetchTwseInstitutionalTradingAll(): Promise<Map<string, Ch
   return map;
 }
 
-interface MarginRow {
-  股票代號: string;
-  融資今日餘額: string;
-  融資前日餘額: string;
-  融券今日餘額: string;
-  融券前日餘額: string;
+interface MarginTradingResponse {
+  stat?: string;
+  date?: string;
+  tables?: Array<{ fields?: string[]; data?: string[][] }>;
 }
 
 /**
- * 融資融券餘額 — TWSE OpenAPI，涵蓋每檔可信用交易的股票，單位是「張」
- * （TWSE 原始資料本來就是張數，不是股數，跟上面三大法人的股數單位不同）。
- * 同樣一次回傳全市場，整包快取後依代號查表。
+ * 融資融券餘額 — 單位是「張」（TWSE 原始資料本來就是張數，不是股數，跟上面三大
+ * 法人的股數單位不同）。同樣一次回傳全市場，整包快取後依代號查表。
+ *
+ * 2026-09-30 從 openapi.twse.com.tw/v1/exchangeReport/MI_MARGN 改成官網 rwd 版：
+ * openapi 版沒有資料日期，而且實測晚上 22:37 還停在前一個交易日（rwd 版已經是
+ * 當天），跟 TPEx 那邊（當天）日期對不齊；rwd 版有 `date`、也有算「融資使用率」
+ * 需要的「次一營業日限額」。rwd 表格的欄位名稱融資/融券兩組重複（前日餘額、
+ * 今日餘額、次一營業日限額各出現兩次），所以融資取第一次出現、融券取最後一次。
  */
 export async function fetchTwseMarginTradingAll(): Promise<Map<string, Chips>> {
-  const url = "https://openapi.twse.com.tw/v1/exchangeReport/MI_MARGN";
-  const res = await fetchWithTimeout(url, 8000);
-  const rows = (await res.json()) as MarginRow[];
+  const url = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?response=json&date=&selectType=ALL";
+  const res = await fetchWithTimeout(url, 10_000);
+  const payload = (await res.json()) as MarginTradingResponse;
   const map = new Map<string, Chips>();
-  for (const row of rows) {
-    const code = row.股票代號?.trim();
+  if (payload.stat !== "OK" || !payload.tables) return map;
+  const table = payload.tables.find((t) => t.fields?.[0] === "代號" && Array.isArray(t.data));
+  if (!table?.fields || !table.data) return map;
+  const f = table.fields;
+  const iCode = 0;
+  const iMarginPrev = f.indexOf("前日餘額");
+  const iMargin = f.indexOf("今日餘額");
+  const iMarginQuota = f.indexOf("次一營業日限額");
+  const iShortPrev = f.lastIndexOf("前日餘額");
+  const iShort = f.lastIndexOf("今日餘額");
+  if ([iMarginPrev, iMargin, iShortPrev, iShort].includes(-1) || iShort === iMargin) return map;
+  const marginDate =
+    payload.date && payload.date.length === 8
+      ? `${payload.date.slice(0, 4)}-${payload.date.slice(4, 6)}-${payload.date.slice(6, 8)}`
+      : undefined;
+
+  for (const row of table.data) {
+    const code = row[iCode]?.trim();
     if (!code) continue;
-    const marginBalance = parseTwseNumber(row.融資今日餘額);
-    const marginPrev = parseTwseNumber(row.融資前日餘額);
-    const shortBalance = parseTwseNumber(row.融券今日餘額);
-    const shortPrev = parseTwseNumber(row.融券前日餘額);
+    const marginBalance = parseTwseNumber(row[iMargin]);
+    const marginPrev = parseTwseNumber(row[iMarginPrev]);
+    const shortBalance = parseTwseNumber(row[iShort]);
+    const shortPrev = parseTwseNumber(row[iShortPrev]);
     map.set(code, {
       marginBalance,
       marginBalanceChange: marginBalance != null && marginPrev != null ? marginBalance - marginPrev : undefined,
       shortBalance,
       shortBalanceChange: shortBalance != null && shortPrev != null ? shortBalance - shortPrev : undefined,
+      marginQuota: iMarginQuota === -1 ? undefined : parseTwseNumber(row[iMarginQuota]),
+      marginDate,
     });
   }
   return map;

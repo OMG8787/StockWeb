@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
+import ChipsRatioSummary, { ChipsRatioSummarySkeleton } from "@/components/ChipsRatioSummary";
 import type { Metadata } from "next";
 import StockChart from "@/components/StockChartLazy";
 import AskAboutButton from "@/components/AskAboutButton";
@@ -98,6 +100,15 @@ export default async function StockDetailPage({ params, searchParams }: PageProp
         </div>
 
         <LiveQuoteHeader initialQuote={quote} />
+
+        {/* 融資使用率／外資持股比例／大戶持股比例：放在報價正下方一眼看得到的位置
+            （使用者要求不用往下捲、不用點開）。Suspense 串流：集保 CSV 冷啟動較慢時
+            不會拖住上方報價與整頁渲染。 */}
+        {quote.market === "TW" && (
+          <Suspense fallback={<ChipsRatioSummarySkeleton />}>
+            <ChipsRatioSummary symbol={quote.symbol} emerging={quote.board === "emerging"} />
+          </Suspense>
+        )}
       </section>
 
       <FundamentalsCard fundamentals={fundamentals} currency={quote.currency} />

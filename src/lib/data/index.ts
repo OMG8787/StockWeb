@@ -20,6 +20,9 @@
  * - `volumeSurge.ts`  價漲量增＋連漲天數
  * - `valueScreen.ts`  本益比/殖利率/股價淨值比/跌幅排行
  * - `chipsRanking.ts` 三大法人/外資/投信買賣超排行
+ * - `chipsRatios.ts`  融資使用率/外資持股比例/大戶持股比例＋前一期（個股頁最上方摘要）
+ *   - `foreignHoldings.ts` 外資持股（TWSE MI_QFIIS／TPEx qfii，可查指定日）
+ *   - `majorHolders.ts`    集保股權分散表第15級（週資料＋週快照/官網個股查詢補上一週）
  * - `volumeBackfill.ts` 量能歷史的一次性回填
  */
 
@@ -54,4 +57,5 @@ export type { VolumeSurgeItem } from "./volumeSurge";
 export { getValueScreen } from "./valueScreen";
 export type { ValueScreen, ValueScreenItem } from "./valueScreen";
 export { getChipsRanking } from "./chipsRanking";
+export { getChipsRatios } from "./chipsRatios";
 export type { ChipsRanking, ChipsRankingItem } from "./chipsRanking";

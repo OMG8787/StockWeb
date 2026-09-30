@@ -68,6 +68,7 @@ src/
 │  ├─ SearchClient.tsx               搜尋頁的篩選邏輯（產業多選、價格區間、debounce）
 │  ├─ SignalTags.tsx                 個股頁技術訊號標籤（爆量/創新高低/均線/連漲跌）
 │  ├─ FundamentalsCard.tsx           基本面卡片（本益比/股價淨值比/殖利率/市值）
+│  ├─ ChipsRatioSummary.tsx          個股頁報價正下方「籌碼比例」摘要（融資使用率/外資持股/大戶持股＋升降），僅台股，Suspense串流
 │  ├─ ChipsCard.tsx                  籌碼面卡片（三大法人買賣超/融資融券）+ 近期重大訊息公告，
 │  │                                 僅台股頁面渲染（`quote.market === "TW"` 才顯示），美股
 │  │                                 沒有對應的公開資料源
@@ -120,6 +121,9 @@ src/
    │  │  ├─ volumeSurge.ts            getVolumeSurgeStocks（價漲量增+連漲天數）
    │  │  ├─ valueScreen.ts            getValueScreen（全市場本益比/殖利率/股價淨值比排行）
    │  │  ├─ chipsRanking.ts           getChipsRanking（三大法人/外資/投信買賣超排行）
+   │  │  ├─ chipsRatios.ts            getChipsRatios（融資使用率/外資持股比例/大戶持股比例＋前一期）
+   │  │  ├─ foreignHoldings.ts        外資持股（TWSE MI_QFIIS／TPEx qfii，可查指定日算日增減）
+   │  │  ├─ majorHolders.ts           集保股權分散表第15級大戶（週資料；週快照＋官網個股查詢補上一週）
    │  │  └─ volumeBackfill.ts         成交量歷史一次性回填（見volumeHistory.ts）
    │  │                              全部「抓不到資料就回 null，絕不產生假資料」的原則不變
    │  ├─ twse.ts                     台股（上市）資料抓取：TWSE 即時報價/K線/OpenAPI 基本面(含P/B)/月營收/
@@ -345,6 +349,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   真正成功的收盤快照並強制標記`status:"closed"`。→ archive：2026-09-21（十四續）與
   更早的「新增台指期夜盤」章節，搜尋「台指期夜盤查出更深的根因」。
 
+- **集保官網個股查詢（qryStock）curl送出總是回「查無此資料」**：要同一個cookie jar先GET拿
+  JSESSIONID＋`SYNCHRONIZER_TOKEN`（綁session、每次查詢重拿），`firDate`填頁面隱藏欄位的最新週、
+  `scaDate`填目標週，POST用已URL編碼的form字串；Node實作見`majorHolders.ts`的`queryTdccWebOnce`
+  （偶發失敗重試一次）。→ 工作日誌 2026-09-30，搜尋「個股頁新增「籌碼比例」摘要」。
+
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
 使用者要求每次對話回報「更新完成」前要走完：
@@ -356,6 +365,13 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-09-30：個股頁新增「籌碼比例」摘要（融資使用率／外資持股比例／大戶持股比例＋升降）
+
+使用者要求像看盤軟體一樣一眼看到融資、外資、大戶比例與每日升降，放在個股頁報價正下方（台股限定，美股不顯示）。
+來源：融資＝TWSE rwd `MI_MARGN`（取代晚一天且無日期的openapi版，含次一營業日限額）／TPEx `MarginPurchaseQuota`；外資＝TWSE `MI_QFIIS`／TPEx `www/zh-tw/insti/qfii`（兩者都能帶date查前一交易日）；
+大戶＝集保CSV第15級（週資料），上一週優先用本站週快照、沒有時查集保官網個股頁（`majorHolders.ts`）。AI grounding同步帶入三項比例與已算好的升降＋`RULE_CHIPS_RATIOS`。
+對帳環球晶6488與截圖完全吻合（前日融資16,064張/13.44%、外資122,238張/25.56%、大戶71.09%/45人/34.0萬張；集保CSV官方比例71.08是截斷，本站自算四捨五入）；tsc/eslint/build通過、本機390/1440px截圖無溢出，待Opus正式站驗證。
 
 ### 2026-09-30：AI問答「建議買什麼」改成從全市場找，不再只從關注清單挑（`134fb6c`＋`9e302c1`，Opus正式站複查通過）
 

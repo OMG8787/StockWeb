@@ -182,6 +182,57 @@ export interface Chips {
   shortBalance?: number;
   /** 融券今日餘額 - 前日餘額，單位「張」 */
   shortBalanceChange?: number;
+  /** 融資限額（可融資上限），單位「張」——TWSE「次一營業日限額」／TPEx
+   *  MarginPurchaseQuota。算「融資使用率」用，見 chipsRatios.ts。 */
+  marginQuota?: number;
+  /** 融資融券這份資料對應的交易日（YYYY-MM-DD）；跟上面三大法人的 `date` 分開，
+   *  因為兩份報表是不同端點、不保證同一時間更新到同一天。 */
+  marginDate?: string;
+}
+
+/**
+ * TW only — 個股頁最上方「籌碼比例」摘要（融資使用率／外資持股比例／大戶持股比例）
+ * 與前一期的比較，見 lib/data/chipsRatios.ts。每一項抓不到就是 undefined，UI 顯示
+ * 「資料暫缺」；前一期抓不到（或大戶週資料還在累積）時 prev* 欄位是 undefined，
+ * 不編數字、不當成 0 變化。所有百分比都是「0~100 的百分比數字」（13.44 代表 13.44%）。
+ */
+export interface ChipsRatios {
+  margin?: {
+    /** 資料交易日（YYYY-MM-DD） */
+    date?: string;
+    /** 融資餘額（張） */
+    balance: number;
+    /** 融資餘額較前一交易日增減（張） */
+    balanceChange?: number;
+    /** 融資使用率 = 融資餘額 ÷ 融資限額 × 100 */
+    utilizationPercent: number;
+    /** 前一交易日融資使用率（前日餘額 ÷ 同一個融資限額；限額只在股本變動時才會變） */
+    prevUtilizationPercent?: number;
+  };
+  foreign?: {
+    date: string;
+    /** 全體外資及陸資持有股數（股） */
+    heldShares: number;
+    /** 全體外資及陸資持股比率（官方公布值） */
+    holdingPercent: number;
+    prevDate?: string;
+    prevHeldShares?: number;
+    prevHoldingPercent?: number;
+  };
+  majorHolders?: {
+    /** 集保股權分散表資料日期（每週一次，通常是該週最後一個營業日） */
+    date: string;
+    /** 持股 1,000 張以上（集保第 15 級：1,000,001 股以上）的人數 */
+    holders: number;
+    /** 這些大戶合計持有股數（股） */
+    shares: number;
+    /** 大戶持股比例 = 第15級股數 ÷ 第17級合計股數 × 100 */
+    holdingPercent: number;
+    /** 上一週（本站自行留存的上一期快照，見 majorHolders.ts）；還在累積時為 undefined */
+    prevDate?: string;
+    prevHolders?: number;
+    prevHoldingPercent?: number;
+  };
 }
 
 /** TW only — 上市公司每日重大訊息公告（併購、增資、法說會等），來源 TWSE 公開資訊觀測站。 */
