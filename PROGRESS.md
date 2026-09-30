@@ -353,6 +353,10 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   JSESSIONID＋`SYNCHRONIZER_TOKEN`（綁session、每次查詢重拿），`firDate`填頁面隱藏欄位的最新週、
   `scaDate`填目標週，POST用已URL編碼的form字串；Node實作見`majorHolders.ts`的`queryTdccWebOnce`
   （偶發失敗重試一次）。→ 工作日誌 2026-09-30，搜尋「個股頁新增「籌碼比例」摘要」。
+- **多個agent同時在同一個工作目錄commit，自己的檔案被別人的commit帶走**：git index是共用的，
+  A先`git add`、B接著`git commit`就會把A暫存的檔案一起提交（2026-10-01 Finnhub那批就被K線修復的
+  `c84a156`帶走）。平行作業時暫存完要立刻commit，或各自用`git worktree`。→ 工作日誌 2026-10-01，
+  搜尋「FRED總體經濟＋Finnhub美股備援」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
@@ -365,6 +369,13 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-01：FRED總體經濟＋Finnhub美股備援（`00864a8`；Finnhub部分被併進`c84a156`）
+
+首頁大盤指數下方新增「美國總體經濟」卡片（`MacroCard`，Suspense串流），AI大盤概況（聊天／快報／今日建議）同步帶入9項FRED序列＋`RULE_MACRO_DATA`：DFF、DGS10、DGS2、T10Y2Y、CPI年增率（CPIAUCSL自算，已對FRED官方pc1吻合3.35%）、UNRATE、DTWEXBGS（非DXY）、VIXCLS、DCOILWTICO；日資料快取3h、月資料12h、缺項20分，不進warm-cache。
+美股財報/基本面改「Yahoo為主、Finnhub備援」（實測兩邊EPS口徑不同，AAPL 2.02 vs 1.91，不換主來源），美股個股新聞再補Finnhub 4則；順修負EPS驚喜被寫成「優於市場預期-0.89%」。
+Adanos（免費每月僅250次）、SEC API（官方EDGAR免費即可）、Hugging Face（金鑰無Inference權限403、冷啟動慢）評估後不接。
+驗證：tsc/eslint/build過；本機有金鑰9項全抓到、快取命中0ms、模擬Yahoo被擋時Finnhub補上；清空金鑰的production build首頁200且卡片不出現、AI概況文字與舊版逐字相同；390/1440px截圖無溢出。**正式站需在Vercel加`FRED_API_KEY`、`FINNHUB_API_KEY`才會生效**，尚待Opus正式站驗證。
 
 ### 2026-09-30：個股頁新增「籌碼比例」摘要（融資使用率／外資持股比例／大戶持股比例＋升降，Opus正式站複查通過）
 
