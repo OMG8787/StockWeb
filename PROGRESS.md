@@ -357,6 +357,10 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   A先`git add`、B接著`git commit`就會把A暫存的檔案一起提交（2026-10-01 Finnhub那批就被K線修復的
   `c84a156`帶走）。平行作業時暫存完要立刻commit，或各自用`git worktree`。→ 工作日誌 2026-10-01，
   搜尋「FRED總體經濟＋Finnhub美股備援」。
+- **冷門股K線圖噴 pageerror「Value is null」、整張圖畫不出來**：TWSE STOCK_DAY 在「只有零星/鉅額
+  成交」的日子開高低收回 `"--"`→NaN→JSON null。所有K線資料源產出時一律過 `candleSanity.ts` 的
+  `sanitizeCandles()`（整根略過、不編價格），新資料源也要套。另：對 TWSE 短時間併發/連打會回 HTTP 428
+  限流，表現成圖表 503，測試時別狂打。→ 工作日誌 2026-10-01，搜尋「修好冷門股K線圖「Value is null」」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
@@ -369,6 +373,13 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-01：修好冷門股K線圖「Value is null」（`c84a156`）
+根因：TWSE STOCK_DAY 對只有零星/鉅額成交的日子回開高低收 `"--"`，`parseFloat` 得 NaN、JSON 變 null，
+lightweight-charts 繪製丟錯（1470 的1年區間 242 根有 46 根壞；光9月就有26檔上市股中招，長區間更多）。
+新增共用 `src/lib/data/candleSanity.ts`，TWSE/TPEx/Yahoo 產出K線時整根略過不合法K棒，`StockChart.tsx`
+餵圖前再濾一次（不動 `candlesRange`）。驗證：tsc/eslint/build 過；正式站 Playwright 對 1470/1538/5906
+全10區間、2330/6488/AAPL 回歸、全開8個技術線疊圖，console 零 pageerror、圖表皆正常畫出。
 
 ### 2026-10-01：FRED總體經濟＋Finnhub美股備援（`00864a8`；Finnhub部分被併進`c84a156`）
 
@@ -707,7 +718,7 @@ Opus agent實測正式站（未測已修過的關注清單/搜尋/AI問答/產�
 
 ## 目前已知問題
 
-- **【2026-09-30新發現，尚未修】部分股票K線圖渲染時噴 pageerror「Value is null」**：Opus複查籌碼比例時在 /stock/1470 發現，堆疊在 lightweight-charts 的 Candlestick 繪製，推測K線資料含 null 的 OHLC。既有問題（籌碼比例改動沒碰圖表檔），尚未查證是哪個資料源／哪幾檔、圖表是否實際畫不出來。
+- **【已於2026-10-01修好，正式站Playwright驗證通過】部分股票K線圖渲染時噴 pageerror「Value is null」**：根因是 TWSE STOCK_DAY 對無一般成交的日子回開高低收 `"--"`→NaN→null；資料層（`candleSanity.ts`）與 `StockChart.tsx` 兩層都已過濾，詳見工作日誌 2026-10-01。
 - **【待使用者決定】手機版個股頁「籌碼比例」不在第一屏**：390×844 時區塊從約702px開始（興櫃股因說明框更長是892px），第一屏只看得到標題與融資使用率，外資、大戶要往下滑；桌機則一進頁面就看得到。要不要把它移到開高低收上方，需使用者決定。
 - **【已於2026-09-27修好，Opus正式站複查通過，正式結案】K線圖快速切換到/離開「當日」區間時偶發console錯誤**：
   根因是`chartData`的時間格式判斷用即時`range`，但`candles`資料在新range fetch完成前
