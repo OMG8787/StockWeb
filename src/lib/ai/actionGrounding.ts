@@ -4,6 +4,7 @@ import {
   getEarnings,
   getFundamentals,
   getIndices,
+  getMacroSnapshot,
   getMaterialAnnouncements,
   getMultiSignalStocks,
   getTaifexNightFutures,
@@ -192,10 +193,11 @@ export interface ActionGrounding {
  * 這種話一旦建立在錯的或半套的資料上，比寫得含糊還糟——所以讓它可以被單獨叫起來檢查。
  */
 export async function buildActionGrounding(): Promise<ActionGrounding> {
-  const [indices, taifexFutures, twMomentum, usMomentum, newsFeed, chipsRanking, valueScreen, twAll] =
+  const [indices, taifexFutures, macro, twMomentum, usMomentum, newsFeed, chipsRanking, valueScreen, twAll] =
     await Promise.all([
       getIndices(),
       getTaifexNightFutures().catch(() => null),
+      getMacroSnapshot(),
       getMultiSignalStocks("TW"),
       getMultiSignalStocks("US"),
       getNewsFeed().catch((): NewsFeed => ({ pinned: [], items: [], generatedAt: new Date().toISOString() })),
@@ -238,7 +240,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
 
   const text = [
     "【大盤概況（台股＋美股）】",
-    buildMarketOverviewText(indices, taifexFutures),
+    buildMarketOverviewText(indices, taifexFutures, macro),
     "",
     "【今日台股候選股「多面向體檢表」——這是你做買進判斷的主要依據】",
     "候選來源刻意混合四種挑法：技術訊號共振清單、今日漲幅榜、三大法人買超榜、投信買超榜，所以這份名單裡同時有「多面向都到位的標的」跟「只有單一面向亮眼、其他面向沒跟上的假訊號」，請自己分辨，不要因為某檔出現在名單上就當成推薦。",

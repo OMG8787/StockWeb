@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import MarketTabs from "@/components/MarketTabs";
+import MacroCard from "@/components/MacroCard";
 import WatchlistSection from "@/components/WatchlistSection";
 import DailyBriefCard from "@/components/DailyBriefCard";
 import LiveIndices from "@/components/LiveIndices";
 import LiveMoversBoard from "@/components/LiveMoversBoard";
 import TaifexFuturesCard from "@/components/TaifexFuturesCard";
-import { getIndices, getTaifexNightFutures, searchStocks } from "@/lib/data";
+import { getIndices, getTaifexNightFutures, isMacroConfigured, searchStocks } from "@/lib/data";
 
 export const revalidate = 0;
 
@@ -72,6 +74,15 @@ export default async function HomePage() {
           }
           us={<LiveIndices market="US" initialIndices={usIndices} />}
         />
+        {/* 總經卡片放在分頁外面（台股/美股分頁都看得到），用 Suspense 串流、不擋首屏；
+            沒設定 FRED_API_KEY 時整塊不渲染，首頁跟以前一樣。 */}
+        {isMacroConfigured() && (
+          <Suspense
+            fallback={<div className="mt-3 h-40 animate-pulse rounded-lg border border-(--gridline) bg-(--surface-1)" aria-hidden />}
+          >
+            <MacroCard />
+          </Suspense>
+        )}
       </section>
 
       <section>

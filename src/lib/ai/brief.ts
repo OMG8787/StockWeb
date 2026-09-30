@@ -1,6 +1,7 @@
 import { cached } from "@/lib/data/cache";
-import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips } from "@/lib/data";
+import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
+import { RULE_MACRO_DATA } from "./askSystemPrompt";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
@@ -64,10 +65,11 @@ async function buildTwChipsSummary(
 
 export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
   return cached(BRIEF_CACHE_KEY, BRIEF_TTL_MS, async () => {
-    const [indices, taifexFutures, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews] =
+    const [indices, taifexFutures, macro, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews] =
       await Promise.all([
         getIndices(),
         getTaifexNightFutures().catch(() => null),
+        getMacroSnapshot(),
         searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" }),
         searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" }),
         searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "asc" }),
@@ -91,7 +93,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       `【市場狀態】台股目前${marketStatusLabel(twStatus)}；美股目前${marketStatusLabel(usStatus)}（美股與台股交易時段不重疊，寫美股段落時以美股自己的狀態為準，不要套用台股的狀態）`,
       "",
       "【大盤概況（台股＋美股）】",
-      buildMarketOverviewText(indices, taifexFutures),
+      buildMarketOverviewText(indices, taifexFutures, macro),
       "",
       "【台股漲幅前8】", listStocks(twGainers.slice(0, 8)),
       "【台股跌幅前8】", listStocks(twLosers.slice(0, 8)),
@@ -127,6 +129,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "參考資料開頭的「【市場狀態】」會告訴你台股、美股現在分別是「盤中」還是「已收盤」——這決定你怎麼描述那個市場的數字：那個市場「已收盤」時才能用『收在』『終場』『收盤』這類字眼；「盤中」時數字還在跳動、還沒定案，絕對不能用『收在』『終場』『收盤』，要改用『目前來到』『截至目前』『盤中來到』這類語氣，並且可以提醒讀者這是撰稿當下的即時數字、盤中仍會變動。台股跟美股的交易時段不重疊，兩邊要各自依照自己的狀態描述，不要因為其中一個收盤了就假設另一個也收盤（或反過來）。",
       "全文只描述現象與客觀關聯，絕對不要給出「建議買進/賣出/加碼/減碼」等任何操作建議或目標價，也不要用「值得買」「該賣」「即將噴出」「準備上漲」這類預測性或推薦性字眼。",
       "若參考資料中某部分標示為無法取得，請如實反映（例如略過或簡短說明查無資料），不要編造數字。",
+      RULE_MACRO_DATA,
       "結尾不需要再加免責聲明，網站會自動附上。",
     ].join("\n");
 

@@ -2,6 +2,7 @@ import { cached } from "@/lib/data/cache";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { pct, QUALIFY_MIN_SUPPORT } from "./actionScoring";
+import { RULE_MACRO_DATA } from "./askSystemPrompt";
 
 export interface ActionBrief {
   text: string;
@@ -83,6 +84,7 @@ const ACTION_SYSTEM_PROMPT = [
   // 實測：參考資料的重大消息只講「Fed升息落地」，AI 在結尾自己擴寫成「全球主要央行同步
   // 升息引發資金流動性緊縮隱憂」——把單一央行的單一事件放大成全球性事件，是編造。
   "談消息面與總體環境時，範圍不可以比參考資料大。資料只提到某一個央行（例如美國聯準會）的動作，就只能講那一個央行，不可以擴寫成「全球主要央行同步升息」這種參考資料沒說過的更大範圍說法；資料只提到某一家公司的消息，也不可以擴寫成整個產業都如何。",
+  RULE_MACRO_DATA,
 ].join("\n");
 
 export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {

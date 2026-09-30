@@ -1,4 +1,4 @@
-import { findInUniverse, getIndices, getTaifexNightFutures } from "@/lib/data";
+import { findInUniverse, getIndices, getMacroSnapshot, getTaifexNightFutures } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
 import type { Market } from "@/lib/data";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
@@ -49,6 +49,7 @@ import {
   RULE_MACRO_LINKAGE_FACTORS,
   RULE_RATE_HIKE_NUANCE,
   RULE_TW_US_CORRELATION,
+  RULE_MACRO_DATA,
   RULE_GIVE_DIRECT_OPINION,
   RULE_NO_FABRICATE_SIMPLE,
   RULE_CONVERSATION_CONTEXT,
@@ -153,8 +154,8 @@ export async function answerQuestion(
   ] =
     await Promise.all([
       Promise.all(targets.map((t) => buildStockGrounding(t))),
-      Promise.all([getIndices(), getTaifexNightFutures().catch(() => null)])
-        .then(([indices, taifexFutures]) => buildMarketOverviewText(indices, taifexFutures))
+      Promise.all([getIndices(), getTaifexNightFutures().catch(() => null), getMacroSnapshot()])
+        .then(([indices, taifexFutures, macro]) => buildMarketOverviewText(indices, taifexFutures, macro))
         .catch(() => ""),
       wantsMovers ? buildMoversGrounding() : Promise.resolve(""),
       wantsTechScreen ? buildTechScreenGrounding().catch(() => "") : Promise.resolve(""),
@@ -359,6 +360,7 @@ ${actionBriefText}` : "",
     RULE_MACRO_LINKAGE_FACTORS,
     RULE_RATE_HIKE_NUANCE,
     RULE_TW_US_CORRELATION,
+    RULE_MACRO_DATA,
     RULE_GIVE_DIRECT_OPINION,
     RULE_NO_FABRICATE_SIMPLE,
     RULE_CONVERSATION_CONTEXT,

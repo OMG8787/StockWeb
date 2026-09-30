@@ -58,4 +58,6 @@ export { getValueScreen } from "./valueScreen";
 export type { ValueScreen, ValueScreenItem } from "./valueScreen";
 export { getChipsRanking } from "./chipsRanking";
 export { getChipsRatios } from "./chipsRatios";
+export { getMacroSnapshot, isMacroConfigured } from "./macro";
+export type { MacroIndicator, MacroSnapshot } from "./macro";
 export type { ChipsRanking, ChipsRankingItem } from "./chipsRanking";

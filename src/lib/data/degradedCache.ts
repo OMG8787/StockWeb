@@ -131,3 +131,34 @@ export async function cachedMapWithDegradedShortTtl<K, V>(
     degradedMapInFlight.delete(key);
   }
 }
+
+/**
+ * 第四個變體：一般物件版本，「降級」由呼叫端的 `isDegraded` 判斷（例如一包資料裡
+ * 有幾項沒抓到）。2026-09-30 為 FRED 總經資料（macro.ts）新增：一包 9 個序列只要有
+ * 一個暫時抓失敗，不該讓「缺一項」的結果存活整整幾小時的正常 TTL。值必須能過 JSON。
+ */
+const degradedPredicateInFlight = new Map<string, Promise<unknown>>();
+
+export async function cachedWithDegradedPredicate<T>(
+  key: string,
+  ttlMs: number,
+  degradedTtlMs: number,
+  isDegraded: (value: T) => boolean,
+  load: () => Promise<T>
+): Promise<T> {
+  const hit = await peekCached<T>(key);
+  if (hit !== undefined && hit !== null) return hit;
+  const pending = degradedPredicateInFlight.get(key);
+  if (pending) return (await pending) as T;
+  const promise = (async () => {
+    const value = await load();
+    await writeCached(key, value, isDegraded(value) ? degradedTtlMs : ttlMs);
+    return value;
+  })();
+  degradedPredicateInFlight.set(key, promise);
+  try {
+    return (await promise) as T;
+  } finally {
+    degradedPredicateInFlight.delete(key);
+  }
+}

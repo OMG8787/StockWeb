@@ -1,5 +1,6 @@
-import type { IndexQuote, TaifexFuturesQuote } from "@/lib/data";
+import type { IndexQuote, MacroSnapshot, TaifexFuturesQuote } from "@/lib/data";
 import { describeTaifexNightFutures } from "@/lib/data";
+import { describeMacroSnapshot } from "./macroText";
 
 /**
  * 「【大盤概況（台股＋美股）】」這段文字，`ask.ts`（AI問答）、`actionBrief.ts`
@@ -9,14 +10,24 @@ import { describeTaifexNightFutures } from "@/lib/data";
  * 記得同步改三個檔案。
  *
  * 回傳值不含最前面的「【大盤概況（台股＋美股）】」標題行——三個呼叫端各自決定
- * 要不要加、加在陣列的哪個位置，這裡只負責內文兩行（指數清單 + 台指期夜盤）。
+ * 要不要加、加在陣列的哪個位置，這裡只負責內文（指數清單 + 台指期夜盤 + 美國總經）。
+ *
+ * `macro`（2026-09-30 新增，FRED 總經）刻意做成**必填**參數而不是選填：三個呼叫端都
+ * 必須自己 `getMacroSnapshot()` 帶進來，編譯器會擋下漏帶的呼叫端，不會出現「某一頁
+ * 的 AI 看得到總經、另一頁看不到」的隱藏落差（規則九第3點）。沒設定 FRED 金鑰時
+ * getMacroSnapshot() 回 null，這裡輸出跟加功能之前逐字相同。
  */
-export function buildMarketOverviewText(indices: IndexQuote[], taifexFutures: TaifexFuturesQuote | null): string {
+export function buildMarketOverviewText(
+  indices: IndexQuote[],
+  taifexFutures: TaifexFuturesQuote | null,
+  macro: MacroSnapshot | null
+): string {
   const indexLines =
     indices.length === 0
       ? "（大盤指數目前無法取得）"
       : indices.map((i) => `${i.name}：${i.price}（${i.change >= 0 ? "+" : ""}${i.changePercent}%）`).join("\n");
   // 台指期夜盤跟前面的加權指數/道瓊等現貨指數不同，是「盤後衍生性商品」，
   // 一定要附帶交易中/已收盤狀態跟資料時間，不能讓 AI 誤把它講成即時現貨指數。
-  return `${indexLines}\n${describeTaifexNightFutures(taifexFutures)}`;
+  const macroText = describeMacroSnapshot(macro);
+  return `${indexLines}\n${describeTaifexNightFutures(taifexFutures)}${macroText ? `\n${macroText}` : ""}`;
 }
