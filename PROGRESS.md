@@ -372,6 +372,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 來源：融資＝TWSE rwd `MI_MARGN`（取代晚一天且無日期的openapi版，含次一營業日限額）／TPEx `MarginPurchaseQuota`；外資＝TWSE `MI_QFIIS`／TPEx `www/zh-tw/insti/qfii`（兩者都能帶date查前一交易日）；
 大戶＝集保CSV第15級（週資料），上一週優先用本站週快照、沒有時查集保官網個股頁（`majorHolders.ts`）。AI grounding同步帶入三項比例與已算好的升降＋`RULE_CHIPS_RATIOS`。
 對帳環球晶6488與截圖完全吻合（前日融資16,064張/13.44%、外資122,238張/25.56%、大戶71.09%/45人/34.0萬張；集保CSV官方比例71.08是截斷，本站自算四捨五入）；tsc/eslint/build通過、本機390/1440px截圖無溢出，待Opus正式站驗證。
+Opus正式站Playwright複查：6488/2330/7893/AAPL/1470/8431畫面與`/api/chips-ratios`一致、無NaN/溢出；唯一問題是AI回答大戶題沒講「集保每週公布的週資料」與週別，已加強`RULE_CHIPS_RATIOS`（必講週資料＋週別、名詞解釋不可省略）。
 
 ### 2026-09-30：AI問答「建議買什麼」改成從全市場找，不再只從關注清單挑（`134fb6c`＋`9e302c1`，Opus正式站複查通過）
 
