@@ -4,6 +4,7 @@ import type { Market } from "@/lib/data";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
+import { getActionBrief } from "@/lib/ai/actionBrief";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
@@ -11,6 +12,7 @@ import { guessSymbolsFromText } from "./symbolResolve";
 import {
   conversationWantsMovers,
   conversationWantsTechScreen,
+  wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
   SINGLE_STOCK_ANALYSIS_INTENT_PATTERN,
@@ -57,6 +59,7 @@ import {
   RULE_MULTI_STOCK_COMPARISON,
   RULE_THEME_STOCKS_USAGE,
   RULE_FULL_NAME_WITH_TICKER,
+  RULE_MARKET_WIDE_RECOMMENDATION,
 } from "./askSystemPrompt";
 
 // `@/lib/ai/ask` 的公開介面刻意保持不變：這兩個型別原本就宣告在這個檔案裡，
@@ -107,6 +110,16 @@ export async function answerQuestion(
     targets = await resolveFollowupTargets(question, history);
   }
   const wantsHoldingsAnalysis = holdings.length > 0 && HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question);
+  // 開放式「建議買什麼」→ 範圍是全市場，見 intent.ts wantsMarketWideBuyIdea 的說明。
+  const wantsMarketWide = targets.length === 0 && !themeMatch && !unknownTheme && !wantsHoldingsAnalysis && wantsMarketWideBuyIdea(question);
+  // 今日建議頁已經算好的全市場多面向買進候選（30分鐘快取，跟 /action 頁同一份，兩邊答案才會一致）；
+  // 冷快取時最多等8秒，逾時就不附，不拖慢聊天回應。
+  const actionBriefPromise: Promise<string> = wantsMarketWide
+    ? Promise.race([
+        getActionBrief().then((b) => (b.usedAi ? b.text : "")).catch(() => ""),
+        new Promise<string>((resolve) => setTimeout(() => resolve(""), 8000)),
+      ])
+    : Promise.resolve("");
   // The "問AI關於<股票>" button on every stock page pre-fills exactly this
   // phrasing (see ChatWidget.tsx's ASK_ABOUT_EVENT handler) — a user asked
   // for this button's answer to be as precise/thorough as the watchlist
@@ -157,6 +170,8 @@ export async function answerQuestion(
       // headlines below.
       getNewsFeed().catch(() => ({ pinned: [], items: [], generatedAt: "" })),
     ]);
+
+  const actionBriefText = await actionBriefPromise;
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
@@ -294,6 +309,11 @@ export async function answerQuestion(
       userSafe: false,
     },
     {
+      text: actionBriefText ? `【今日建議名單（本站用技術面＋籌碼面＋基本面＋財報面多面向評分後的全市場買進候選，與「今日建議」頁同一份）】
+${actionBriefText}` : "",
+      userSafe: true,
+    },
+    {
       // 清單標題與說明文字裡夾雜寫給模型看的指示（「可以直接回答今天沒有」
       // 「不要自己回想或推測」），跟「今日焦點數據」同一個理由標成 userSafe:false。
       text: techScreenGrounding ? `【技術指標篩選（多重條件比對用）】\n${techScreenGrounding}` : "",
@@ -348,6 +368,7 @@ export async function answerQuestion(
     RULE_MULTI_STOCK_COMPARISON,
     RULE_THEME_STOCKS_USAGE,
     RULE_FULL_NAME_WITH_TICKER,
+    wantsMarketWide ? RULE_MARKET_WIDE_RECOMMENDATION : "",
   ].filter(Boolean).join("\n");
 
   const userContent = grounding

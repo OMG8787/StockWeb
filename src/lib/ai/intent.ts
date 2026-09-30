@@ -69,8 +69,23 @@ function isFollowupShape(question: string): boolean {
 const RANKING_METRIC_PATTERN =
   /本益比|本益比|PE\s*ratio|殖利率|配息|股利|股價淨值比|股价净值比|淨值比|净值比|成交金額|成交金额|成交量|周轉|周转|跌幅|跌最多|跌得最多|跌深|漲幅|涨幅|法人|外資|外资|投信|自營|自营|買超|买超|賣超|卖超|融資|融资|融券/i;
 
+// 2026-09-30 使用者反映：問「建議買什麼」這類開放式問題，AI 越來越常只從『我的關注清單』
+// 挑股票回答，範圍太小。兩個原因疊加：①「建議買甚麼／有什麼可以布局」這類說法沒被
+// MOVERS_INTENT_PATTERN 接住，wantsMovers 為 false，當下唯一有逐檔明細的就只剩
+// 關注清單，模型自然只用它；②系統提示詞一直帶著『逐檔講重點』的關注清單規則。
+// 這裡補上開放式買進建議的意圖判斷（給 wantsMovers 與『全市場推薦』提示詞規則共用），
+// 並用 EXPLICIT_HOLDINGS_SCOPE_PATTERN 分辨使用者是不是明講只想看自己的清單。
+const BUY_IDEA_INTENT_PATTERN =
+  /建議.{0,8}(買|布局|佈局|進場|入手|投資|加碼)|(買|布局|佈局|進場|入手|投資).{0,4}(哪|什麼|甚麼|啥|哪些|哪一)|有什麼.{0,8}(可以|適合|值得).{0,4}(買|布局|佈局|進場|入手)|可以(買|布局|佈局|進場).{0,3}(什麼|甚麼|哪)|(挑|選).{0,3}(幾|一|兩|二|三)(檔|支)/;
+const EXPLICIT_HOLDINGS_SCOPE_PATTERN = /(我的|我).{0,3}(關注|自選|持股|持有|庫存)|關注清單|自選股|持股裡|手上(的|有)/;
+
+/** 開放式『建議買什麼』且沒有明講只限自己清單 → 範圍是整個市場，不是關注清單。 */
+export function wantsMarketWideBuyIdea(question: string): boolean {
+  return BUY_IDEA_INTENT_PATTERN.test(question) && !EXPLICIT_HOLDINGS_SCOPE_PATTERN.test(question);
+}
+
 export function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
-  if (MOVERS_INTENT_PATTERN.test(question)) return true;
+  if (MOVERS_INTENT_PATTERN.test(question) || BUY_IDEA_INTENT_PATTERN.test(question)) return true;
   if (RANKING_METRIC_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
   if (!isFollowupShape(question)) return false;
   return history.some(
