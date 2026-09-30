@@ -85,7 +85,10 @@ export function wantsMarketWideBuyIdea(question: string): boolean {
 }
 
 export function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
-  if (MOVERS_INTENT_PATTERN.test(question) || BUY_IDEA_INTENT_PATTERN.test(question)) return true;
+  // 用 wantsMarketWideBuyIdea（不是裸的 BUY_IDEA_INTENT_PATTERN）：「我的關注清單裡建議買哪檔」
+  // 這種明講限定範圍的問法如果也附上全市場焦點資料，模型會先列出清單外的股票再自己改口
+  // （2026-09-30 Opus 正式站複查實測抓到）。
+  if (MOVERS_INTENT_PATTERN.test(question) || wantsMarketWideBuyIdea(question)) return true;
   if (RANKING_METRIC_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
   if (!isFollowupShape(question)) return false;
   return history.some(
