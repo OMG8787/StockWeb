@@ -99,16 +99,19 @@ export default async function StockDetailPage({ params, searchParams }: PageProp
           <AskAboutButton symbol={quote.symbol} market={quote.market} name={quote.name} />
         </div>
 
-        <LiveQuoteHeader initialQuote={quote} />
-
-        {/* 融資使用率／外資持股比例／大戶持股比例：放在報價正下方一眼看得到的位置
-            （使用者要求不用往下捲、不用點開）。Suspense 串流：集保 CSV 冷啟動較慢時
-            不會拖住上方報價與整頁渲染。 */}
-        {quote.market === "TW" && (
-          <Suspense fallback={<ChipsRatioSummarySkeleton />}>
-            <ChipsRatioSummary symbol={quote.symbol} emerging={quote.board === "emerging"} />
-          </Suspense>
-        )}
+        {/* 融資使用率／外資持股比例／大戶持股比例：放在價格正下方、開高低收格子之前，
+            手機第一屏就能看完三項（使用者要求不用往下捲、不用點開）。Suspense 串流：
+            集保 CSV 冷啟動較慢時不會拖住上方報價與整頁渲染。 */}
+        <LiveQuoteHeader
+          initialQuote={quote}
+          afterPrice={
+            quote.market === "TW" ? (
+              <Suspense fallback={<ChipsRatioSummarySkeleton />}>
+                <ChipsRatioSummary symbol={quote.symbol} emerging={quote.board === "emerging"} />
+              </Suspense>
+            ) : undefined
+          }
+        />
       </section>
 
       <FundamentalsCard fundamentals={fundamentals} currency={quote.currency} />

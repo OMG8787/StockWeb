@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { Quote } from "@/lib/data";
 import { formatChange, formatPercent, formatPrice, formatTaipeiDateTime, formatVolume, priceDirectionClass } from "@/lib/format";
 import { getMarketStatus, marketScope, type MarketStatus } from "@/lib/marketStatus";
@@ -17,7 +17,12 @@ import MarketStatusBadge from "./MarketStatusBadge";
  * （getQuote 本來就會回上一個收盤價），並持續檢查是否已經跨進交易時段，
  * 所以一直開著的頁面到了開盤會自己開始更新。
  */
-export default function LiveQuoteHeader({ initialQuote }: { initialQuote: Quote }) {
+/**
+ * afterPrice：插在「價格＋更新時間」與「開高低收成交量」格子之間的內容（伺服器端傳進來的
+ * 籌碼比例摘要）。手機螢幕小，如果放在整個報價區塊（含開高低收格子）下面，第一屏只看得到
+ * 標題跟融資使用率；放在價格正下方，三項比例在手機第一屏就能一眼看完。
+ */
+export default function LiveQuoteHeader({ initialQuote, afterPrice }: { initialQuote: Quote; afterPrice?: ReactNode }) {
   const { symbol, market } = initialQuote;
   const [quote, setQuote] = useState(initialQuote);
   // 興櫃（board === "emerging"）的交易時間是 09:00~15:00，跟上市櫃的
@@ -64,6 +69,8 @@ export default function LiveQuoteHeader({ initialQuote }: { initialQuote: Quote 
         {status === "open" && emerging && "（興櫃交易時間為 09:00-15:00，比上市櫃晚 1.5 小時收盤）"}
         {status === "pre-market" && "（08:30-09:00試撮時段，尚未正式開盤，以下數字僅供參考）"}
       </p>
+
+      {afterPrice}
 
       {/* 興櫃專屬說明。興櫃跟上市/上櫃是完全不同的交易制度，如果不講清楚，
           使用者會用看上市股的習慣去解讀這頁的每一個數字（尤其是「漲跌是跟
