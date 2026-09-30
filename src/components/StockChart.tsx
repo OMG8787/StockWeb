@@ -13,6 +13,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, ChartRange } from "@/lib/data";
+import { sanitizeCandles } from "@/lib/data/candleSanity";
 import { computeSignals } from "@/lib/signals";
 import { applyIndicatorData, INDICATOR_DEFS, type IndicatorSeries } from "@/lib/chartIndicatorDefs";
 import { formatPrice, formatVolume } from "@/lib/format";
@@ -208,7 +209,10 @@ export default function StockChart({
       })
       .then((data) => {
         if (cancelled) return;
-        setCandles(data.candles);
+        // 第二道防線：資料層已濾掉不合法K棒（見 candleSanity.ts），這裡再濾一次，
+        // 防止舊快取或未來新資料源漏網的 null/NaN 讓 lightweight-charts 丟出
+        // "Value is null" 整張圖畫不出來；指標/訊號也都吃這份已清理的 candles。
+        setCandles(sanitizeCandles(data.candles));
         setCandlesRange(range);
         setError(null);
       })

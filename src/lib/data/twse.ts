@@ -1,4 +1,5 @@
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
+import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
@@ -275,17 +276,21 @@ async function fetchMonth(stockNo: string, dateParam: string): Promise<Candle[]>
   const res = await fetchWithTimeout(url, 5000);
   const data = (await res.json()) as StockDayResponse;
   if (data.stat !== "OK" || !data.data) return [];
-  return data.data.map((row) => {
-    const [rocDate, , , open, high, low, close] = row;
-    return {
-      time: rocToIso(rocDate),
-      open: parseFloat(open.replace(/,/g, "")),
-      high: parseFloat(high.replace(/,/g, "")),
-      low: parseFloat(low.replace(/,/g, "")),
-      close: parseFloat(close.replace(/,/g, "")),
-      volume: parseInt(row[1].replace(/,/g, ""), 10) || 0,
-    };
-  });
+  // 只有零星/鉅額成交、沒有一般交易開高低收的日子，STOCK_DAY 回 "--" → NaN；
+  // sanitizeCandles 整根略過（不編造價格），見 candleSanity.ts 說明。
+  return sanitizeCandles(
+    data.data.map((row) => {
+      const [rocDate, , , open, high, low, close] = row;
+      return {
+        time: rocToIso(rocDate),
+        open: parseFloat(open.replace(/,/g, "")),
+        high: parseFloat(high.replace(/,/g, "")),
+        low: parseFloat(low.replace(/,/g, "")),
+        close: parseFloat(close.replace(/,/g, "")),
+        volume: parseInt(row[1].replace(/,/g, ""), 10) || 0,
+      };
+    })
+  );
 }
 
 interface BwibbuRow {

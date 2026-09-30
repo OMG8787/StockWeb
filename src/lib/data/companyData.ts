@@ -18,6 +18,7 @@ import {
 } from "./tpex";
 import { fetchEmergingMonthlyRevenueAll, fetchEmergingQuarterlyEpsAll } from "./emerging";
 import { fetchUsEarnings, fetchUsFundamentals } from "./us";
+import { fetchFinnhubEarnings, fetchFinnhubFundamentals, isFinnhubConfigured } from "./finnhub";
 import { mergeTwMaps } from "./twMergedMaps";
 import { detectMarket, normalizeSymbol } from "./symbols";
 
@@ -28,6 +29,31 @@ import { detectMarket, normalizeSymbol } from "./symbols";
 // ——這是 Vercel 免費方案用量吃緊後盤點出來的真實浪費源頭之一，30分鐘仍然遠比
 // 「一天只變一次」的實際更新頻率頻繁，使用者不會感覺到任何變舊。
 export const FUNDAMENTALS_TTL_MS = 30 * 60_000;
+
+/**
+ * 美股財報／基本面：Yahoo（非官方、可能被鎖）為主，Yahoo 丟錯或查無資料時才改打
+ * Finnhub（見 finnhub.ts 的取捨說明）。沒設定 FINNHUB_API_KEY 時行為跟以前完全一樣：
+ * Yahoo 丟錯就照樣往外丟（→ 不寫進快取、下次請求會重試），回 null 就回 null。
+ * 兩邊都丟錯時丟出 Yahoo 的錯誤，一樣不會被快取成「沒有資料」。
+ */
+async function withFinnhubFallback<T>(primary: () => Promise<T | null>, fallback: () => Promise<T | null>): Promise<T | null> {
+  let primaryError: unknown;
+  try {
+    const value = await primary();
+    if (value) return value;
+  } catch (e) {
+    primaryError = e;
+  }
+  if (!isFinnhubConfigured()) {
+    if (primaryError) throw primaryError;
+    return null;
+  }
+  try {
+    return await fallback();
+  } catch (e) {
+    throw primaryError ?? e;
+  }
+}
 
 /**
  * Returns null when unavailable — fabricating a P/E ratio or dividend
@@ -43,7 +69,12 @@ export async function getFundamentals(symbolInput: string, marketHint?: Market):
       );
       return map.get(symbol) ?? null;
     }
-    return await cached(`fundamentals:US:${symbol}`, FUNDAMENTALS_TTL_MS, () => fetchUsFundamentals(symbol));
+    return await cached(`fundamentals:US:${symbol}`, FUNDAMENTALS_TTL_MS, () =>
+      withFinnhubFallback(
+        () => fetchUsFundamentals(symbol),
+        () => fetchFinnhubFundamentals(symbol)
+      )
+    );
   } catch {
     return null;
   }
@@ -76,7 +107,12 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
       if (!revenue && !eps) return null;
       return { ...revenue, ...eps };
     }
-    return await cached(`earnings:US:${symbol}`, EARNINGS_TTL_MS, () => fetchUsEarnings(symbol));
+    return await cached(`earnings:US:${symbol}`, EARNINGS_TTL_MS, () =>
+      withFinnhubFallback(
+        () => fetchUsEarnings(symbol),
+        () => fetchFinnhubEarnings(symbol)
+      )
+    );
   } catch {
     return null;
   }

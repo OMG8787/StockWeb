@@ -111,7 +111,7 @@ export async function fetchNewsMulti(query: string, perLocaleLimit: number, loca
   return dedupeNews(await Promise.all(locales.map((locale) => fetchNews(query, perLocaleLimit, locale))).then((l) => l.flat()));
 }
 
-function dedupeNews(items: NewsItem[]): NewsItem[] {
+export function dedupeNews(items: NewsItem[]): NewsItem[] {
   const seen = new Set<string>();
   const merged: NewsItem[] = [];
   for (const item of items) {

@@ -1,6 +1,23 @@
 import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
 import type { Market } from "@/lib/data";
-import { fetchNews, fetchNewsMulti } from "@/lib/data/news";
+import { dedupeNews, fetchNews, fetchNewsMulti, type NewsItem } from "@/lib/data/news";
+import { fetchFinnhubCompanyNews } from "@/lib/data/finnhub";
+
+/** 美股個股新聞每次最多從 Finnhub 補幾則（Google News 中英兩版各 4 則之外） */
+const FINNHUB_NEWS_LIMIT = 4;
+
+/**
+ * 美股：Google News（中英兩版）＋ Finnhub company-news 合併去重；Finnhub 沒設定金鑰時
+ * fetchFinnhubCompanyNews 直接回空陣列，結果跟以前完全一樣。台股維持只用 Google News。
+ */
+async function fetchStockNews(quote: { symbol: string; market: Market }, newsQuery: string): Promise<NewsItem[]> {
+  if (quote.market !== "US") return fetchNews(newsQuery, 8);
+  const [google, finnhub] = await Promise.all([
+    fetchNewsMulti(newsQuery, 4, ["zh-TW", "en-US"]).catch(() => []),
+    fetchFinnhubCompanyNews(quote.symbol, FINNHUB_NEWS_LIMIT),
+  ]);
+  return dedupeNews([...google, ...finnhub]);
+}
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState } from "./indicators";
@@ -26,9 +43,7 @@ export async function buildStockGrounding(
   const newsQuery = `${quote.name} ${quote.symbol}`;
   const [earnings, news, fundamentals, chips, announcements, chipsRatios] = await Promise.all([
     getEarnings(quote.symbol, quote.market).catch(() => null),
-    (quote.market === "US" ? fetchNewsMulti(newsQuery, 4, ["zh-TW", "en-US"]) : fetchNews(newsQuery, 8)).catch(
-      () => []
-    ),
+    fetchStockNews(quote, newsQuery).catch(() => []),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
     getChips(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
@@ -100,7 +115,9 @@ export async function buildStockGrounding(
       parts.push(`${earnings.quarterlyEpsPeriod ?? "最新一季"} EPS ${earnings.quarterlyEps}${quote.currency === "TWD" ? "元" : ""}`);
     }
     if (earnings.epsSurprisePercent != null) {
-      parts.push(`優於市場預期 ${earnings.epsSurprisePercent}%`);
+      // 驚喜幅度可能是負的（低於預期），不能一律寫「優於」——以前負值會被寫成「優於市場預期 -0.89%」。
+      const s = earnings.epsSurprisePercent;
+      parts.push(s > 0 ? `優於市場預期 ${s}%` : s < 0 ? `低於市場預期 ${Math.abs(s)}%` : "與市場預期相同");
     }
     if (earnings.nextEarningsDate) {
       parts.push(`下次公布財報日期約 ${earnings.nextEarningsDate}`);

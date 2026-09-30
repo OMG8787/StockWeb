@@ -1,6 +1,7 @@
 import https from "node:https";
 import tls from "node:tls";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
+import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
@@ -463,24 +464,24 @@ async function fetchTpexMonth(stockNo: string, year: number, month: number): Pro
   const data = await fetchTpexJson<TpexHistoryResponse>(url, 6000);
   const rows = data.tables?.[0]?.data;
   if (!Array.isArray(rows)) return [];
-  return rows
-    .map((row): Candle | null => {
+  // 原本只檢查 close；open/high/low 若是 "--" 一樣會變 NaN → 圖表 "Value is null"，
+  // 統一交給 sanitizeCandles 檢查四個價格（見 candleSanity.ts）。
+  return sanitizeCandles(
+    rows.map((row): Candle => {
       const [rocDate, lots, , open, high, low, close] = row;
-      const closeNum = parseFloat((close ?? "").replace(/,/g, ""));
-      if (!Number.isFinite(closeNum)) return null;
       return {
         time: rocSlashToIso(rocDate),
         open: parseFloat((open ?? "").replace(/,/g, "")),
         high: parseFloat((high ?? "").replace(/,/g, "")),
         low: parseFloat((low ?? "").replace(/,/g, "")),
-        close: closeNum,
+        close: parseFloat((close ?? "").replace(/,/g, "")),
         // 成交張數 (lots) -> shares, same normalization twse.ts applies to
         // STOCK_DAY's own lot-denominated column, so TW candle volume stays
         // one consistent unit (shares) across both exchanges.
         volume: (parseInt((lots ?? "").replace(/,/g, ""), 10) || 0) * 1000,
       };
     })
-    .filter((c): c is Candle => c !== null);
+  );
 }
 
 export async function fetchTpexCandles(stockNo: string, range: ChartRange): Promise<Candle[]> {

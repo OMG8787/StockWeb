@@ -30,7 +30,8 @@ export default function EarningsCard({ earnings, currency }: { earnings: Earning
             </dd>
           </div>
           <div>
-            <dt className="text-(--text-muted)">EPS優於預期幅度</dt>
+            {/* 值可能是負的（低於預期），標籤不能寫死「優於」 */}
+            <dt className="text-(--text-muted)">EPS較市場預期</dt>
             <dd className={`mt-0.5 font-medium tabular-nums ${revenueColorClass(earnings?.epsSurprisePercent)}`}>
               {earnings?.epsSurprisePercent != null
                 ? `${earnings.epsSurprisePercent >= 0 ? "+" : ""}${earnings.epsSurprisePercent.toFixed(2)}%`

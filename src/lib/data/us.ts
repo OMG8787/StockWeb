@@ -1,4 +1,5 @@
 import { cached, chunk, fetchWithTimeout } from "./cache";
+import { sanitizeCandles } from "./candleSanity";
 import type { Candle, ChartRange, Earnings, Fundamentals, Quote } from "./types";
 import { findInUniverse } from "./universe";
 
@@ -423,9 +424,12 @@ export async function fetchUsCandles(symbol: string, range: ChartRange): Promise
       volume: quote.volume[i] ?? 0,
     });
   }
-  if (candles.length === 0) throw new Error(`No Yahoo candles for ${symbol}`);
+  // Yahoo 用 null 補空的欄位上面已跳過；這裡再用共用的 sanitizeCandles 擋掉
+  // NaN/0 等其他不合法值，跟 TWSE/TPEx 同一套標準（見 candleSanity.ts）。
+  const valid = sanitizeCandles(candles);
+  if (valid.length === 0) throw new Error(`No Yahoo candles for ${symbol}`);
   const days = RANGE_DAYS[range];
-  return days != null ? candles.slice(-days) : candles;
+  return days != null ? valid.slice(-days) : valid;
 }
 
 function round2(n: number): number {
@@ -501,6 +505,7 @@ export async function fetchYahooIntradayCandles(yahooSymbol: string): Promise<Ca
       volume: quote.volume[i] ?? 0,
     });
   }
-  if (candles.length === 0) throw new Error(`No Yahoo intraday candles for ${yahooSymbol}`);
-  return candles;
+  const valid = sanitizeCandles(candles);
+  if (valid.length === 0) throw new Error(`No Yahoo intraday candles for ${yahooSymbol}`);
+  return valid;
 }
