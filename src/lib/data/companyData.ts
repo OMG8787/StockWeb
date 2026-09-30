@@ -123,6 +123,15 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
 export const CHIPS_TTL_MS = 60 * 60_000;
 
 /**
+ * 全市場融資融券表（上市＋上櫃，整包快取 1 小時）。getChips() 與籌碼比例批次版
+ * （chipsRatios.ts 的 getChipsRatiosBatch）共用同一份快取，不另打上游。
+ * v2（2026-09-30）：每檔多了 marginQuota/marginDate，換 key 避免讀到舊形狀的快取。
+ */
+export function getTwMarginMap(): Promise<Map<string, Chips>> {
+  return cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll));
+}
+
+/**
  * TW only（籌碼面：三大法人買賣超＋融資融券餘額）— 美股沒有對應的公開資料
  * 源，一律回傳 null，不是抓取失敗。兩份資料都是「整個市場一次回傳」的報表，
  * 各自整包快取一次再依代號查表，不對每檔股票各打一次。
@@ -136,8 +145,7 @@ export async function getChips(symbolInput: string, marketHint?: Market): Promis
       cachedMap("chips:TW:institutional", CHIPS_TTL_MS, () =>
         mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll)
       ),
-      // v2（2026-09-30）：每檔多了 marginQuota/marginDate，換 key 避免讀到舊形狀的快取。
-      cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll)),
+      getTwMarginMap(),
     ]);
     const institutional = institutionalMap.get(symbol);
     const margin = marginMap.get(symbol);

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import type { Market, SearchItem } from "@/lib/data";
 import { formatAmount, formatAmountChange, formatPercent, formatPrice, formatVolume, priceDirectionClass } from "@/lib/format";
 import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
+import { useChipsRatioRow } from "@/lib/useChipsRatios";
+import { ChipsRatioCells, ChipsRatioHeaderCells } from "./ChipsRatioCells";
 import WatchlistButton from "./WatchlistButton";
 
 /**
@@ -285,6 +287,8 @@ function DraggableGroup({
 
   // 只有一檔時排序沒有意義，按鈕只會變成誤導（按了畫面完全沒變）。
   const showIndustryButton = group === "unheld" && items.length > 1;
+  // 籌碼比例三欄只在台股表顯示（美股沒有這些公開資料）。
+  const showChips = items[0].market === "TW";
 
   return (
     <div>
@@ -341,7 +345,13 @@ function DraggableGroup({
       </div>
       )}
       <div className="overflow-x-auto">
-        <table className={`w-full text-sm ${sortable ? "min-w-[960px]" : "min-w-[800px]"}`}>
+        {/* 台股表多了籌碼比例三欄（融資使用率／外資持股／大戶持股(週)），最小寬度跟著
+            加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
+        <table
+          className={`w-full text-sm ${
+            showChips ? (sortable ? "min-w-[1230px]" : "min-w-[1070px]") : sortable ? "min-w-[960px]" : "min-w-[800px]"
+          }`}
+        >
           <thead>
             <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
               <th className="w-8 pr-1 text-right font-medium">#</th>
@@ -354,6 +364,7 @@ function DraggableGroup({
               <th className="py-2 pr-4 font-medium text-right">股價</th>
               <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
               <th className="py-2 pr-4 font-medium text-right">成交量</th>
+              {showChips && <ChipsRatioHeaderCells />}
               <th className="py-2 pr-4 font-medium text-right">持有股數</th>
               <th className="py-2 pr-4 font-medium text-right">購買價格</th>
               {sortable && (
@@ -398,6 +409,7 @@ function DraggableGroup({
                   rowNumber={index + 1}
                   item={item}
                   showHoldingColumns={sortable}
+                  showChips={showChips}
                   rowRef={(el) => {
                     if (el) rowRefs.current.set(key, el);
                     else rowRefs.current.delete(key);
@@ -419,6 +431,7 @@ function HoldingRow({
   rowNumber,
   item,
   showHoldingColumns,
+  showChips,
   rowRef,
   onHandlePointerDown,
   onHandlePointerMove,
@@ -430,6 +443,7 @@ function HoldingRow({
   rowNumber: number;
   item: HoldingItem;
   showHoldingColumns: boolean;
+  showChips: boolean;
   rowRef: (el: HTMLTableRowElement | null) => void;
   onHandlePointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void;
   onHandlePointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -438,6 +452,24 @@ function HoldingRow({
   const [shares, setShares] = useState(item.shares?.toString() ?? "");
   const [costBasis, setCostBasis] = useState(item.costBasis?.toString() ?? "");
   const currency = item.market === "TW" ? "TWD" : "USD";
+
+  // 籌碼比例：關注清單是短清單，大戶上一週沒有週快照時允許補查集保官網（見 useChipsRatios）。
+  const { rowRef: chipsRowRef, entry: chipsEntry } = useChipsRatioRow(item.symbol, showChips ? item.market : "US", {
+    webFallback: true,
+  });
+  // 拖曳用的 rowRef 是上層每次 render 新建的 inline callback；這裡合併成一個穩定的
+  // ref，避免每次重繪都對 <tr> 反覆解除/重掛 IntersectionObserver。
+  const dragRowRef = useRef(rowRef);
+  useEffect(() => {
+    dragRowRef.current = rowRef;
+  });
+  const combinedRowRef = useCallback(
+    (el: HTMLTableRowElement | null) => {
+      dragRowRef.current(el);
+      chipsRowRef(el);
+    },
+    [chipsRowRef]
+  );
 
   function commit() {
     const sharesNum = shares.trim() === "" ? undefined : Number(shares);
@@ -484,7 +516,7 @@ function HoldingRow({
   const invested = hasHoldingInput ? investedAmount(costNum, sharesNum, item.market) : null;
 
   return (
-    <tr ref={rowRef} className="border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
+    <tr ref={combinedRowRef} className="border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
       <td className="py-2.5 pr-1 text-right tabular-nums text-(--text-muted)">{rowNumber}</td>
       <td className="py-2.5 pl-1">
         <button
@@ -533,6 +565,7 @@ function HoldingRow({
       <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
         {item.volume != null ? formatVolume(item.volume, item.market) : "—"}
       </td>
+      {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} />}
       <td className="py-2.5 pr-4 text-right">
         <input
           type="number"

@@ -97,18 +97,35 @@ async function fetchLatestWeekFromCsv(): Promise<WeekSnapshot> {
  */
 async function loadWeeks(): Promise<WeeksBlob> {
   const latest = await fetchLatestWeekFromCsv();
-  let history: WeeksBlob | undefined;
-  try {
-    history = await peekCached<WeeksBlob>(HISTORY_KEY);
-  } catch {
-    history = undefined;
-  }
+  // peekCached() 遇到 Redis 暫時性錯誤會吞掉、回 undefined，跟「真的還沒有快照」
+  // 長得一樣。如果照樣寫回，會用只有本週的內容把已經累積好的「上一週」蓋掉
+  // （2026-09-30 列表籌碼比例欄位上線時檢查發現）。所以讀不到時再讀一次，兩次
+  // 都讀不到才當成第一次建立。
+  const history =
+    (await peekCached<WeeksBlob>(HISTORY_KEY).catch(() => undefined)) ??
+    (await peekCached<WeeksBlob>(HISTORY_KEY).catch(() => undefined));
   const older = (history?.weeks ?? []).filter((w) => w.date < latest.date);
   const weeks = [latest, ...older].slice(0, 2);
   if (history?.weeks[0]?.date !== latest.date) {
     await writeCached(HISTORY_KEY, { weeks } satisfies WeeksBlob, HISTORY_TTL_MS).catch(() => undefined);
   }
   return { weeks };
+}
+
+/** 集保每週公布一次；兩份快照相隔超過這個天數，代表中間有一週本站沒解析到
+ *  （例如整週沒人造訪），那份舊快照就不是「上一週」，不能拿來算「較上週」。 */
+const MAX_WEEK_GAP_DAYS = 10;
+
+function daysBetween(a: string, b: string): number {
+  const t = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(4, 6) - 1, +d.slice(6, 8));
+  return Math.round((t(a) - t(b)) / 86_400_000);
+}
+
+/** 本站週快照裡的「上一週」（必須與最新週相鄰），沒有就回 undefined。 */
+function snapshotPreviousWeek(weeks: WeekSnapshot[]): WeekSnapshot | undefined {
+  const [latest, prev] = weeks;
+  if (!latest || !prev) return undefined;
+  return daysBetween(latest.date, prev.date) <= MAX_WEEK_GAP_DAYS ? prev : undefined;
 }
 
 function getWeeks(): Promise<WeeksBlob> {
@@ -212,16 +229,11 @@ function toIso(yyyymmdd: string): string {
   return `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
 }
 
-/** 大戶（1000張以上）持股＋上一週；本週資料抓不到或代號不在集保清單裡回 undefined。 */
-export async function getMajorHolding(symbol: string): Promise<MajorHolding | undefined> {
-  const { weeks } = await getWeeks();
-  const latest = weeks[0];
-  const row = latest?.rows[symbol];
-  if (!latest || !row) return undefined;
+/** 本週一列＋（有的話）上一週一列 → MajorHolding。單檔與批次版共用，確保數字一致。 */
+function buildMajorHolding(symbol: string, latest: WeekSnapshot, prev: WeekSnapshot | undefined): MajorHolding | undefined {
+  const row = latest.rows[symbol];
+  if (!row) return undefined;
   const result: MajorHolding = { date: toIso(latest.date), holders: row[0], shares: row[1], holdingPercent: row[2] };
-
-  let prev: WeekSnapshot | undefined = weeks[1]?.rows[symbol] ? weeks[1] : undefined;
-  if (!prev) prev = await fetchPreviousWeekFromWeb(symbol, latest.date).catch(() => undefined);
   const prevRow = prev?.rows[symbol];
   if (prev && prevRow) {
     result.prevDate = toIso(prev.date);
@@ -229,4 +241,36 @@ export async function getMajorHolding(symbol: string): Promise<MajorHolding | un
     result.prevHoldingPercent = prevRow[2];
   }
   return result;
+}
+
+/**
+ * 多檔一次查（股票列表用）：本週與上一週都只從全市場 CSV 快取＋本站週快照查表，
+ * **絕不**對每檔打集保官網——週快照還沒累積到上一週時，該檔就只有本週數值、沒有
+ * prev*（UI 顯示「累積中」），不編造。回傳的 Map 只含集保清單裡查得到的代號。
+ */
+export async function getMajorHoldingsBatch(symbols: string[]): Promise<Map<string, MajorHolding>> {
+  const out = new Map<string, MajorHolding>();
+  if (symbols.length === 0) return out;
+  const { weeks } = await getWeeks();
+  const latest = weeks[0];
+  if (!latest) return out;
+  const prev = snapshotPreviousWeek(weeks);
+  for (const symbol of symbols) {
+    const holding = buildMajorHolding(symbol, latest, prev);
+    if (holding) out.set(symbol, holding);
+  }
+  return out;
+}
+
+/** 大戶（1000張以上）持股＋上一週；本週資料抓不到或代號不在集保清單裡回 undefined。
+ *  上一週優先用本站週快照，沒有時才查集保官網個股頁（依代號＋週別長效快取）。 */
+export async function getMajorHolding(symbol: string): Promise<MajorHolding | undefined> {
+  const { weeks } = await getWeeks();
+  const latest = weeks[0];
+  if (!latest?.rows[symbol]) return undefined;
+  const fromSnapshot = snapshotPreviousWeek(weeks);
+  const prev = fromSnapshot?.rows[symbol]
+    ? fromSnapshot
+    : await fetchPreviousWeekFromWeb(symbol, latest.date).catch(() => undefined);
+  return buildMajorHolding(symbol, latest, prev);
 }

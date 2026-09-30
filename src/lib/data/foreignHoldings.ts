@@ -150,23 +150,51 @@ export interface ForeignHolding {
   prevHoldingPercent?: number;
 }
 
-/** 上市/上櫃個股的外資持股比例＋前一交易日；兩邊都查不到回 undefined（興櫃、ETF 以外的特殊代號等）。 */
-export async function getForeignHolding(symbol: string): Promise<ForeignHolding | undefined> {
+/**
+ * 多檔一次查（股票列表的籌碼比例欄位用）：只讀全市場整包快取（每個交易所的最新＋
+ * 前一交易日各一份），在記憶體裡查表，不會對每檔各打一次上游。只有清單裡真的
+ * 出現某個交易所的股票時，才去讀那個交易所的前一交易日報表。回傳的 Map 只含查得
+ * 到的代號；查不到的（興櫃、美股等）不在 Map 裡。
+ */
+export async function getForeignHoldingsBatch(symbols: string[]): Promise<Map<string, ForeignHolding>> {
+  const out = new Map<string, ForeignHolding>();
+  if (symbols.length === 0) return out;
   const [twse, tpex] = await Promise.all([
     latestSnapshot("TWSE").catch(() => undefined),
     latestSnapshot("TPEX").catch(() => undefined),
   ]);
-  const exchange: Exchange | undefined = twse?.rows[symbol] ? "TWSE" : tpex?.rows[symbol] ? "TPEX" : undefined;
-  const latest = exchange === "TWSE" ? twse : exchange === "TPEX" ? tpex : undefined;
-  if (!exchange || !latest) return undefined;
-  const [heldShares, holdingPercent] = latest.rows[symbol];
-  const result: ForeignHolding = { date: yyyymmddToIso(latest.date), heldShares, holdingPercent };
+  const latestBy: Record<Exchange, HoldingSnapshot | undefined> = { TWSE: twse, TPEX: tpex };
+  const exchangeOf = (symbol: string): Exchange | undefined =>
+    twse?.rows[symbol] ? "TWSE" : tpex?.rows[symbol] ? "TPEX" : undefined;
+
+  const needed = new Set(symbols.map(exchangeOf).filter((e): e is Exchange => e != null));
   // 前一交易日抓不到只影響「增減」那一欄，不能讓整個外資持股一起消失。
-  const prev = await previousTradingSnapshot(exchange, latest.date).catch(() => undefined);
-  const prevRow = prev?.rows[symbol];
-  if (prev && prevRow) {
-    result.prevDate = yyyymmddToIso(prev.date);
-    [result.prevHeldShares, result.prevHoldingPercent] = prevRow;
+  const prevBy: Partial<Record<Exchange, HoldingSnapshot | undefined>> = {};
+  await Promise.all(
+    Array.from(needed, async (exchange) => {
+      prevBy[exchange] = await previousTradingSnapshot(exchange, latestBy[exchange]!.date).catch(() => undefined);
+    })
+  );
+
+  for (const symbol of symbols) {
+    const exchange = exchangeOf(symbol);
+    const latest = exchange ? latestBy[exchange] : undefined;
+    if (!exchange || !latest) continue;
+    const [heldShares, holdingPercent] = latest.rows[symbol];
+    const result: ForeignHolding = { date: yyyymmddToIso(latest.date), heldShares, holdingPercent };
+    const prev = prevBy[exchange];
+    const prevRow = prev?.rows[symbol];
+    if (prev && prevRow) {
+      result.prevDate = yyyymmddToIso(prev.date);
+      [result.prevHeldShares, result.prevHoldingPercent] = prevRow;
+    }
+    out.set(symbol, result);
   }
-  return result;
+  return out;
+}
+
+/** 上市/上櫃個股的外資持股比例＋前一交易日；兩邊都查不到回 undefined（興櫃、ETF 以外的特殊代號等）。
+ *  與列表用的批次版走同一套邏輯，確保個股頁與列表數字一致。 */
+export async function getForeignHolding(symbol: string): Promise<ForeignHolding | undefined> {
+  return (await getForeignHoldingsBatch([symbol])).get(symbol);
 }
