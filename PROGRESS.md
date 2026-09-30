@@ -357,6 +357,15 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-09-30：AI問答「建議買什麼」改成從全市場找，不再只從關注清單挑（`134fb6c`，待Opus複查）
+
+使用者反映開放式買進建議都只從關注清單回答。根因：「建議買甚麼／有什麼可以布局」沒被
+`MOVERS_INTENT_PATTERN`接住 → 沒附任何全市場資料，加上前端每題預設帶關注清單、提示詞永遠有
+「逐檔講重點」規則，模型只剩關注清單可用。修法：`intent.ts`新增`wantsMarketWideBuyIdea`（明講
+「我的關注清單／我持有的」時不觸發）並納入`wantsMovers`；`ask.ts`命中時附上與`/action`同一份
+全市場多面向候選（`getActionBrief()`，30分鐘快取、逾時8秒放棄），並加`RULE_MARKET_WIDE_RECOMMENDATION`。
+`tsc`/`eslint`通過。
+
 ### 2026-09-27：「當日」切換race condition Opus正式站複查通過，正式結案
 
 Opus agent用Playwright在正式站`/stock/2330`監聽console/pageerror，做多組快速連點（完全不等待、
