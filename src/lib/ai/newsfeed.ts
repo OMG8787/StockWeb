@@ -82,6 +82,8 @@ async function selectPinned(candidates: NewsItem[]): Promise<PinnedPick[]> {
 
   const result = await callAiProviders(system, [{ role: "user", content: `新聞清單：\n${listText}` }], {
     maxOutputTokens: 1000,
+    // 照格式回 JSON 的挑選工作，不需要推理（NVIDIA 備援時會關閉思考模式）。
+    simpleTask: true,
   });
   if (!result.usedAi) return [];
 
@@ -300,6 +302,9 @@ async function summarizeBatch(items: NewsFeedItem[], fullTextById: Map<string, s
     // batch still has to fit entire objects.
     const result = await callAiProviders(system, [{ role: "user", content: `新聞清單：\n${listText}` }], {
       maxOutputTokens: Math.max(1200, items.length * 130),
+      simpleTask: true,
+      // 模型要原封不動抄回標題開頭做比對，標題若含簡體字被轉成繁體就會對不上。
+      normalizeZhTw: false,
     });
     if (!result.usedAi) return new Map();
     const parsed = parseSummaryEntries(result.answer);

@@ -1,4 +1,4 @@
-import { ZH_TW_CHAR_FIXES } from "./zhTwCharMap";
+import { ZH_TW_CHAR_FIXES, ZH_TW_PHRASE_FIXES } from "./zhTwCharMap";
 
 // AI 回覆的繁體中文把關（輸出端）。提示詞裡已經要求「只用台灣繁體中文」，但
 // 正式站真的出現過模型混出簡體字「几倍」、日文漢字「同歩」；新接的 NVIDIA／
@@ -26,8 +26,14 @@ export function normalizeZhTw(text: string): ZhTwCheckResult {
     return { text, fixedCount: 0, rejectReason: `回覆混入日文假名（${kanaCount} 字）` };
   }
   let fixedCount = 0;
+  let source = text;
+  for (const [from, to] of ZH_TW_PHRASE_FIXES) {
+    const parts = source.split(from);
+    fixedCount += parts.length - 1;
+    source = parts.join(to);
+  }
   let out = "";
-  for (const ch of text) {
+  for (const ch of source) {
     const fixed = ZH_TW_CHAR_FIXES.get(ch);
     if (fixed) {
       fixedCount++;

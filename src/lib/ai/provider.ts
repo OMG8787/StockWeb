@@ -28,12 +28,13 @@ export interface CallAiProvidersOptions {
    *  since it generates a longer, four-section write-up than a typical chat
    *  answer. */
   maxOutputTokens?: number;
-  /** 整條備援鏈（所有供應商加起來）最多花多久，預設 50 秒——所有呼叫 AI 的
-   *  route 的 maxDuration 都是 60 秒，前一家逾時後還要留時間給下一家，但不能
-   *  讓整個請求超過函式時限。 */
+  /** 整條備援鏈（所有供應商加起來）最多花多久，預設 45 秒——所有呼叫 AI 的
+   *  route 的 maxDuration 都是 60 秒，前面還要留時間抓 grounding，前一家逾時
+   *  後也要留時間給下一家，但不能讓整個請求超過函式時限。 */
   totalBudgetMs?: number;
-  /** 小型、格式固定的工作（新聞摘要）設 true：讓最快的 Groq 先上。 */
-  preferFast?: boolean;
+  /** 格式固定、不需要推理的工作（新聞挑選／摘要回 JSON）設 true：NVIDIA 會關閉
+   *  思考模式（實測開著思考做 10 則摘要要 98 秒還被截斷）。不影響供應商順序。 */
+  simpleTask?: boolean;
   /** 預設 true：輸出做繁中把關（簡體／日文新字體一對一轉回繁體，成段日文
    *  假名視為不合格改用下一家）。要求模型「原封不動抄回原文」的呼叫端要設
    *  false，否則原文裡的簡體字被轉掉會對不上。 */
@@ -43,9 +44,10 @@ export interface CallAiProvidersOptions {
 const MAX_HISTORY_TURNS = 10;
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 1000;
-const DEFAULT_TOTAL_BUDGET_MS = 50_000;
+const DEFAULT_TOTAL_BUDGET_MS = 45_000;
 /** 剩下的時間少於這個就不再嘗試下一家（幾乎不可能在這麼短時間內回完）。 */
 const MIN_ATTEMPT_MS = 3000;
+const DEFAULT_ORDER: ProviderId[] = ["gemini", "nvidia", "groq", "anthropic"];
 
 /**
  * 依序嘗試已設定金鑰的 AI 供應商（順序見 buildProviderChain），回傳第一個
@@ -106,7 +108,8 @@ export async function callAiProviders(
   const callerTimeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const deadline = Date.now() + (options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS);
-  const chain = buildProviderChain(options.preferFast ?? false, system, turns, maxOutputTokens);
+  const simpleTask = options.simpleTask ?? false;
+  const chain = buildProviderChain(system, turns, maxOutputTokens);
   const failures: string[] = [];
 
   for (const adapter of chain) {
@@ -118,7 +121,7 @@ export async function callAiProviders(
     const timeoutMs = Math.min(adapter.preferredTimeoutMs(callerTimeoutMs), remaining);
     const startedAt = Date.now();
     try {
-      const raw = await adapter.call(system, turns, { timeoutMs, maxOutputTokens });
+      const raw = await adapter.call(system, turns, { timeoutMs, maxOutputTokens, simpleTask });
       const checked = options.normalizeZhTw === false ? { text: raw, fixedCount: 0 } : normalizeZhTw(raw);
       if ("rejectReason" in checked && checked.rejectReason) {
         console.error(`[ai] ${adapter.label} output rejected:`, checked.rejectReason);
@@ -145,25 +148,18 @@ export async function callAiProviders(
 
 /**
  * 決定這次請求要依序嘗試哪些供應商：
- * - 預設（品質優先）：Gemini → NVIDIA → Groq → Claude。Gemini 是原本的主力、
- *   品質基準；NVIDIA 接得住本站所有長提示詞，當第一備援；Groq 最快但免費層
- *   只接得住小請求；Claude 付費，放最後。
- * - preferFast（新聞摘要這類小型、格式固定的工作）：Groq 先上（約 1 秒），
- *   接不住或失敗再走原本順序。
+ * - Gemini → NVIDIA → Groq → Claude。Gemini 是原本的主力、品質基準（實測名詞
+ *   白話解釋、新聞挑選判斷都最好）；NVIDIA 接得住本站所有長提示詞、數字忠於
+ *   參考資料，當第一備援；Groq 最快（約 1 秒）但免費層只接得住小請求，且實測
+ *   新聞挑選會重複挑同一事件、用「美聯儲」等中國用語，品質不及 Gemini，只當
+ *   最後的免費備援；Claude 付費，放最後。
  * - 環境變數 AI_PROVIDER_ORDER（例如 "nvidia,gemini"）可以整個覆寫順序，
  *   維運或本機測試備援鏈時用；沒列到的供應商就不會被呼叫。
  * 沒設定金鑰、或這次請求太大接不住的供應商直接排除；正在熔斷冷卻中的排到
  * 最後（全部都在冷卻時仍然照順序試，總比直接放棄好）。
  */
-function buildProviderChain(
-  preferFast: boolean,
-  system: string,
-  turns: ChatTurn[],
-  maxOutputTokens: number
-): ProviderAdapter[] {
-  const override = parseProviderOrder(process.env.AI_PROVIDER_ORDER);
-  const order: ProviderId[] =
-    override ?? (preferFast ? ["groq", "gemini", "nvidia", "anthropic"] : ["gemini", "nvidia", "groq", "anthropic"]);
+function buildProviderChain(system: string, turns: ChatTurn[], maxOutputTokens: number): ProviderAdapter[] {
+  const order: ProviderId[] = parseProviderOrder(process.env.AI_PROVIDER_ORDER) ?? DEFAULT_ORDER;
   const usable = order
     .map((id) => ADAPTERS[id])
     .filter((a) => a.isConfigured() && a.canHandle(system, turns, maxOutputTokens));

@@ -17,12 +17,16 @@ import type { ChatTurn } from "./types";
 //   雖然快一點，但回答明顯變短、白話解釋變少，不划算。
 // - Groq：免費層每個模型每分鐘只有 8,000 token（TPM，而且「提示詞＋max_tokens」
 //   單一請求超過就直接 413），qwen3.8-27b 另有每分鐘 1,000 輸出 token 上限。
-//   AI 問答的系統提示詞本身就約 8,600 token（gpt-oss 分詞），所以 Groq 只接得住
-//   新聞摘要這類小請求；gpt-oss-120b 約 1 秒回覆，最快。
+//   AI 問答的系統提示詞本身就約 8,600 token（gpt-oss 分詞），附全文的新聞摘要
+//   批次也約 9,000 token，所以 Groq 只接得住「新聞重大消息挑選」這類小請求；
+//   gpt-oss-120b 約 1 秒回覆，最快，但實測挑選品質不及 Gemini（同一事件重複
+//   挑、用「美聯儲」等中國用語），因此排在備援鏈最後。
 
 export interface AdapterCallOptions {
   timeoutMs: number;
   maxOutputTokens: number;
+  /** 格式固定、不需要推理的工作（見 CallAiProvidersOptions.simpleTask）。 */
+  simpleTask?: boolean;
 }
 
 export interface ProviderAdapter {
@@ -41,8 +45,14 @@ const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 const NVIDIA_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b";
 /** 推理模型的思考過程實測約 300~700 token，保留寬一點避免把正文擠掉被截斷。 */
 const NVIDIA_REASONING_ALLOWANCE = 2048;
-/** NVIDIA 比 Gemini 慢（實測 4~7 秒起跳，長輸出更久），給的逾時下限。 */
-const NVIDIA_MIN_TIMEOUT_MS = 25_000;
+/** NVIDIA 免費層輸出速度實測約 60~70 token/秒：短回答 5~10 秒，單股／關注清單
+ *  這類上千字的深度分析要 25~37 秒。逾時下限給寬，實際仍受整條鏈總時限壓縮。 */
+const NVIDIA_MIN_TIMEOUT_MS = 40_000;
+/** 推理保持開啟但走 low_effort：實測思考從約 600 token 降到約 100 token（省約 10 秒），
+ *  回答長度與結構不變；完全關閉思考則深度分析只剩 300 多字，不採用。 */
+const NVIDIA_EXTRA_BODY = { chat_template_kwargs: { enable_thinking: true, low_effort: true } };
+/** 新聞挑選／摘要這類照格式回 JSON 的工作：開著思考實測 10 則摘要要 98 秒還被截斷，關掉。 */
+const NVIDIA_SIMPLE_TASK_BODY = { chat_template_kwargs: { enable_thinking: false } };
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
@@ -89,8 +99,9 @@ const nvidiaAdapter: ProviderAdapter = {
       model: process.env.NVIDIA_MODEL || NVIDIA_DEFAULT_MODEL,
       system,
       turns,
-      maxTokens: options.maxOutputTokens + NVIDIA_REASONING_ALLOWANCE,
+      maxTokens: options.maxOutputTokens + (options.simpleTask ? 0 : NVIDIA_REASONING_ALLOWANCE),
       timeoutMs: options.timeoutMs,
+      extraBody: options.simpleTask ? NVIDIA_SIMPLE_TASK_BODY : NVIDIA_EXTRA_BODY,
     });
     return text;
   },

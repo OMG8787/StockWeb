@@ -45,5 +45,15 @@ function buildMap(...sources: string[]): ReadonlyMap<string, string> {
   return map;
 }
 
+/**
+ * 詞組層級的修正：其中某個字單獨看在繁體裡合法（所以不能收進單字對照表），
+ * 但整個詞是簡體寫法。在單字替換之前先處理。實際觀察到的：NVIDIA nemotron
+ * 把「槓桿」寫成「杠杆」（「杆」在繁體合法，單字表不能收）。
+ */
+export const ZH_TW_PHRASE_FIXES: ReadonlyArray<readonly [string, string]> = [
+  ["杠杆", "槓桿"],
+  ["槓杆", "槓桿"],
+];
+
 /** 錯字 → 台灣繁體正字。 */
 export const ZH_TW_CHAR_FIXES: ReadonlyMap<string, string> = buildMap(SIMPLIFIED_PAIRS, JAPANESE_SHINJITAI_PAIRS);
