@@ -369,6 +369,9 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   1,000輸出token上限；NVIDIA 免費層 kimi-k3/deepseek/glm/gemma 排隊90秒以上，只有 nemotron-3-super
   可用，且思考模式做 JSON 摘要會失控（98秒+截斷）→ 要用 `simpleTask` 關思考。換模型前先重測。
   → 工作日誌 2026-10-01，搜尋「AI供應商層接入NVIDIA與Groq」。
+- **Adanos 額度「每月250次」不是日曆月**：依註冊日起算的帳單週期（2026-10-01實測回 `x-ratelimit-reset-monthly: 2026-10-22T14:15:52Z`），
+  所以護欄以回應標頭的 remaining/reset 為主、自己的月計數只是保底；trending 預設只算「UTC今天」，一定要帶 `from` 才有7日樣本。
+  → 工作日誌 2026-10-01，搜尋「美股「社群情緒」接入 Adanos」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
@@ -381,6 +384,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-01：美股「社群情緒」接入 Adanos（`16446eb`）
+
+使用者決定美股盤中每天約10次、每月約220次可接受，作為推薦的「情緒」面向。只打 `/{reddit|x|news}/stocks/v1/trending?limit=100&from=7天前`（標頭 `X-API-Key`；一次回近7日最熱最多100檔，含 buzz_score／trend／mentions／bullish_pct／bearish_pct），三來源輪流、Redis `SET NX EX 2400` 跨實例鎖＝盤中約40分鐘1次，只在 `VERCEL_ENV=production`（或本機 `ADANOS_ALLOW_LOCAL=1`）＋美股盤中呼叫，其餘讀14天快照（`sentiment.ts`）；護欄 `adanosQuota.ts`：伺服器回報剩餘≤10停到重置、自計日12／月240（INCR）、無Redis或Redis錯誤一律不呼叫。美股個股頁新增「社群情緒」小卡＋AI grounding＋`RULE_SOCIAL_SENTIMENT`；不在榜上照實顯示「討論很少」、提及<20次不下偏多空結論。
+驗證：tsc/eslint/build過；模擬fetch＋假Redis測鎖、非盤中、預覽、缺金鑰、日12/月240、剩餘≤10、429全擋得住（0次真實呼叫）；真實回應解析正確；390/1440px無溢出；缺金鑰AAPL頁小卡不出現、2330不出現。實測共用4次真實呼叫（10/1當時伺服器 used=6／250）。
 
 ### 2026-10-01：AI供應商層接入NVIDIA與Groq（`da17187`＋`d8c5032`）
 
@@ -738,6 +746,10 @@ Opus agent實測正式站（未測已修過的關注清單/搜尋/AI問答/產�
 > 2026-09-27 一次），起因都是主檔又長回大幾百行以上、單次讀取成本疊加得太快。**
 
 ## 目前已知問題
+
+- **【待使用者操作＋待驗證】Adanos 社群情緒要在 Vercel 加 `ADANOS_API_KEY` 才會啟用**（沒加時美股頁不顯示小卡、AI 無此區塊，行為同原本）。
+  加上後第一份快照要等美股盤中（台北約21:30~04:00）有人開美股個股頁/問AI才會抓；三個來源要約80分鐘才會都有資料。
+  若要查用量：Redis key `adanos:quota`（伺服器回報剩餘）、`adanos:calls:day:<紐約日期>`、`adanos:calls:month:<UTC年月>`。
 
 - **【待使用者操作】Vercel 後台要新增 `NVIDIA_API_KEY`、`GROQ_API_KEY` 才會啟用AI備援**（沒加時行為與原本相同）。
   已知限制：NVIDIA 單股/關注清單深度分析偶爾超過40秒逾時（變異大，實測29~44秒），Gemini 本身逾時時 NVIDIA 剩餘時間不足；
