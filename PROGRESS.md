@@ -374,6 +374,8 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   → 工作日誌 2026-10-01，搜尋「美股「社群情緒」接入 Adanos」。
 - **K線某區間（常見5y/10y）全站連續幾分鐘都回503「目前無法取得歷史圖表資料」**：TWSE限流讓任一月份失敗→整張圖null，
   舊版把null當正常結果快取5分鐘；已改失敗只快取30秒。測試時連打多檔長區間本身就會觸發限流。→ 工作日誌 2026-10-01，搜尋「修K線失敗快取」。
+- **關注清單拖曳畫面有動、重新整理卻打回原狀（往下拖才會）**：React重排列搬動被拖DOM→`lostpointercapture`→把手的`onPointerUp`不觸發；拖曳的move/up要掛window。→ 工作日誌 2026-10-01，搜尋「關注清單往下拖曳順序沒存」。
+- **某檔（常見興櫃/上櫃）偶發「資料暫缺」、直接打上游卻正常**：任何「失敗回null」的`cached()`都會把null快取滿TTL並經Redis傳給所有人，前端重試無效；改用`cachedWithDegradedNullTtl`。→ 工作日誌 2026-10-01，搜尋「單檔報價失敗null快取60秒」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
@@ -387,7 +389,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
-### 2026-10-01：關注清單新增依大戶／外資／融資排序＋籌碼三欄改為「大戶／外資／融資」由左到右（`bf741ce`）
+### 2026-10-01：Opus複查順帶修兩個既有bug——關注清單往下拖曳順序沒存、單檔報價失敗null快取60秒（`fd73497`＋`c3a33a5`）
+
+拖曳：往下拖時React搬動被拖那列的DOM觸發`lostpointercapture`，`pointerup`落在一般儲存格、`handlePointerUp`沒被呼叫→順序沒寫進localStorage；改成拖曳期間在window監聽move/up/cancel。報價：`getQuote()`用一般`cached()`，上游偶發失敗的null被寫進記憶體＋Redis存活整個TTL（盤中60秒），關注清單前端1.2秒後的重試必打到同一份null→該檔顯示「資料暫缺」（6610／7893／8069輪流中招，非6610本身問題）；改用`cachedWithDegradedNullTtl`降級TTL 1秒（不在官方清單的代號維持完整TTL防爬蟲放大）。驗證：tsc/eslint/build過；正式站Playwright桌機上下拖、手機觸控上下拖皆重新整理保留，完整回歸0失敗、無503。
+
+### 2026-10-01：關注清單新增依大戶／外資／融資排序＋籌碼三欄改為「大戶／外資／融資」由左到右（`bf741ce`）（Opus正式站複查通過）
 
 使用者要求。`ChipsRatioCells`（全站列表）與個股頁`ChipsRatioSummary`同步改順序；`useChipsRatios.ts`新增`ensureChipsRatios()`（繞過畫面觀察、一次批次取齊整組台股代號，全部有結果才resolve）與`getChipsRatioValue()`。持有中排序選單加三項（沿用方向鈕），僅關注加三顆按鈕（再按切換方向，同「依產業排序」寫進手動順序）；取齊後才排、期間顯示「籌碼資料載入中…」，依本期比例排序，缺資料（美股／興櫃缺項／暫缺）不論方向都排最後。驗證：tsc/eslint/build過；正式站Playwright 16檔台股關注清單三項×兩方向排序正確、與API逐值一致、重新整理順序保留，/、/search、/highlights、個股頁順序一致，390/1440無溢出（僅`/api/quote/6610`興櫃報價503，屬既有資料暫缺）。
 
