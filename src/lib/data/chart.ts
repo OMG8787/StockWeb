@@ -1,4 +1,4 @@
-import { cached } from "./cache";
+import { cachedWithDegradedNullTtl } from "./degradedCache";
 import type { Candle, ChartRange, ChartResponse, Market } from "./types";
 import { fetchTwseCandles } from "./twse";
 import { fetchTpexCandles } from "./tpex";
@@ -13,6 +13,11 @@ const CHART_TTL_MS = 5 * 60_000;
 // intraday view. 60s keeps it genuinely near-live without re-fetching for
 // every single poll of a chart a user might have open.
 const INTRADAY_CHART_TTL_MS = 60_000;
+// 抓失敗（null）只快取 30 秒：TWSE 對連續請求會暫時回 428 限流，5y/10y 一次要打
+// 60~120 個月份請求，任何一個月失敗整張圖就是 null。原本用 cached() 會把這個 null
+// 當正常結果寫進共用 Redis 存活整個 5 分鐘，全站訪客都看到「無法取得」，即使上游
+// 下一秒就恢復（2026-10-01 正式站實測 2330 5y 連續 503）。同 /api/indices 的修法。
+const CHART_DEGRADED_TTL_MS = 30_000;
 
 async function fetchTwChart(symbol: string, range: ChartRange): Promise<Candle[]> {
   const exchange = resolveTwExchange(symbol);
@@ -80,7 +85,7 @@ export async function getChart(
   const symbol = normalizeSymbol(symbolInput);
   const market = marketHint ?? detectMarket(symbol);
   const ttl = range === "today" ? INTRADAY_CHART_TTL_MS : CHART_TTL_MS;
-  return cached(`chart:${market}:${symbol}:${range}`, ttl, async () => {
+  return cachedWithDegradedNullTtl<ChartResponse>(`chart:${market}:${symbol}:${range}`, ttl, CHART_DEGRADED_TTL_MS, async () => {
     try {
       const candles =
         range === "today"
