@@ -273,15 +273,39 @@ function DraggableGroup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items.map(groupKey).join(",")]);
 
+  // 拖曳的 move/up/cancel 一律掛在 window 上，不掛在把手按鈕本身——2026-10-01 Opus 正式站
+  // 實測抓到：往下拖時 React 重排列會把被拖的那一列 DOM 節點搬位置，瀏覽器因此觸發
+  // lostpointercapture，之後的 pointerup 落在一般儲存格上、把手的 onPointerUp 永遠不會被
+  // 呼叫 → 拖完的順序從沒寫進 localStorage（重新整理就打回原狀），draggingKeyRef 也一直
+  // 卡著讓之後的資料重新同步被擋住。window 監聽不受指標捕捉遺失影響。
+  const dragHandlersRef = useRef<{ move: (y: number) => void; up: () => void }>({ move: () => {}, up: () => {} });
+  const detachDragRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => detachDragRef.current?.(), []);
+
   function handlePointerDown(e: ReactPointerEvent<HTMLButtonElement>, key: string) {
     e.currentTarget.setPointerCapture(e.pointerId);
     draggingKeyRef.current = key;
+    detachDragRef.current?.();
+    const onMove = (ev: PointerEvent) => dragHandlersRef.current.move(ev.clientY);
+    const onUp = () => {
+      detach();
+      dragHandlersRef.current.up();
+    };
+    function detach() {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      detachDragRef.current = null;
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    detachDragRef.current = detach;
   }
 
-  function handlePointerMove(e: ReactPointerEvent<HTMLButtonElement>) {
+  function handlePointerMove(y: number) {
     const dragKey = draggingKeyRef.current;
     if (!dragKey) return;
-    const y = e.clientY;
     let overIndex = order.length - 1;
     for (let i = 0; i < order.length; i++) {
       const el = rowRefs.current.get(order[i]);
@@ -314,6 +338,11 @@ function DraggableGroup({
     const ordered = order.map((k) => byKey.get(k)).filter((i): i is HoldingItem => i != null);
     persistOrder(ordered);
   }
+
+  // 每次 render 把最新的 move/up 交給 window 監聽器用（它們讀的是這次 render 的 order）。
+  useEffect(() => {
+    dragHandlersRef.current = { move: handlePointerMove, up: handlePointerUp };
+  });
 
   function applySort(field: HeldSortField, dir: "asc" | "desc") {
     setSortField(field);
@@ -511,8 +540,6 @@ function DraggableGroup({
                     else rowRefs.current.delete(key);
                   }}
                   onHandlePointerDown={(e) => handlePointerDown(e, key)}
-                  onHandlePointerMove={handlePointerMove}
-                  onHandlePointerUp={handlePointerUp}
                 />
               );
             })}
@@ -530,8 +557,6 @@ function HoldingRow({
   showChips,
   rowRef,
   onHandlePointerDown,
-  onHandlePointerMove,
-  onHandlePointerUp,
 }: {
   /** 這一列在目前排序/篩選結果裡的順位（從1開始）——單純反映畫面上「目前看到
    *  第幾個」，不是股票的固定ID，改排序或拖曳後會跟著重新算過，不會維持原本
@@ -542,8 +567,6 @@ function HoldingRow({
   showChips: boolean;
   rowRef: (el: HTMLTableRowElement | null) => void;
   onHandlePointerDown: (e: ReactPointerEvent<HTMLButtonElement>) => void;
-  onHandlePointerMove: (e: ReactPointerEvent<HTMLButtonElement>) => void;
-  onHandlePointerUp: (e: ReactPointerEvent<HTMLButtonElement>) => void;
 }) {
   const [shares, setShares] = useState(item.shares?.toString() ?? "");
   const [costBasis, setCostBasis] = useState(item.costBasis?.toString() ?? "");
@@ -620,9 +643,6 @@ function HoldingRow({
           aria-label={`拖曳調整 ${item.name} 的順序`}
           title="拖曳調整順序"
           onPointerDown={onHandlePointerDown}
-          onPointerMove={onHandlePointerMove}
-          onPointerUp={onHandlePointerUp}
-          onPointerCancel={onHandlePointerUp}
           style={{ touchAction: "none" }}
           className="flex h-6 w-6 cursor-grab select-none items-center justify-center rounded text-(--text-muted) hover:bg-(--surface-2) hover:text-(--text-secondary) active:cursor-grabbing"
         >
