@@ -193,6 +193,17 @@ const RANGE_DAYS: Partial<Record<ChartRange, number>> = { "5d": 5, "10d": 10 };
 // long-range chart is a deliberate, infrequent user action, so it taking a
 // few extra seconds is an acceptable trade for not hammering the upstream.
 const MONTH_FETCH_CONCURRENCY = 10;
+// 5y/10y 一次要打 61~121 個月份請求，只要其中任何一個失敗整張圖就是 null——正式站
+// （Vercel 出口 IP）實測 2330 5y 連續好幾分鐘回 503，但同時間本機直連 TWSE 61 個月
+// 全部成功，代表是個別月份請求被限流/逾時、不是資料問題。兩層補強：
+// ①單月請求失敗自動重試（最多3次、帶隨機退避），長區間並行數也降到 6，降低被限流機率；
+// ②已經收盤的歷史月份資料不會再變，成功抓到的月份存進同一個實例的記憶體（30分鐘），
+//   下一次請求（含失敗後重試）只需要補沒抓到的月份，進度會累積、越試越容易成功。
+const LONG_RANGE_MONTH_CONCURRENCY = 6;
+const MONTH_RETRY_ATTEMPTS = 3;
+const CLOSED_MONTH_CACHE_TTL_MS = 30 * 60_000;
+const CLOSED_MONTH_CACHE_MAX = 900;
+const closedMonthCache = new Map<string, { candles: Candle[]; expiresAt: number }>();
 
 interface StockDayResponse {
   stat: string;
@@ -238,7 +249,7 @@ export async function fetchTwseCandles(stockNo: string, range: ChartRange): Prom
       cursor.setUTCMonth(cursor.getUTCMonth() - 1);
       return p;
     });
-    const monthly = await mapWithConcurrency(monthParams, MONTH_FETCH_CONCURRENCY, (p) => fetchMonth(stockNo, p));
+    const monthly = await mapWithConcurrency(monthParams, MONTH_FETCH_CONCURRENCY, (p) => fetchMonthResilient(stockNo, p));
     const merged = monthly.flat().sort((a, b) => a.time.localeCompare(b.time));
     if (merged.length === 0) throw new Error(`No TWSE candles for ${stockNo}`);
     return merged.slice(-days);
@@ -262,13 +273,50 @@ export async function fetchTwseCandles(stockNo: string, range: ChartRange): Prom
 
   const cutoffIso = monthsBefore(year, month, day, months);
 
-  const monthly = await mapWithConcurrency(monthParams, MONTH_FETCH_CONCURRENCY, (p) => fetchMonth(stockNo, p));
+  const monthly = await mapWithConcurrency(
+    monthParams,
+    months > 24 ? LONG_RANGE_MONTH_CONCURRENCY : MONTH_FETCH_CONCURRENCY,
+    (p) => fetchMonthResilient(stockNo, p)
+  );
   const merged = monthly
     .flat()
     .filter((c) => c.time >= cutoffIso)
     .sort((a, b) => a.time.localeCompare(b.time));
   if (merged.length === 0) throw new Error(`No TWSE candles for ${stockNo}`);
   return merged;
+}
+
+/** dateParam 是 YYYYMM01；比台北時間「本月」更早的月份才算已收盤、資料不會再變。 */
+function isClosedMonth(dateParam: string): boolean {
+  const { year, month } = taipeiToday();
+  return dateParam.slice(0, 6) < `${year}${pad(month)}`;
+}
+
+async function fetchMonthResilient(stockNo: string, dateParam: string): Promise<Candle[]> {
+  const closed = isClosedMonth(dateParam);
+  const key = `${stockNo}:${dateParam}`;
+  if (closed) {
+    const hit = closedMonthCache.get(key);
+    if (hit && hit.expiresAt > Date.now()) return hit.candles;
+  }
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MONTH_RETRY_ATTEMPTS; attempt++) {
+    try {
+      const candles = await fetchMonth(stockNo, dateParam);
+      if (closed) {
+        if (closedMonthCache.size >= CLOSED_MONTH_CACHE_MAX) {
+          const oldest = closedMonthCache.keys().next().value;
+          if (oldest !== undefined) closedMonthCache.delete(oldest);
+        }
+        closedMonthCache.set(key, { candles, expiresAt: Date.now() + CLOSED_MONTH_CACHE_TTL_MS });
+      }
+      return candles;
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 250 * (attempt + 1) + Math.random() * 250));
+    }
+  }
+  throw lastErr;
 }
 
 async function fetchMonth(stockNo: string, dateParam: string): Promise<Candle[]> {

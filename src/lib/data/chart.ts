@@ -96,8 +96,22 @@ export async function getChart(
             ? await fetchTwChart(symbol, range)
             : await fetchUsCandles(symbol, range);
       return { symbol, market, range, candles };
-    } catch {
+    } catch (err) {
+      // 失敗原因記下來（只有HTTP狀態/上游網址，不含金鑰），/api/chart 的503會附上：
+      // 正式站拿不到serverless log時，才分得出是限流、逾時還是別的原因。
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[chart] getChart failed:", symbol, range, message);
+      lastChartFailure.set(`${market}:${symbol}:${range}`, message.slice(0, 300));
+      if (lastChartFailure.size > 50) lastChartFailure.delete(lastChartFailure.keys().next().value as string);
       return null;
     }
   });
+}
+
+const lastChartFailure = new Map<string, string>();
+/** 最近一次這個股票/區間抓失敗的原因（同一個實例內），給 /api/chart 的503診斷用。 */
+export function getLastChartFailure(symbolInput: string, range: ChartRange, marketHint?: Market): string | undefined {
+  const symbol = normalizeSymbol(symbolInput);
+  const market = marketHint ?? detectMarket(symbol);
+  return lastChartFailure.get(`${market}:${symbol}:${range}`);
 }

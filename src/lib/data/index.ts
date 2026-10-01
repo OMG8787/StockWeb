@@ -42,7 +42,7 @@ export { describeTaifexNightFutures } from "./taifex";
 
 export { detectMarket, normalizeSymbol } from "./symbols";
 export { getQuote, getMarketDepth } from "./quote";
-export { getChart } from "./chart";
+export { getChart, getLastChartFailure } from "./chart";
 export { getIndices, getTaifexNightFutures } from "./marketIndices";
 export { getFundamentals, getEarnings, getChips, getMaterialAnnouncements } from "./companyData";
 export { backfillVolumeHistory } from "./volumeBackfill";

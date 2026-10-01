@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChart } from "@/lib/data";
+import { getChart, getLastChartFailure } from "@/lib/data";
 import type { ChartRange, Market } from "@/lib/data";
 
 const VALID_RANGES: ChartRange[] = ["today", "5d", "10d", "1m", "3m", "6m", "1y", "2y", "5y", "10y"];
@@ -25,7 +25,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ symb
   try {
     const chart = await getChart(symbol, range, market);
     if (!chart) {
-      return NextResponse.json({ error: "目前無法取得歷史圖表資料" }, { status: 503 });
+      return NextResponse.json(
+        { error: "目前無法取得歷史圖表資料", detail: getLastChartFailure(symbol, range, market) },
+        { status: 503 }
+      );
     }
     return NextResponse.json(chart);
   } catch (err) {
