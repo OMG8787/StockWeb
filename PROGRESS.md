@@ -179,7 +179,10 @@ src/
    │                                 volumeRatio（**2026-09-14 新增**，價量關係推論，非真實買賣單資料）
    │
    ├─ ai/                            AI 問答與每日快報
-   │  ├─ provider.ts                 共用的 Gemini→Claude fallback 呼叫邏輯（callAiProviders），
+   │  ├─ providerAdapters.ts / openaiCompat.ts / providerHealth.ts / zhTwNormalize.ts(+zhTwCharMap.ts)
+   │  │                              各供應商轉接（Gemini/NVIDIA/Groq/Claude）、OpenAI相容呼叫、
+   │  │                              熔斷器、輸出繁中把關（簡體/日文新字體一對一轉繁、成段假名判不合格）
+   │  ├─ provider.ts                 共用的 Gemini→NVIDIA→Groq→Claude 備援編排（callAiProviders），
    │  │                              處理對話歷史裁切、開頭必須是 user、合併連續同角色 turn
    │  ├─ ask.ts                      **2026-09-22 再次拆分後約120行**：/api/ask 的主要進入點，
    │  │                              組grounding、組出`system`陣列、呼叫callAiProviders，其餘
@@ -361,6 +364,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
   成交」的日子開高低收回 `"--"`→NaN→JSON null。所有K線資料源產出時一律過 `candleSanity.ts` 的
   `sanitizeCandles()`（整根略過、不編價格），新資料源也要套。另：對 TWSE 短時間併發/連打會回 HTTP 428
   限流，表現成圖表 503，測試時別狂打。→ 工作日誌 2026-10-01，搜尋「修好冷門股K線圖「Value is null」」。
+- **Groq 回 413「Request too large…TPM」、NVIDIA 大模型等到逾時沒回**：Groq 免費層每模型每分鐘8,000
+  token且「提示詞＋max_tokens」單次超過就拒（AI問答系統提示詞本身就約8,600 token），qwen另有每分鐘
+  1,000輸出token上限；NVIDIA 免費層 kimi-k3/deepseek/glm/gemma 排隊90秒以上，只有 nemotron-3-super
+  可用，且思考模式做 JSON 摘要會失控（98秒+截斷）→ 要用 `simpleTask` 關思考。換模型前先重測。
+  → 工作日誌 2026-10-01，搜尋「AI供應商層接入NVIDIA與Groq」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
 
@@ -373,6 +381,13 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-01：AI供應商層接入NVIDIA與Groq（`da17187`＋`d8c5032`）
+
+目的：Gemini免費層常撞429時有免費備援。`callAiProviders`改為 Gemini→NVIDIA(nemotron-3-super)→Groq(gpt-oss-120b，只接得住小請求)→Claude，
+429/5xx/逾時熔斷暫跳過、整條鏈總時限45秒、輸出端繁中把關；缺新金鑰時行為同原本。Groq新聞挑選品質不及Gemini（重複挑同事件、中國用語）故排最後；
+NVIDIA忠於grounding數字但名詞白話解釋較少、深度分析25~37秒。Tavily評估後不做（理由見目前已知問題）。
+驗證：tsc/eslint/build過；本機以假Gemini金鑰實測落到NVIDIA/Groq、無金鑰走原失敗路徑；5種問法對照正式站Gemini。
 
 ### 2026-10-01：所有股票列表新增籌碼比例三欄（融資使用率／外資持股／大戶持股(週)＋▲▼升降，`8462f6b`）
 
@@ -723,6 +738,13 @@ Opus agent實測正式站（未測已修過的關注清單/搜尋/AI問答/產�
 > 2026-09-27 一次），起因都是主檔又長回大幾百行以上、單次讀取成本疊加得太快。**
 
 ## 目前已知問題
+
+- **【待使用者操作】Vercel 後台要新增 `NVIDIA_API_KEY`、`GROQ_API_KEY` 才會啟用AI備援**（沒加時行為與原本相同）。
+  已知限制：NVIDIA 單股/關注清單深度分析偶爾超過40秒逾時（變異大，實測29~44秒），Gemini 本身逾時時 NVIDIA 剩餘時間不足；
+  Groq gpt-oss 偶發回空白內容（會自動落到下一家）。
+- **【評估後不做】Tavily 網路搜尋補充**：本站「沒資料」最常見是未收錄的主題/概念股，而既有規則刻意禁止列未查證成分股，網路結果（部落格/FB）
+  正是該規則要防的來源；實測10筆結果約4筆低品質（房地產站、亂碼頁、FB）；每月1,000次全站共用，且 ask 幾乎每題都有 grounding，
+  沒有可靠的「完全沒資料」觸發訊號。若日後要做，建議改成使用者主動按「上網查」＋網域白名單（官方IR/公開資訊觀測站/主流財經媒體）。
 
 - **【待確認，約2026-10-04後】列表「大戶持股(週)」長列表升降目前全顯示「累積中」**：本站週快照9/30才開始累積，要等集保CSV下一次換週（約10/3公布）才有上一週；屆時抽查`/search`該欄應出現▲▼，若仍是累積中就查`major-holders:TW:weeks:v1`是否有兩週。
 - **【已於2026-10-01修好，正式站Playwright驗證通過】部分股票K線圖渲染時噴 pageerror「Value is null」**：根因是 TWSE STOCK_DAY 對無一般成交的日子回開高低收 `"--"`→NaN→null；資料層（`candleSanity.ts`）與 `StockChart.tsx` 兩層都已過濾，詳見工作日誌 2026-10-01。
