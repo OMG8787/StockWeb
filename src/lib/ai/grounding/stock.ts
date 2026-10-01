@@ -22,6 +22,8 @@ import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState } from "./indicators";
 import { describeChipsRatios } from "./chipsRatios";
+import { getUsStockSentiment } from "@/lib/data/sentiment";
+import { describeSocialSentiment } from "./sentiment";
 
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined }
@@ -41,7 +43,7 @@ export async function buildStockGrounding(
   // surfaces English-language wire coverage (Reuters/Bloomberg/MarketWatch)
   // that the zh-TW edition mostly doesn't carry.
   const newsQuery = `${quote.name} ${quote.symbol}`;
-  const [earnings, news, fundamentals, chips, announcements, chipsRatios] = await Promise.all([
+  const [earnings, news, fundamentals, chips, announcements, chipsRatios, socialSentiment] = await Promise.all([
     getEarnings(quote.symbol, quote.market).catch(() => null),
     fetchStockNews(quote, newsQuery).catch(() => []),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
@@ -49,6 +51,8 @@ export async function buildStockGrounding(
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
     // 美股直接回 null（沒有這些資料），不會多打任何上游。
     getChipsRatios(quote.symbol, quote.market).catch(() => null),
+    // 美股限定的社群情緒（只讀快照，最多偶爾觸發1次批次刷新，見 lib/data/sentiment.ts）；缺金鑰回 null。
+    quote.market === "US" ? getUsStockSentiment(quote.symbol).catch(() => null) : Promise.resolve(null),
   ]);
 
   const changeLabel = quote.change >= 0 ? "上漲" : "下跌";
@@ -151,6 +155,8 @@ export async function buildStockGrounding(
   }
   const chipsRatiosText = describeChipsRatios(chipsRatios);
   if (chipsRatiosText) lines.push(chipsRatiosText);
+  const sentimentText = describeSocialSentiment(socialSentiment);
+  if (sentimentText) lines.push(sentimentText);
 
   if (announcements.length > 0) {
     const shown = announcements.slice(0, 3).map((a) => `- ${a.date}：${a.subject.length > 80 ? `${a.subject.slice(0, 80)}…` : a.subject}`);

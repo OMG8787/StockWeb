@@ -8,6 +8,7 @@ import WatchlistButton from "@/components/WatchlistButton";
 import FundamentalsCard from "@/components/FundamentalsCard";
 import EarningsCard from "@/components/EarningsCard";
 import ChipsCard from "@/components/ChipsCard";
+import SocialSentimentCard from "@/components/SocialSentimentCard";
 import MarketDepthCard from "@/components/MarketDepthCard";
 import LiveQuoteHeader from "@/components/LiveQuoteHeader";
 import PriceAlertForm from "@/components/PriceAlertForm";
@@ -117,6 +118,13 @@ export default async function StockDetailPage({ params, searchParams }: PageProp
       <FundamentalsCard fundamentals={fundamentals} currency={quote.currency} />
 
       <EarningsCard earnings={earnings} currency={quote.currency} />
+
+      {/* 美股限定：Reddit／X／新聞社群情緒（額度極少，只讀批次快照，見 lib/data/sentiment.ts） */}
+      {quote.market === "US" && (
+        <Suspense fallback={null}>
+          <SocialSentimentCard symbol={quote.symbol} />
+        </Suspense>
+      )}
 
       {quote.market === "TW" && <MarketDepthCard depth={marketDepth} />}
 
