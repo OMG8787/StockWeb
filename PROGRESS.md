@@ -389,6 +389,10 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-01：/search 搜尋篩選頁排序下拉新增大戶／外資／融資三項（`49c785b`）（Opus正式站複查通過）
+
+`searchStocks()` 的 `sortBy` 增加 `major`/`foreign`/`margin`，後端用 `getChipsRatiosBatch()`（全市場整包快取、純記憶體查表）對篩選後的台股排序，缺資料一律墊底、兩個方向都不變；前端只在台股分頁顯示這三項。Opus 在正式站驗證：台股 1979 筆三項雙向單調、半導體業 207 筆缺資料墊底、關鍵字與切回漲跌幅正常、390px 不破版、console 0 錯誤。
+
 ### 2026-10-01：Opus複查順帶修兩個既有bug——關注清單往下拖曳順序沒存、單檔報價失敗null快取60秒（`fd73497`＋`c3a33a5`）
 
 拖曳：往下拖時React搬動被拖那列的DOM觸發`lostpointercapture`，`pointerup`落在一般儲存格、`handlePointerUp`沒被呼叫→順序沒寫進localStorage；改成拖曳期間在window監聽move/up/cancel。報價：`getQuote()`用一般`cached()`，上游偶發失敗的null被寫進記憶體＋Redis存活整個TTL（盤中60秒），關注清單前端1.2秒後的重試必打到同一份null→該檔顯示「資料暫缺」（6610／7893／8069輪流中招，非6610本身問題）；改用`cachedWithDegradedNullTtl`降級TTL 1秒（不在官方清單的代號維持完整TTL防爬蟲放大）。驗證：tsc/eslint/build過；正式站Playwright桌機上下拖、手機觸控上下拖皆重新整理保留，完整回歸0失敗、無503。
