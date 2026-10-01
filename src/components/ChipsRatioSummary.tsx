@@ -73,34 +73,7 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
     <div className="mt-5 border-t border-(--gridline) pt-4" aria-label="籌碼比例摘要">
       <h2 className="mb-2 text-base font-semibold">籌碼比例</h2>
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-        <Item
-          title="融資使用率"
-          percent={m?.utilizationPercent}
-          delta={m && <Delta current={m.utilizationPercent} prev={m.prevUtilizationPercent} label="較前日" />}
-          detail={
-            m && (
-              <>
-                融資餘額 {m.balance.toLocaleString("zh-TW")} 張
-                {m.balanceChange != null && (
-                  <span className={priceDirectionClass(m.balanceChange)}>
-                    （{m.balanceChange > 0 ? "+" : ""}
-                    {m.balanceChange.toLocaleString("zh-TW")} 張）
-                  </span>
-                )}
-              </>
-            )
-          }
-          footnote={m?.date ? `${shortDate(m.date)} 收盤後資料` : undefined}
-          missing={emerging ? "資料暫缺（興櫃依規定不能融資）" : undefined}
-        />
-        <Item
-          title="外資持股比例"
-          percent={f?.holdingPercent}
-          delta={f && <Delta current={f.holdingPercent} prev={f.prevHoldingPercent} label="較前日" />}
-          detail={f && <>外資持股 {Math.round(f.heldShares / 1000).toLocaleString("zh-TW")} 張</>}
-          footnote={f ? `${shortDate(f.date)} 收盤後資料` : undefined}
-          missing={emerging ? "資料暫缺（興櫃沒有公布外資持股）" : undefined}
-        />
+        {/* 由左到右＝大戶／外資／融資，跟列表三欄（ChipsRatioCells）同一個順序。 */}
         <Item
           title="大戶持股比例"
           percent={h?.holdingPercent}
@@ -124,6 +97,34 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
               ? `週資料（集保每週公布一次）：${shortDate(h.date)}${h.prevDate ? `，比較 ${shortDate(h.prevDate)} 那週` : "，上一週資料累積中、暫無前期可比"}`
               : undefined
           }
+        />
+        <Item
+          title="外資持股比例"
+          percent={f?.holdingPercent}
+          delta={f && <Delta current={f.holdingPercent} prev={f.prevHoldingPercent} label="較前日" />}
+          detail={f && <>外資持股 {Math.round(f.heldShares / 1000).toLocaleString("zh-TW")} 張</>}
+          footnote={f ? `${shortDate(f.date)} 收盤後資料` : undefined}
+          missing={emerging ? "資料暫缺（興櫃沒有公布外資持股）" : undefined}
+        />
+        <Item
+          title="融資使用率"
+          percent={m?.utilizationPercent}
+          delta={m && <Delta current={m.utilizationPercent} prev={m.prevUtilizationPercent} label="較前日" />}
+          detail={
+            m && (
+              <>
+                融資餘額 {m.balance.toLocaleString("zh-TW")} 張
+                {m.balanceChange != null && (
+                  <span className={priceDirectionClass(m.balanceChange)}>
+                    （{m.balanceChange > 0 ? "+" : ""}
+                    {m.balanceChange.toLocaleString("zh-TW")} 張）
+                  </span>
+                )}
+              </>
+            )
+          }
+          footnote={m?.date ? `${shortDate(m.date)} 收盤後資料` : undefined}
+          missing={emerging ? "資料暫缺（興櫃依規定不能融資）" : undefined}
         />
       </div>
     </div>

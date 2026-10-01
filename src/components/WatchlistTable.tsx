@@ -7,7 +7,7 @@ import { formatAmount, formatAmountChange, formatPercent, formatPrice, formatVol
 import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
-import { useChipsRatioRow } from "@/lib/useChipsRatios";
+import { ensureChipsRatios, getChipsRatioValue, useChipsRatioRow, type ChipsRatioPick } from "@/lib/useChipsRatios";
 import { ChipsRatioCells, ChipsRatioHeaderCells } from "./ChipsRatioCells";
 import WatchlistButton from "./WatchlistButton";
 
@@ -67,13 +67,33 @@ function pnlPercentOrNull(item: HoldingItem): number | null {
   return computeHoldingPnl(item.price, item.costBasis, item.shares, item.market).pnlPercent;
 }
 
-/** 「依產業」不是數值指標，所以不能跟其他三個一樣用 metric 相減比較——它走
+/** 籌碼比例的「本期比例」（不是升降幅度）；美股、或這一檔沒有該項資料（興櫃沒有融資／外資、
+ *  資料暫缺）回 null → 排序時墊底，不當成 0。呼叫前必須先 await ensureChipsRatios() 取齊。 */
+function chipsMetric(pick: ChipsRatioPick) {
+  return (item: HoldingItem) => (item.market === "TW" ? getChipsRatioValue(item.symbol, pick) : null);
+}
+
+/** 依籌碼比例排序的三個欄位（值＝lib/useChipsRatios.ts 的 ChipsRatioPick）。 */
+const CHIPS_SORT_FIELDS: { field: ChipsRatioPick; label: string; title: string }[] = [
+  { field: "major", label: "大戶持股", title: "依大戶持股比例（1000張以上大戶，集保週資料）排序" },
+  { field: "foreign", label: "外資持股", title: "依外資持股比例排序" },
+  { field: "margin", label: "融資使用率", title: "依融資使用率排序" },
+];
+
+function isChipsField(field: HeldSortField): field is ChipsRatioPick {
+  return field === "major" || field === "foreign" || field === "margin";
+}
+
+/** 「依產業」不是數值指標，所以不能跟其他欄位一樣用 metric 相減比較——它走
  *  lib/fineIndustry.ts 的族群順序，也沒有「高→低／低→高」的意義。 */
-type HeldSortField = "investedAmount" | "changePercent" | "pnlPercent" | "fineIndustry";
+type HeldSortField = "investedAmount" | "changePercent" | "pnlPercent" | "fineIndustry" | ChipsRatioPick;
 const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: HoldingItem) => number | null> = {
   investedAmount: investedAmountOrZero,
   changePercent: (item) => item.changePercent,
   pnlPercent: pnlPercentOrNull,
+  major: chipsMetric("major"),
+  foreign: chipsMetric("foreign"),
+  margin: chipsMetric("margin"),
 };
 
 function sortForField(items: HoldingItem[], field: HeldSortField, dir: "asc" | "desc"): HoldingItem[] {
@@ -220,9 +240,29 @@ function DraggableGroup({
   const [order, setOrder] = useState<string[]>(() => items.map(groupKey));
   const [sortField, setSortField] = useState<HeldSortField>("investedAmount");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  /** 僅關注組最近一次按的籌碼比例排序（決定按鈕上的箭頭、再按一次切換方向）；只存在這次瀏覽。 */
+  const [unheldChipsSort, setUnheldChipsSort] = useState<{ field: ChipsRatioPick; dir: "asc" | "desc" } | null>(null);
+  /** 依籌碼比例排序時，等全部台股列的比例取齊這段期間＝true（先不動順序，取齊才一次排好）。 */
+  const [chipsLoading, setChipsLoading] = useState(false);
+  const sortTokenRef = useRef(0);
+  const itemsRef = useRef(items);
   const draggingKeyRef = useRef<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
   const byKey = new Map(items.map((i) => [groupKey(i), i]));
+  const twSymbolsKey = items
+    .filter((i) => i.market === "TW")
+    .map((i) => i.symbol)
+    .join(",");
+
+  useEffect(() => {
+    itemsRef.current = items;
+  });
+
+  // 關注清單檔數少：一掛載就對這組全部台股列取齊籌碼比例（同一個批次 API＋前端快取，
+  // 不是逐檔打），使用者之後選「依大戶／外資／融資」排序時通常已經取好、不用等。
+  useEffect(() => {
+    if (twSymbolsKey) void ensureChipsRatios(twSymbolsKey.split(","));
+  }, [twSymbolsKey]);
 
   // Re-sync from the persisted/live-refreshed items whenever they change —
   // except mid-drag, where the in-progress visual order takes precedence
@@ -278,9 +318,31 @@ function DraggableGroup({
   function applySort(field: HeldSortField, dir: "asc" | "desc") {
     setSortField(field);
     setSortDir(dir);
-    const sorted = sortForField(items, field, dir);
-    setOrder(sorted.map(groupKey));
-    persistOrder(sorted);
+    const token = ++sortTokenRef.current;
+    if (!isChipsField(field)) {
+      setChipsLoading(false);
+      const sorted = sortForField(items, field, dir);
+      setOrder(sorted.map(groupKey));
+      persistOrder(sorted);
+      return;
+    }
+    // 依籌碼比例：必須先取齊整組台股列的資料才排（不能拿只載到一半的資料先排、之後再跳動）。
+    // 等待期間使用者又改了別的排序 → token 不符，這次結果作廢。
+    setChipsLoading(true);
+    const symbols = itemsRef.current.filter((i) => i.market === "TW").map((i) => i.symbol);
+    void ensureChipsRatios(symbols).then(() => {
+      if (token !== sortTokenRef.current) return;
+      setChipsLoading(false);
+      const sorted = sortForField(itemsRef.current, field, dir);
+      setOrder(sorted.map(groupKey));
+      persistOrder(sorted);
+    });
+  }
+
+  function applyUnheldChipsSort(field: ChipsRatioPick) {
+    const dir = unheldChipsSort?.field === field && unheldChipsSort.dir === "desc" ? "asc" : "desc";
+    setUnheldChipsSort({ field, dir });
+    applySort(field, dir);
   }
 
   if (items.length === 0) return null;
@@ -300,6 +362,7 @@ function DraggableGroup({
         {title && <h3 className="text-xs font-semibold text-(--text-muted)">{title}</h3>}
         {sortable && (
           <div className="ml-auto flex items-center gap-1.5">
+            {chipsLoading && <span className="text-[11px] text-(--text-muted)">籌碼資料載入中…</span>}
             <select
               value={sortField}
               onChange={(e) => applySort(e.target.value as HeldSortField, sortDir)}
@@ -310,6 +373,12 @@ function DraggableGroup({
               <option value="changePercent">依漲跌幅</option>
               <option value="pnlPercent">依損益%</option>
               <option value="fineIndustry">依產業</option>
+              {showChips &&
+                CHIPS_SORT_FIELDS.map((c) => (
+                  <option key={c.field} value={c.field}>
+                    依{c.label}
+                  </option>
+                ))}
             </select>
             {/* 依產業沒有「高→低」的意義（族群順序不是數值），所以這顆方向鈕
                 只在數值型排序時出現，改附上分類來源說明。 */}
@@ -333,19 +402,46 @@ function DraggableGroup({
             （例如之前手動拖過、現在想改回產業排序）。按下去等同一次性的手動
             排序：會寫進 order、之後照樣可以再拖曳微調，不是鎖定模式。 */}
         {showIndustryButton && (
-          <button
-            type="button"
-            onClick={() => applySort("fineIndustry", "desc")}
-            className="ml-auto rounded-md border border-(--gridline) bg-(--surface-2) px-1.5 py-0.5 text-xs hover:bg-(--page-plane)"
-            title={FINE_INDUSTRY_HINT}
-          >
-            依產業排序
-          </button>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+            {chipsLoading && <span className="text-[11px] text-(--text-muted)">籌碼資料載入中…</span>}
+            <button
+              type="button"
+              onClick={() => {
+                setUnheldChipsSort(null);
+                applySort("fineIndustry", "desc");
+              }}
+              className="rounded-md border border-(--gridline) bg-(--surface-2) px-1.5 py-0.5 text-xs hover:bg-(--page-plane)"
+              title={FINE_INDUSTRY_HINT}
+            >
+              依產業排序
+            </button>
+            {/* 依籌碼比例：跟「依產業排序」一樣是一次性排好寫進手動順序，之後仍可拖曳；
+                再按同一顆切換高→低／低→高。缺資料（興櫃缺項、暫缺）不論方向都排最後。 */}
+            {showChips &&
+              CHIPS_SORT_FIELDS.map((c) => {
+                const active = unheldChipsSort?.field === c.field;
+                return (
+                  <button
+                    key={c.field}
+                    type="button"
+                    onClick={() => applyUnheldChipsSort(c.field)}
+                    aria-pressed={active}
+                    className={`rounded-md border px-1.5 py-0.5 text-xs hover:bg-(--page-plane) ${
+                      active ? "border-(--accent) bg-(--surface-2) text-(--accent)" : "border-(--gridline) bg-(--surface-2)"
+                    }`}
+                    title={`${c.title}（再按一次切換高→低／低→高；沒有資料的排最後）`}
+                  >
+                    {c.label}
+                    {active && (unheldChipsSort.dir === "desc" ? " ↓" : " ↑")}
+                  </button>
+                );
+              })}
+          </div>
         )}
       </div>
       )}
       <div className="overflow-x-auto">
-        {/* 台股表多了籌碼比例三欄（融資使用率／外資持股／大戶持股(週)），最小寬度跟著
+        {/* 台股表多了籌碼比例三欄（大戶持股(週)／外資持股／融資使用率），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
           className={`w-full text-sm ${

@@ -52,9 +52,13 @@ let webRunning = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 let meta: { majorDate?: string; majorPrevDate?: string } = {};
 
+/** 任何一檔狀態變動都通知（給 ensureChipsRatios 等「等一整批」的用途）。 */
+const anyListeners = new Set<() => void>();
+
 function setEntry(symbol: string, entry: ChipsRatioEntry) {
   store.set(symbol, { entry, at: Date.now() });
   listeners.get(symbol)?.forEach((l) => l());
+  anyListeners.forEach((l) => l());
 }
 
 function updateMeta(body: ChipsRatiosBatchResponse) {
@@ -140,6 +144,48 @@ function request(symbol: string, webFallback: boolean) {
   if (slot?.entry.status !== "ok") setEntry(symbol, { status: "loading" });
   pending.add(symbol);
   if (!flushTimer) flushTimer = setTimeout(() => void flush(), FLUSH_DELAY_MS);
+}
+
+// ---------------------------------------------------------------------------
+// 依比例排序用（關注清單）：不等列捲到畫面，直接對整組台股代號取齊資料。
+// ---------------------------------------------------------------------------
+
+export type ChipsRatioPick = "major" | "foreign" | "margin";
+
+function isSettled(symbol: string): boolean {
+  const s = store.get(symbol)?.entry.status;
+  return s === "ok" || s === "failed";
+}
+
+/**
+ * 對一組台股代號一次登記（沿用同一個 store／80ms 合併批次／30 分鐘快取，已有的不重打），
+ * 回傳的 Promise 在**每一檔都有結果**（成功或失敗）時才 resolve，最多等 timeoutMs。
+ * 要依比例排序的呼叫端一定要先 await 這個，才能保證不是拿「只載到一半」的資料去排。
+ * 只放台股代號進來（美股沒有這些資料，放進來會被當成查無資料）。
+ */
+export function ensureChipsRatios(symbols: string[], timeoutMs = 15_000): Promise<void> {
+  const list = Array.from(new Set(symbols));
+  for (const s of list) request(s, false);
+  if (list.every(isSettled)) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      anyListeners.delete(check);
+      clearTimeout(timer);
+      resolve();
+    };
+    const check = () => {
+      if (list.every(isSettled)) done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    anyListeners.add(check);
+  });
+}
+
+/** 某檔某項的「本期比例」（排序用）；沒資料（載入中／失敗／查無此項）回 null，不當成 0。 */
+export function getChipsRatioValue(symbol: string, pick: ChipsRatioPick): number | null {
+  const entry = store.get(symbol)?.entry;
+  if (entry?.status !== "ok") return null;
+  return entry.data?.[pick]?.[0] ?? null;
 }
 
 // ---------------------------------------------------------------------------

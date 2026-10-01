@@ -5,8 +5,10 @@ import type { RatioPair } from "@/lib/chipsRatiosList";
 import { useChipsRatiosMeta, type ChipsRatioEntry } from "@/lib/useChipsRatios";
 
 /**
- * 股票列表的「籌碼比例」三欄（融資使用率／外資持股／大戶持股(週)），StockTable 與
- * WatchlistTable 共用。每格＝「數值%」＋下方小字「▲/▼ 升降」，升降一定同時有符號
+ * 股票列表的「籌碼比例」三欄，由左到右＝大戶持股(週)／外資持股／融資使用率（使用者
+ * 2026-10-01 指定的順序；個股頁 ChipsRatioSummary 也是同一個順序），StockTable 與
+ * WatchlistTable 共用。表頭（ChipsRatioHeaderCells）與儲存格（ChipsRatioCells）的順序
+ * 必須一起改，否則會錯位。每格＝「數值%」＋下方小字「▲/▼ 升降」，升降一定同時有符號
  * 與文字（不能只靠紅綠顏色），顏色照台股慣例紅漲綠跌。缺資料一律「—」，不補 0。
  * 資料從 lib/useChipsRatios.ts 漸進載入，載入中顯示骨架。
  */
@@ -24,17 +26,17 @@ export function ChipsRatioHeaderCells() {
   const th = "py-2 pr-4 font-medium text-right whitespace-nowrap";
   return (
     <>
-      <th className={th} title="融資使用率＝融資餘額 ÷ 融資限額（收盤後資料）。下方▲▼為較前一交易日增減的百分點；興櫃不能融資，顯示「—」。">
-        融資使用率
-      </th>
-      <th className={th} title="外資持股＝全體外資及陸資持股比率（證交所／櫃買中心每個交易日收盤後公布）。下方▲▼為較前一交易日增減的百分點。">
-        外資持股
-      </th>
       <th
         className={th}
         title={`大戶持股＝持股 1000 張以上大戶占集保庫存的比例，集保結算所每週公布一次的「週資料」。${weekNote}下方▲▼為較上一週增減的百分點；本站上一週資料還沒累積到時顯示「累積中」。`}
       >
         大戶持股(週)
+      </th>
+      <th className={th} title="外資持股＝全體外資及陸資持股比率（證交所／櫃買中心每個交易日收盤後公布）。下方▲▼為較前一交易日增減的百分點。">
+        外資持股
+      </th>
+      <th className={th} title="融資使用率＝融資餘額 ÷ 融資限額（收盤後資料）。下方▲▼為較前一交易日增減的百分點；興櫃不能融資，顯示「—」。">
+        融資使用率
       </th>
     </>
   );
@@ -117,9 +119,9 @@ export function ChipsRatioCells({ entry, isTw }: { entry: ChipsRatioEntry; isTw:
   }
   return (
     <>
-      <Cell entry={entry} pick="margin" prevLabel="前一交易日" missingPrev="—" />
-      <Cell entry={entry} pick="foreign" prevLabel="前一交易日" missingPrev="—" />
       <Cell entry={entry} pick="major" prevLabel="上一週" missingPrev="累積中" />
+      <Cell entry={entry} pick="foreign" prevLabel="前一交易日" missingPrev="—" />
+      <Cell entry={entry} pick="margin" prevLabel="前一交易日" missingPrev="—" />
     </>
   );
 }
