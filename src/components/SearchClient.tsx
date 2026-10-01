@@ -28,7 +28,7 @@ const VOLUME_TREND_OPTIONS: Array<{ value: VolumeTrend; label: string }> = [
   { value: "neutral", label: "量能不明顯" },
 ];
 
-type SortBy = "changePercent" | "volume" | "price" | "turnover";
+type SortBy = "changePercent" | "volume" | "price" | "turnover" | "major" | "foreign" | "margin";
 type SortDir = "asc" | "desc";
 
 export default function SearchClient() {
@@ -40,7 +40,7 @@ export default function SearchClient() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">搜尋 / 篩選股票</h1>
-        <p className="mt-1 text-sm text-(--text-secondary)">台股、美股分開顯示，各自可依產業、股價、成交量、成交金額、漲跌幅、價量關係篩選與排序。</p>
+        <p className="mt-1 text-sm text-(--text-secondary)">台股、美股分開顯示，各自可依產業、股價、成交量、成交金額、漲跌幅、價量關係篩選；台股另可依大戶／外資／融資比例排序。</p>
       </div>
 
       <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4 space-y-4">
@@ -274,6 +274,13 @@ function MarketSection({
           <option value="volume">成交量</option>
           <option value="turnover">成交金額</option>
           <option value="price">股價</option>
+          {market === "TW" && (
+            <>
+              <option value="major">大戶持股比例（週）</option>
+              <option value="foreign">外資持股比例</option>
+              <option value="margin">融資使用率</option>
+            </>
+          )}
         </select>
         <button
           onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}

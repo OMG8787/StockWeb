@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { searchStocks } from "@/lib/data";
 import type { Market, VolumeTrend } from "@/lib/data";
 
-const SORT_FIELDS = ["changePercent", "volume", "price", "turnover"] as const;
+const SORT_FIELDS = ["changePercent", "volume", "price", "turnover", "major", "foreign", "margin"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
 
 const VOLUME_TRENDS = ["buy-leaning", "sell-leaning", "neutral"] as const;
