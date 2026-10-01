@@ -1,4 +1,5 @@
 import { cached } from "./cache";
+import { cachedWithDegradedNullTtl } from "./degradedCache";
 import type { Market, Quote } from "./types";
 import { fetchTwseQuote } from "./twse";
 import { fetchTpexQuote } from "./tpex";
@@ -65,7 +66,15 @@ export async function getQuote(symbolInput: string, marketHint?: Market): Promis
   // 直接受益，不用自己再操心這個前置條件（見 ensureTwUniverseWarm() 的
   // 完整說明）。
   if (market === "TW") await ensureTwUniverseWarm();
-  return cached(`quote:${market}:${symbol}`, quoteTtlMs(market), async () => {
+  // 抓失敗的 null 只快取 QUOTE_DEGRADED_TTL_MS——2026-10-01 Opus 正式站複查抓到：原本用一般
+  // cached()，上游偶發一次失敗（逾時／被斷線）的 null 會被當正常結果寫進記憶體＋共用 Redis
+  // 存活整個 TTL（盤中 60 秒），關注清單前端 1.2 秒後的重試打到的就是這份 null，該檔必定顯示
+  // 「資料暫缺」（例如興櫃 6610／7893、上櫃 8069 輪流中招）。跟 /api/indices 漏抓 TAIEX 同一類。
+  // 不在官方股票清單裡的台股代號（打錯／爬蟲亂打 /stock/xxx）失敗是常態不是偶發，null 照舊
+  // 快取完整 TTL，免得每秒都對三個交易所各試一次。
+  const ttl = quoteTtlMs(market);
+  const degradedTtl = market === "TW" && !resolveTwExchange(symbol) ? ttl : QUOTE_DEGRADED_TTL_MS;
+  return cachedWithDegradedNullTtl(`quote:${market}:${symbol}`, ttl, degradedTtl, async () => {
     try {
       return market === "TW" ? await fetchTwQuote(symbol) : await fetchUsQuote(symbol);
     } catch {
@@ -73,6 +82,10 @@ export async function getQuote(symbolInput: string, marketHint?: Market): Promis
     }
   });
 }
+
+/** 單檔報價抓失敗時 null 的快取時間：要短於關注清單前端的重試間隔（1.2 秒，見
+ *  WatchlistSection），重試才會真的重抓；同時仍擋住同一瞬間大量請求重複打上游。 */
+const QUOTE_DEGRADED_TTL_MS = 1_000;
 
 // A single call here is a full ~370KB HTML page fetch (see
 // yahooTwMarketDepth.ts) — genuinely heavier than a normal quote request, so
