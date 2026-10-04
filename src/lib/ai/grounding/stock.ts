@@ -138,7 +138,11 @@ export async function buildStockGrounding(
       parts.push(`${earnings.monthlyRevenuePeriod ?? "最新月"}營收年增率 ${earnings.monthlyRevenueYoyPercent >= 0 ? "+" : ""}${earnings.monthlyRevenueYoyPercent}%`);
     }
     if (earnings.quarterlyEps != null) {
-      parts.push(`${earnings.quarterlyEpsPeriod ?? "最新一季"} EPS ${earnings.quarterlyEps}${quote.currency === "TWD" ? "元" : ""}`);
+      // 台股官方季報（t187ap06）的 EPS 是「當年度累計到該季」，不是單季（2026-10-04 對帳：
+      // 2330 115年Q2 官方 49.33 ＝ Yahoo 單季 Q1 22.08＋Q2 27.25），標清楚免得 AI 當成單季跟【歷史脈絡】的單季EPS比。
+      const twQuarter = quote.market === "TW" ? earnings.quarterlyEpsPeriod?.match(/^(.*)Q([2-4])$/) : null;
+      const epsLabel = twQuarter ? `${twQuarter[1]}Q1～Q${twQuarter[2]}累計` : (earnings.quarterlyEpsPeriod ?? "最新一季");
+      parts.push(`${epsLabel} EPS ${earnings.quarterlyEps}${quote.currency === "TWD" ? "元" : ""}`);
     }
     if (earnings.epsSurprisePercent != null) {
       // 驚喜幅度可能是負的（低於預期），不能一律寫「優於」——以前負值會被寫成「優於市場預期 -0.89%」。

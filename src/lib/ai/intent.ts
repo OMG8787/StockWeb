@@ -330,16 +330,19 @@ export function detectHistoryPeriod(
   // 週一為一週的第一天
   const mondayThisWeek = addDays(t, -((t.getUTCDay() + 6) % 7));
   if (LAST_WEEK_PATTERN.test(question)) {
-    return { label: "上週", from: isoOf(addDays(mondayThisWeek, -7)), to: isoOf(addDays(mondayThisWeek, -1)) };
+    const from = isoOf(addDays(mondayThisWeek, -7));
+    const to = isoOf(addDays(mondayThisWeek, -1));
+    return { label: `上週（${from}～${to}）`, from, to };
   }
-  if (THIS_WEEK_PATTERN.test(question)) return { label: "這週", from: isoOf(mondayThisWeek), to: isoOf(t) };
+  if (THIS_WEEK_PATTERN.test(question)) return { label: `這週（${isoOf(mondayThisWeek)}起）`, from: isoOf(mondayThisWeek), to: isoOf(t) };
   if (LAST_MONTH_PATTERN.test(question)) {
     const first = new Date(Date.UTC(today.year, today.month - 2, 1));
     const last = new Date(Date.UTC(today.year, today.month - 1, 0));
-    return { label: "上個月", from: isoOf(first), to: isoOf(last) };
+    return { label: `上個月（${isoOf(first).slice(0, 7)}）`, from: isoOf(first), to: isoOf(last) };
   }
   if (THIS_MONTH_PATTERN.test(question)) {
-    return { label: "這個月", from: isoOf(new Date(Date.UTC(today.year, today.month - 1, 1))), to: isoOf(t) };
+    const from = isoOf(new Date(Date.UTC(today.year, today.month - 1, 1)));
+    return { label: `這個月（${from.slice(0, 7)}）`, from, to: isoOf(t) };
   }
   return undefined;
 }

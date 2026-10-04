@@ -251,9 +251,16 @@ export function describeFundamentalsHistory(h: FundamentalsHistory | null, isTw:
       const prior4 = h.eps.slice(-8, -4).reduce((s, e) => s + e.eps, 0);
       sumNote = `；近4季合計${recent4.toFixed(2)}，前4季${prior4.toFixed(2)}`;
     }
-    lines.push(`- 季EPS（${unit}）：${shown.map((e) => `${e.period.replace(/\s+/g, "")} ${e.eps}`).join("、")}${sumNote}`);
+    lines.push(`- 單季EPS（${unit}）：${shown.map((e) => `${e.period.replace(/\s+/g, "")} ${e.eps}`).join("、")}${sumNote}`);
   }
-  if (lines.length > 0) lines.push(`（營收/EPS多期取自${h.source}，與官方最新一期不同時以官方為準）`);
+  if (lines.length > 0) {
+    // 台股官方季報 EPS 是年度累計（見 stock.ts 財報那行），這裡是單季，口徑不同要講清楚。
+    lines.push(
+      isTw
+        ? `（營收/EPS多期取自${h.source}；這裡的季EPS是單季，上方財報那行官方EPS是年度累計，不要直接比）`
+        : `（EPS多期取自${h.source}）`
+    );
+  }
   return lines;
 }
 
@@ -271,7 +278,7 @@ export function describePeriodDetail(
     const n = Math.min(period.lastTradingDays, HISTORY_PERIOD_MAX_DAYS);
     idxs = Array.from({ length: Math.min(n, candles.length - 1) }, (_, i) => candles.length - Math.min(n, candles.length - 1) + i);
   } else {
-    if (period.to < candles[0].time) return `- 你問的期間（${period.label}）早於本站這次取得的日K範圍（${candles[0].time}起），沒有逐日資料`;
+    if (period.to < candles[0].time) return `- 使用者問的期間（${period.label}）早於本站這次取得的日K範圍（${candles[0].time}起），沒有逐日資料`;
     idxs = candles.flatMap((c, i) => (i > 0 && c.time >= period.from && c.time <= period.to ? [i] : []));
     if (idxs.length === 0) {
       const prev = candles.reduce<number>((found, c, i) => (c.time <= period.to && i > 0 ? i : found), -1);
@@ -290,10 +297,10 @@ export function describePeriodDetail(
     const chg = prevClose > 0 ? (c.close / prevClose - 1) * 100 : 0;
     const chips = chipsByDate.get(c.time);
     const chipsText =
-      chips?.foreignNet != null ? ` 外資${signedLots(chips.foreignNet)} 投信${signedLots(chips.trustNet ?? 0)}` : "";
+      chips?.foreignNet != null ? ` 外資${signedLots(chips.foreignNet)}張 投信${signedLots(chips.trustNet ?? 0)}張` : "";
     return `${mmdd(c.time)} 收${fmtPrice(c.close)}(${pct(chg, 2)}) 量${fmtVolume(c.volume, isTw)}${chipsText}`;
   });
-  return `- 你問的期間（${period.label}）逐日${isTw ? "（法人單位：張）" : ""}${note}：${rows.join("；")}`;
+  return `- 使用者問的期間（${period.label}）逐日，回答這段期間要用這幾天的數字${note}：${rows.join("；")}`;
 }
 
 export interface HistoryContextInput {
