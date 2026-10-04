@@ -1,4 +1,4 @@
-import { getMacroSnapshot } from "@/lib/data";
+import { getFredSnapshot } from "@/lib/data";
 import { MACRO_SERIES } from "@/lib/data/macroSeries";
 import { formatMacroValue, macroDelta } from "@/lib/data/macroFormat";
 
@@ -17,7 +17,7 @@ function formatDate(date: string, monthly: boolean): string {
 }
 
 export default async function MacroCard() {
-  const snapshot = await getMacroSnapshot();
+  const snapshot = await getFredSnapshot();
   if (!snapshot) return null;
   const byKey = new Map(snapshot.indicators.map((i) => [i.key, i]));
 

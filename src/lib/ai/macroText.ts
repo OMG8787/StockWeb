@@ -11,7 +11,7 @@ import { formatMacroDelta, formatMacroValue, macroDelta } from "@/lib/data/macro
  * 把幾天前的數字講成「今天」。
  */
 export function describeMacroSnapshot(snapshot: MacroSnapshot | null): string {
-  if (!snapshot) return "";
+  if (!snapshot || snapshot.fredDisabled) return "";
   const byKey = new Map(snapshot.indicators.map((i) => [i.key, i]));
   const lines = MACRO_SERIES.map((def) => {
     const ind = byKey.get(def.key);

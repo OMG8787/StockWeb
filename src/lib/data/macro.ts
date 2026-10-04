@@ -1,5 +1,6 @@
-import { fetchWithTimeout } from "./cache";
 import { cachedWithDegradedPredicate } from "./degradedCache";
+import { fetchObservations, isMacroConfigured } from "./fred";
+import { getMarketHistory, type MarketHistory } from "./marketHistory";
 import { MACRO_SERIES, type MacroFrequency, type MacroSeriesDef } from "./macroSeries";
 
 /**
@@ -16,7 +17,6 @@ import { MACRO_SERIES, type MacroFrequency, type MacroSeriesDef } from "./macroS
  * - FRED 免費額度 120 次/分鐘，一包最多 7 個請求、每幾小時一次，完全不用擔心。
  */
 
-const FRED_BASE = "https://api.stlouisfed.org/fred/series/observations";
 const DAILY_TTL_MS = 3 * 60 * 60_000;
 const MONTHLY_TTL_MS = 12 * 60 * 60_000;
 const DEGRADED_TTL_MS = 20 * 60_000;
@@ -41,30 +41,15 @@ export interface MacroSnapshot {
   indicators: MacroIndicator[];
   /** 有設定金鑰但這次沒抓到的序列 key——畫面顯示「資料暫缺」、AI 照實說沒有 */
   missing: string[];
-}
-
-interface FredObservation {
-  date: string;
-  value: string;
-}
-
-export function isMacroConfigured(): boolean {
-  return !!process.env.FRED_API_KEY;
-}
-
-async function fetchObservations(seriesId: string, limit: number): Promise<Array<{ date: string; value: number }>> {
-  const apiKey = process.env.FRED_API_KEY ?? "";
-  // api_key 會被 fetchWithTimeout 的錯誤訊息遮罩（redactSecretParams 已涵蓋 api_key），
-  // 不會外洩到 log 或畫面上。
-  const url = `${FRED_BASE}?series_id=${encodeURIComponent(seriesId)}&api_key=${encodeURIComponent(apiKey)}&file_type=json&sort_order=desc&limit=${limit}`;
-  const res = await fetchWithTimeout(url, 6000);
-  const data = (await res.json()) as { observations?: FredObservation[] };
-  // FRED 用 "." 代表當天沒有資料（例如假日），要濾掉，不能當成 0。
-  // 空字串也要擋（Number("") 會變成 0）。
-  return (data.observations ?? [])
-    .filter((o) => typeof o.value === "string" && o.value.trim() !== "" && o.value !== ".")
-    .map((o) => ({ date: o.date, value: Number(o.value) }))
-    .filter((o) => Number.isFinite(o.value) && /^\d{4}-\d{2}-\d{2}$/.test(o.date));
+  /**
+   * 只有 AI 用的 `getMacroSnapshot()` 會帶（首頁卡片用 `getFredSnapshot()`，不帶、也不會
+   * 因此多打台股／Yahoo 請求）：大盤／總體的歷史脈絡，給 buildMarketOverviewText 輸出
+   * 【市場歷史與情緒走勢】。掛在這裡而不是另開參數，是為了讓三個 AI 呼叫端
+   * （brief／actionGrounding／ask）不用改任何一行就自動吃到（它們本來就都會帶 macro）。
+   */
+  marketHistory?: MarketHistory;
+  /** 沒設定 FRED_API_KEY：indicators/missing 都是空的，AI 文字要整段略過總經段 */
+  fredDisabled?: true;
 }
 
 function round(n: number, digits: number): number {
@@ -141,11 +126,14 @@ function getBundle(frequency: MacroFrequency): Promise<MacroSnapshot> {
   );
 }
 
+export { isMacroConfigured };
+
 /**
- * 回傳 null 代表「沒設定 FRED_API_KEY」（功能整個關閉），不是抓取失敗；有設定但抓不到
- * 的項目會列在 `missing`。indicators 依 macroSeries.ts 的順序排列。永遠不會 throw。
+ * 首頁「美國總體經濟」卡片用：回傳 null 代表「沒設定 FRED_API_KEY」（功能整個關閉），
+ * 不是抓取失敗；有設定但抓不到的項目會列在 `missing`。indicators 依 macroSeries.ts 的
+ * 順序排列。永遠不會 throw。
  */
-export async function getMacroSnapshot(): Promise<MacroSnapshot | null> {
+export async function getFredSnapshot(): Promise<MacroSnapshot | null> {
   if (!isMacroConfigured()) return null;
   try {
     const [daily, monthly] = await Promise.all([getBundle("daily"), getBundle("monthly")]);
@@ -157,4 +145,15 @@ export async function getMacroSnapshot(): Promise<MacroSnapshot | null> {
   } catch {
     return { indicators: [], missing: MACRO_SERIES.map((d) => d.key) };
   }
+}
+
+/**
+ * AI（每日快報／今日建議／AI問答）用：FRED 總經快照＋大盤／總體歷史脈絡
+ * （`marketHistory`）。沒設定 FRED 金鑰時仍回傳物件（`fredDisabled: true`、總經部分為空），
+ * 讓台股／美股指數與法人、融資的歷史脈絡照樣送到 AI；兩者都抓不到也不會 throw。
+ */
+export async function getMacroSnapshot(): Promise<MacroSnapshot | null> {
+  const [fred, marketHistory] = await Promise.all([getFredSnapshot(), getMarketHistory()]);
+  if (fred) return { ...fred, marketHistory };
+  return { indicators: [], missing: [], fredDisabled: true, marketHistory };
 }
