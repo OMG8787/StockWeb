@@ -55,7 +55,8 @@ export default function ChatWidget() {
       const detail = (e as CustomEvent<AskAboutDetail>).detail;
       setContextSymbol(detail);
       setOpen(true);
-      setInput(`關於 ${detail.name}（${detail.symbol}），最近走勢如何？`);
+      // 2026-10-04 使用者要求：預填問句要直接要一個「買或不買」的結論，不只問走勢。
+      setInput(`關於 ${detail.name}（${detail.symbol}），最近走勢如何？現在建議買還是不買？`);
     }
     window.addEventListener(ASK_ABOUT_EVENT, handleAskAbout);
     return () => window.removeEventListener(ASK_ABOUT_EVENT, handleAskAbout);
