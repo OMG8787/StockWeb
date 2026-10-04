@@ -26,37 +26,8 @@ import { buildTechScreenGrounding } from "./grounding/techScreen";
 import { buildHoldingsAnalysisGrounding, buildHoldingsGrounding } from "./grounding/holdings";
 import { buildThemeGrounding, detectTheme, THEME_QUESTION_PATTERN } from "./grounding/theme";
 import { buildCannedAnswer, sanitizeLeakedMarkers } from "./askFallback";
-import {
-  SYSTEM_ROLE,
-  RULE_HONESTY,
-  RULE_FULL_NAME_WITH_TICKER,
-  RULE_JARGON,
-  RULE_OPINION,
-  RULE_SECOND_OPINION,
-  RULE_YES_NO_DIRECT,
-  RULE_CONCISE_ANSWER,
-  RULE_STAY_ON_TOPIC,
-  RULE_NO_UNVERIFIABLE_CONFESSION,
-  RULE_NO_CANT_BACKTRACK_WHEN_DATA,
-  RULE_USE_HISTORICAL_CONTEXT,
-  RULE_INDICATORS,
-  RULE_TW_CHIPS,
-  RULE_CHIPS_RATIOS,
-  RULE_SOCIAL_SENTIMENT,
-  RULE_MULTI_STOCK_COMPARISON,
-  RULE_NOT_FOUND_MARKER,
-  RULE_MACRO,
-  RULE_RATE_HIKE_NUANCE,
-  RULE_NIGHT_FUTURES,
-  RULE_MOVERS,
-  RULE_TECH_SCREEN_USAGE,
-  RULE_THEME_STOCKS_USAGE,
-  RULE_MARKET_WIDE_RECOMMENDATION,
-  RULE_HOLDINGS_EMPTY_NOT_NO_PERMISSION,
-  RULE_HOLDINGS_LIGHT,
-  RULE_HOLDINGS_DEEP_ANALYSIS,
-  RULE_SINGLE_STOCK_DEEP_ANALYSIS,
-} from "./askSystemPrompt";
+import { composeAskSystemPrompt } from "./askSystemCompose";
+import { getMarketStatus } from "@/lib/marketStatus";
 
 // `@/lib/ai/ask` 的公開介面刻意保持不變：這兩個型別原本就宣告在這個檔案裡，
 // 拆檔之後搬到 askTypes.ts，這裡再原樣匯出，呼叫端（api/ask/route.ts）完全
@@ -139,7 +110,7 @@ export async function answerQuestion(
     : holdings.filter((h) => targetSymbolSet.has(h.symbol.toUpperCase()));
   const holdingsBackgroundNote =
     !holdingsTopical && holdings.length > 0
-      ? `使用者的關注清單共 ${holdings.length} 檔：${holdings.map((h) => `${h.name}(${h.symbol})`).join("、")}。這只是備用背景名單：這一題沒有在問持股或關注清單，除非使用者明確問到，否則不要提、不要逐檔盤點、不要在回答結尾主動延伸到他的持股。`
+      ? `使用者的關注清單共 ${holdings.length} 檔：${holdings.map((h) => `${h.name}(${h.symbol})`).join("、")}。這題沒在問持股，除非使用者明確問到，否則不要提、不要盤點。`
       : "";
 
   let groundedSymbol: string | undefined;
@@ -266,7 +237,7 @@ export async function answerQuestion(
   // must never trigger either not-found note below.
   const notFoundNote =
     !contextSymbol && targets.length > 0 && stockGroundings.length === 0
-      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：${describeUnresolved()}。請用你自己的話、以一般對話語氣照實反映：暫時連不上的部分要說「暫時連不上，等等再問看看」，不要說成不涵蓋；真的沒有涵蓋的部分才說是名稱/代號打錯或不在涵蓋範圍。不要複製這段標記文字本身，也不要用自己的知識補任何具體數字。`
+      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：${describeUnresolved()}。請用自己的話照實回覆：暫時連不上的要明說「這檔本站有涵蓋，但資料來源暫時連不上，等等再問看看」，不可說成不涵蓋；不要複製這段標記，也不要用自己的知識補任何數字。`
       : "";
   // Partial miss on a multi-stock question (e.g. "環球晶跟世界先進比較" when
   // only one of the two is covered) — some real data was found, so the
@@ -275,7 +246,7 @@ export async function answerQuestion(
   // found, or it risks filling that gap in with its own trained knowledge.
   const partialNotFoundNote =
     !contextSymbol && stockGroundings.length > 0 && unresolvedTargets.length > 0
-      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：這次問題裡有部分股票/公司查到真實資料（見上方個股資料），另外${describeUnresolved()}。請用你自己的話照實反映上述情況（暫時連不上的不要說成不涵蓋），絕對不要用自己的知識填補這幾檔的任何具體數字，不要複製這段標記文字本身。`
+      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：這次問題裡有部分股票/公司查到真實資料（見上方個股資料），另外${describeUnresolved()}。請用自己的話照實回覆（暫時連不上的要明說本站有涵蓋、等等再問，不可說成不涵蓋），不要用自己的知識補這幾檔的任何數字，不要複製這段標記。`
       : "";
 
   const stockGroundingText =
@@ -340,7 +311,8 @@ ${actionBriefText}` : "",
     { text: themeGrounding ? `【主題股清單】\n${themeGrounding}` : "", userSafe: true },
     {
       text: unknownTheme
-        ? "【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】使用者這句話問的是某個主題／概念股／類股族群，但本站沒有對應的分類資料（本站只有 TWSE/TPEx 官方產業分類，例如半導體業、航運業、金融保險業、生技醫療業、鋼鐵工業、光電業、通信網路業、資訊服務業，外加一份人工整理的 AI 供應鏈清單）。請直接、誠實地說「本站目前沒有這個主題的分類清單」，然後可以改為建議使用者直接給幾檔想看的股票代號、或改問本站有的官方產業分類。絕對不可以把下面「今日焦點數據」裡的漲幅榜、技術訊號共振股、價漲量增清單當成這個主題的成分股列出來——那些股票只是今天剛好量價變化大，跟使用者問的主題沒有任何已查證的關係，把它們寫成「以下是常見的XX概念股」等於是在幫真實公司捏造一個不存在的產業分類，比答不出來嚴重得多。"
+        ? "【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】本站沒有使用者問的這個主題／概念股分類（只有 TWSE/TPEx 官方產業分類，例如半導體業、航運業、金融保險業、生技醫療業、鋼鐵工業、光電業、通信網路業、資訊服務業，外加一份 AI 供應鏈清單）。請直說「本站目前沒有這個主題的分類清單」，可建議改給幾檔股票代號或改問官方產業分類；不可把今日焦點數據的漲幅榜、共振股、價漲量增股票說成這個主題的成分股——那等於幫真實公司捏造產業分類。"
+
         : "",
       userSafe: false,
     },
@@ -353,7 +325,7 @@ ${actionBriefText}` : "",
       // 對話焦點：承接上文時明講「現在在談哪一檔」，避免大塊市場資料把注意力拉走。
       text:
         history.length > 0 && stockGroundings.length > 0
-          ? `【對話焦點】使用者目前正在討論：${stockGroundings.map((g) => g.symbol).join("、")}（詳見上方個股資料）。除非使用者這句話明確換了題目，這一句就是延續這個話題；回答只針對他問的事，不要岔到別的主題。`
+          ? `【對話焦點】使用者目前正在討論：${stockGroundings.map((g) => g.symbol).join("、")}。除非使用者明確換題，這句就是延續這個話題。`
           : "",
       userSafe: false,
     },
@@ -364,36 +336,35 @@ ${actionBriefText}` : "",
     .filter(Boolean)
     .join("\n\n");
 
-  const system = [
-    SYSTEM_ROLE,
-    RULE_HONESTY,
-    RULE_NOT_FOUND_MARKER,
-    RULE_FULL_NAME_WITH_TICKER,
-    RULE_JARGON,
-    RULE_OPINION,
-    RULE_SECOND_OPINION,
-    RULE_TW_CHIPS,
-    RULE_CHIPS_RATIOS,
-    RULE_SOCIAL_SENTIMENT,
-    wantsHoldingsAnalysis ? RULE_HOLDINGS_DEEP_ANALYSIS : RULE_HOLDINGS_LIGHT,
-    RULE_HOLDINGS_EMPTY_NOT_NO_PERMISSION,
-    wantsSingleStockAnalysis ? RULE_SINGLE_STOCK_DEEP_ANALYSIS : "",
-    RULE_INDICATORS,
-    RULE_MACRO,
-    RULE_RATE_HIKE_NUANCE,
-    RULE_NIGHT_FUTURES,
-    RULE_STAY_ON_TOPIC,
-    RULE_NO_UNVERIFIABLE_CONFESSION,
-    RULE_NO_CANT_BACKTRACK_WHEN_DATA,
-    RULE_YES_NO_DIRECT,
-    RULE_USE_HISTORICAL_CONTEXT,
-    RULE_MOVERS,
-    RULE_TECH_SCREEN_USAGE,
-    RULE_MULTI_STOCK_COMPARISON,
-    RULE_THEME_STOCKS_USAGE,
-    wantsMarketWide ? RULE_MARKET_WIDE_RECOMMENDATION : "",
-    RULE_CONCISE_ANSWER,
-  ].filter(Boolean).join("\n");
+  // 依這一題實際附上的資料區塊決定帶哪些規則（見 askSystemCompose.ts）。
+  const system = composeAskSystemPrompt({
+    question,
+    lastUserTurn,
+    hasHistory: history.length > 0,
+    stockText: stockGroundingText,
+    stockCount: stockGroundings.length,
+    holdingsText: holdingsGrounding,
+    holdingsMode: !holdingsGrounding
+      ? "none"
+      : wantsHoldingsAnalysis
+        ? "deep"
+        : holdingsTopical
+          ? "light"
+          : "target",
+    holdingsBackground: !!holdingsBackgroundNote,
+    holdingsEmptyAsked:
+      holdings.length === 0 &&
+      (HOLDINGS_TOPIC_PATTERN.test(question) || HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question)),
+    indexText: indexGrounding,
+    moversText: moversGrounding,
+    techScreenText: techScreenGrounding,
+    hasTheme: !!themeGrounding,
+    hasNotFoundMarker: !!(notFoundNote || partialNotFoundNote),
+    singleStockDeep: wantsSingleStockAnalysis,
+    marketWide: wantsMarketWide,
+    twMarketOpen: getMarketStatus("TW") === "open",
+    usMarketOpen: getMarketStatus("US") === "open",
+  });
 
   const userContent = grounding
     ? `參考資料：\n${grounding}\n\n使用者問題：${question}`
