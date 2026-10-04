@@ -1,4 +1,5 @@
 import { cached } from "@/lib/data/cache";
+import { AI_SWR_MS } from "@/lib/data/swrPolicy";
 import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getChipsRatiosBatch, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
 import { RULE_MACRO_DATA_COMPACT } from "./compactRules";
@@ -239,5 +240,5 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
     ].join("\n");
 
     return { text: fallback, usedAi: false, generatedAt: new Date().toISOString() };
-  }, { forceRefresh });
+  }, { forceRefresh, staleWhileRevalidateMs: AI_SWR_MS });
 }
