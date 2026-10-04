@@ -82,7 +82,7 @@ async function withRetry<T>(key: string, load: () => Promise<T>): Promise<T> {
 // ---------------------------------------------------------------------------
 
 async function loadTwseInsti(yyyymmdd: string): Promise<Record<string, InstiRow>> {
-  const map = await fetchTwseInstitutionalTradingAll(yyyymmdd);
+  const map = await fetchTwseInstitutionalTradingAll(yyyymmdd, "ALLBUT0999");
   const iso = `${yyyymmdd.slice(0, 4)}-${yyyymmdd.slice(4, 6)}-${yyyymmdd.slice(6, 8)}`;
   if (map.size === 0) throw new NotPublishedError(`T86 ${yyyymmdd}`);
   const rows: Record<string, InstiRow> = {};

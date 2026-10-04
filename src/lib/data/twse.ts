@@ -394,9 +394,13 @@ function parseTwseNumber(raw: string | undefined): number | undefined {
  * 使用時要分開標示避免混淆）。一次回傳全市場，所以整包快取一次、依代號查表，
  * 不對每檔股票各打一次。
  */
-export async function fetchTwseInstitutionalTradingAll(queryDate?: string): Promise<Map<string, Chips>> {
+export async function fetchTwseInstitutionalTradingAll(
+  queryDate?: string,
+  selectType: "ALL" | "ALLBUT0999" = "ALL"
+): Promise<Map<string, Chips>> {
   // queryDate：YYYYMMDD，查指定交易日（個股歷史脈絡用，見 chipsHistory.ts）；不帶＝最新一天。
-  const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${queryDate ?? ""}&selectType=ALL`;
+  // selectType：ALL 含權證（實測約 2.4MB）；ALLBUT0999 不含權證（約 190KB），只需要股票/ETF 時用它。
+  const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${queryDate ?? ""}&selectType=${selectType}`;
   const res = await fetchWithTimeout(url, 8000);
   const payload = (await res.json()) as InstitutionalTradingResponse;
   const map = new Map<string, Chips>();
