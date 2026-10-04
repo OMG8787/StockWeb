@@ -52,6 +52,32 @@ function marginText(r: ChipsRatios): string {
   return `融資使用率（${m.date ?? "最近交易日"}）${m.utilizationPercent.toFixed(2)}%${cmp}`;
 }
 
+/**
+ * 今日快報用的最精簡單行（一次列十幾檔，要省 AI 輸入長度）：期別說明放在區塊標題裡講一次，
+ * 每檔只留本期數字＋升降幅度；大戶仍保留週別日期，避免被講成每日資料。三項都沒有回 null。
+ */
+export function holdingStructureCompact(r: ChipsRatios | null): string | null {
+  if (!r) return null;
+  const parts: string[] = [];
+  const h = r.majorHolders;
+  if (h) {
+    const cmp = h.prevHoldingPercent != null ? pointDelta(h.holdingPercent, h.prevHoldingPercent, "上一週") : "上一週無法比較";
+    parts.push(`大戶持股${h.holdingPercent.toFixed(2)}%（週資料，${h.date}那週，${cmp}）`);
+  }
+  const f = r.foreign;
+  if (f) {
+    const cmp = f.prevHoldingPercent != null ? pointDelta(f.holdingPercent, f.prevHoldingPercent, "前一交易日") : "前一交易日無法比較";
+    parts.push(`外資持股${f.holdingPercent.toFixed(2)}%（${cmp}）`);
+  }
+  const m = r.margin;
+  if (m) {
+    const cmp =
+      m.prevUtilizationPercent != null ? pointDelta(m.utilizationPercent, m.prevUtilizationPercent, "前一交易日") : "前一交易日無法比較";
+    parts.push(`融資使用率${m.utilizationPercent.toFixed(2)}%（${cmp}）`);
+  }
+  return parts.length > 0 ? parts.join("、") : null;
+}
+
 /** 三項各自的單行文字（順序固定：大戶→外資→融資）。r 為 null 時回 null，由呼叫端決定怎麼寫「無資料」。 */
 export function holdingStructureParts(r: ChipsRatios | null): { major: string; foreign: string; margin: string } | null {
   if (!r) return null;

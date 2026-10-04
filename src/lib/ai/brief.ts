@@ -1,7 +1,14 @@
 import { cached } from "@/lib/data/cache";
-import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getMacroSnapshot } from "@/lib/data";
+import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getChipsRatiosBatch, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
 import { RULE_MACRO_DATA } from "./askSystemPrompt";
+import {
+  GLOSS_FOREIGN_HOLDING,
+  GLOSS_MAJOR_HOLDERS,
+  GLOSS_MARGIN_UTILIZATION,
+  RULE_HOLDING_STRUCTURE_WORDING,
+  holdingStructureCompact,
+} from "./chipsRatiosWording";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
@@ -35,7 +42,8 @@ export interface DailyBrief {
 // 用量吃緊後盤點出來的浪費源頭之一，理由同 lib/data/index.ts 的 FUNDAMENTALS_TTL_MS
 // 說明；30分鐘仍然遠比3小時的舊版本新鮮很多。
 const BRIEF_TTL_MS = 30 * 60_000;
-const BRIEF_CACHE_KEY = "daily-brief:v2"; // v2: dropped the per-date key when this moved to a rolling TTL
+// v2: dropped the per-date key when this moved to a rolling TTL；v3：參考資料新增大戶／外資／融資比例區塊
+const BRIEF_CACHE_KEY = "daily-brief:v3";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -63,6 +71,29 @@ async function buildTwChipsSummary(
   return filtered.length > 0 ? filtered.join("\n") : "（今日主要漲跌個股無明顯法人籌碼資料）";
 }
 
+// 「主要漲跌個股的大戶／外資／融資比例」區塊：對象＝已經列在漲跌榜前 N 的台股（不另外
+// 擴大名單），資料來自 getChipsRatiosBatch 的全市場整包快取，只在記憶體查表、不多打上游。
+// 每檔一行、只帶本期＋前期變化，控制 AI 輸入長度；三項都查不到的（ETF、興櫃常見）直接略過。
+const MOVERS_LIST_LIMIT = 8;
+
+async function buildTwHoldingStructureSummary(
+  twGainers: Array<{ name: string; symbol: string }>,
+  twLosers: Array<{ name: string; symbol: string }>
+): Promise<string> {
+  const targets = [...twGainers.slice(0, MOVERS_LIST_LIMIT), ...twLosers.slice(0, MOVERS_LIST_LIMIT)];
+  const ratios = await getChipsRatiosBatch(targets.map((s) => s.symbol)).catch(() => null);
+  const lines = targets
+    .map((s) => {
+      const text = holdingStructureCompact(ratios?.get(s.symbol) ?? null);
+      return text ? `${s.name}(${s.symbol})：${text}` : null;
+    })
+    .filter((l): l is string => l !== null);
+  return lines.length > 0 ? lines.join("\n") : "（今日主要漲跌個股查無大戶／外資持股／融資資料）";
+}
+
+// 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
+const RULE_BRIEF_HOLDING_STRUCTURE = `「主要漲跌個股的大戶／外資／融資比例」那段資料可以在第二部分「台股焦點」拿來當解釋漲跌的線索（例如大戶持股連續增加、外資持股比例下滑、融資使用率攀升代表散戶槓桿升溫），但不是唯一原因，也不可以由此推論未來會漲會跌或給操作建議。第一次提到這三個詞時要在同一句裡附上白話解釋：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}`;
+
 export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
   return cached(BRIEF_CACHE_KEY, BRIEF_TTL_MS, async () => {
     const [indices, taifexFutures, macro, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews] =
@@ -84,7 +115,10 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
         fetchNews("台股", 15).catch(() => []),
         fetchUsMarketNews(10).catch(() => []),
       ]);
-    const chipsSummary = await buildTwChipsSummary(twGainers, twLosers);
+    const [chipsSummary, holdingSummary] = await Promise.all([
+      buildTwChipsSummary(twGainers, twLosers),
+      buildTwHoldingStructureSummary(twGainers, twLosers),
+    ]);
 
     const twStatus = getMarketStatus("TW");
     const usStatus = getMarketStatus("US");
@@ -95,8 +129,8 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "【大盤概況（台股＋美股）】",
       buildMarketOverviewText(indices, taifexFutures, macro),
       "",
-      "【台股漲幅前8】", listStocks(twGainers.slice(0, 8)),
-      "【台股跌幅前8】", listStocks(twLosers.slice(0, 8)),
+      `【台股漲幅前${MOVERS_LIST_LIMIT}】`, listStocks(twGainers.slice(0, MOVERS_LIST_LIMIT)),
+      `【台股跌幅前${MOVERS_LIST_LIMIT}】`, listStocks(twLosers.slice(0, MOVERS_LIST_LIMIT)),
       "",
       "【美股漲幅前8】", listStocks(usGainers.slice(0, 8)),
       "【美股跌幅前8】", listStocks(usLosers.slice(0, 8)),
@@ -112,6 +146,9 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "",
       "【今日主要漲跌個股的三大法人籌碼動向（僅台股，股數已換算好對應張數，直接引用不要自己重算）】",
       chipsSummary,
+      "",
+      "【主要漲跌個股的大戶／外資／融資比例（僅台股，附前期變化；大戶是集保每週公布的週資料、跟上一週比，外資持股與融資使用率是每日資料、跟前一交易日比；升降幅度已算好，直接引用）】",
+      holdingSummary,
       "",
       "【近期市場新聞（台股，依時間排序，可能橫跨最近幾天）】",
       twNews.length > 0 ? twNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
@@ -130,6 +167,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "全文只描述現象與客觀關聯，絕對不要給出「建議買進/賣出/加碼/減碼」等任何操作建議或目標價，也不要用「值得買」「該賣」「即將噴出」「準備上漲」這類預測性或推薦性字眼。",
       "若參考資料中某部分標示為無法取得，請如實反映（例如略過或簡短說明查無資料），不要編造數字。",
       RULE_MACRO_DATA,
+      RULE_BRIEF_HOLDING_STRUCTURE,
       "結尾不需要再加免責聲明，網站會自動附上。",
     ].join("\n");
 
