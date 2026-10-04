@@ -340,5 +340,5 @@ export async function buildHistoryContext(input: HistoryContextInput): Promise<s
     if (detail) lines.push(detail);
   }
   if (lines.length === 0) return undefined;
-  return `${HISTORY_SECTION_TITLE}（程式算好，直接引用勿重算；未列出的期間/項目＝沒有資料）\n${lines.join("\n")}`;
+  return `${HISTORY_SECTION_TITLE}（程式算好，直接引用勿重算；回答買不買／強不強時必須拿這裡的過去走勢跟今天對照著講；未列出的期間/項目＝沒有資料）\n${lines.join("\n")}`;
 }
