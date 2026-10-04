@@ -1,3 +1,4 @@
+import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
 import https from "node:https";
 import tls from "node:tls";
 import type { Candle, ChartRange, Earnings, Quote } from "./types";
@@ -442,7 +443,7 @@ export async function fetchEmergingQuarterlyEpsAll(): Promise<Map<string, Earnin
     if (!row.SecuritiesCompanyCode || !Number.isFinite(eps)) continue;
     map.set(row.SecuritiesCompanyCode.trim(), {
       quarterlyEps: round2(eps),
-      quarterlyEpsPeriod: `${row.年度}年Q${row.季別}`,
+      quarterlyEpsPeriod: twQuarterlyEpsPeriodLabel(row.年度, row.季別),
     });
   }
   return map;

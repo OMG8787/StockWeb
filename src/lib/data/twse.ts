@@ -1,3 +1,4 @@
+import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
@@ -593,7 +594,7 @@ export async function fetchTwseQuarterlyEpsAll(): Promise<Map<string, Earnings>>
     if (!row.公司代號 || !Number.isFinite(eps)) continue;
     map.set(row.公司代號, {
       quarterlyEps: round2(eps),
-      quarterlyEpsPeriod: `${row.年度}年Q${row.季別}`,
+      quarterlyEpsPeriod: twQuarterlyEpsPeriodLabel(row.年度, row.季別),
     });
   }
   return map;

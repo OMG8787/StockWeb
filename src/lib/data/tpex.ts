@@ -1,3 +1,4 @@
+import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
 import https from "node:https";
 import tls from "node:tls";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
@@ -773,7 +774,7 @@ export async function fetchTpexQuarterlyEpsAll(): Promise<Map<string, Earnings>>
     if (!row.SecuritiesCompanyCode || !Number.isFinite(eps)) continue;
     map.set(row.SecuritiesCompanyCode, {
       quarterlyEps: round2(eps),
-      quarterlyEpsPeriod: `${row.Year}年Q${row.Season}`,
+      quarterlyEpsPeriod: twQuarterlyEpsPeriodLabel(row.Year, row.Season),
     });
   }
   return map;
