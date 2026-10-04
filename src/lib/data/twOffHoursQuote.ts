@@ -1,4 +1,5 @@
 import { classifyTwQuoteTradeDate } from "@/lib/pollingSchedule";
+import { getChart } from "./chart";
 import { cachedMapWithDegradedShortTtl } from "./degradedCache";
 import { fetchTwseDailyBarsAll } from "./twse";
 import { fetchTpexDailyBarsAll } from "./tpex";
@@ -95,7 +96,16 @@ export async function reconcileTwListedQuote(
 ): Promise<Quote> {
   if (!needsDailyBar(quote, now)) return quote;
   const bar = pickDailyBar(quote, (await getTwDailyBarMap(exchange)).get(quote.symbol), now);
-  return bar ? quoteFromDailyBar(quote, bar) : quote;
+  if (!bar) return quote;
+  const rebuilt = quoteFromDailyBar(quote, bar);
+  if (exchange !== "TPEx") return rebuilt;
+  // 上櫃的 tpex_mainboard_quotes 成交股數只算一般交易（＝MIS 的口徑），個股頁日K
+  // （st43）另含盤後定價等，同一天會差幾％（2026-10-02 6488：15,514,000 vs 16,256,000）。
+  // 單檔報價跟個股頁日K放在同一頁，量要對得上：同一天的日K有就用日K的量（走圖表
+  // 同一個快取 key／模式，個股頁本來就會抓這份）。上市的 STOCK_DAY_ALL 跟 STOCK_DAY
+  // 本來就逐值相同，不需要這一步。
+  const candle = (await getChart(quote.symbol, "5d", "TW").catch(() => null))?.candles.find((c) => c.time === bar.date);
+  return candle ? { ...rebuilt, volume: candle.volume } : rebuilt;
 }
 
 /** 全市場報價表：同上規則逐檔套用；只有真的有需要校正的檔才去抓對應交易所的整包。 */
