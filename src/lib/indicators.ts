@@ -1,4 +1,5 @@
 import type { Candle } from "@/lib/data/types";
+import { computeMacdLines, MACD_MIN_BARS } from "@/lib/ema";
 
 // Full-series versions of the same indicators lib/signals.ts already
 // computes for the text signal tags (same formulas, same parameters — kept
@@ -22,31 +23,6 @@ function sma(values: number[], period: number): (number | null)[] {
     }
     const slice = values.slice(i - period + 1, i + 1);
     result.push(slice.reduce((a, b) => a + b, 0) / period);
-  }
-  return result;
-}
-
-/**
- * 指數移動平均——**必須跟 lib/signals.ts 的 `ema()` 完全同一套算法**，
- * 否則圖上的 MACD 副圖會跟技術訊號標籤講不同的話。種子用前 `period` 根的
- * 簡單移動平均（教科書標準做法），前 `period − 1` 根回 `null`；輸入開頭
- * 帶 `null`（MACD 訊號線的情形）也支援。詳細理由見 signals.ts 的註解。
- */
-function ema(values: (number | null)[], period: number): (number | null)[] {
-  const k = 2 / (period + 1);
-  const result: (number | null)[] = new Array(values.length).fill(null);
-  let start = 0;
-  while (start < values.length && values[start] == null) start++;
-  if (values.length - start < period) return result;
-  let sum = 0;
-  for (let i = start; i < start + period; i++) sum += values[i] as number;
-  let prev = sum / period;
-  result[start + period - 1] = prev;
-  for (let i = start + period; i < values.length; i++) {
-    const v = values[i];
-    if (v == null) break;
-    prev = v * k + prev * (1 - k);
-    result[i] = prev;
   }
   return result;
 }
@@ -119,17 +95,9 @@ export interface MacdSeries {
  *  之後，訊號線最早要到第 34 根才有有效值；這裡仍沿用 signals.ts 的
  *  MIN_BARS 門檻當作「資料夠不夠」的判斷，並且只畫真的有值的點。 */
 export function computeMacdSeries(candles: Candle[]): MacdSeries {
-  const MIN_BARS = 50;
+  const MIN_BARS = MACD_MIN_BARS;
   if (candles.length < MIN_BARS) return { macd: [], signal: [], histogram: [] };
-  const closes = candles.map((c) => c.close);
-  const ema12 = ema(closes, 12);
-  const ema26 = ema(closes, 26);
-  const macdLine = closes.map((_, i) => {
-    const fast = ema12[i];
-    const slow = ema26[i];
-    return fast == null || slow == null ? null : fast - slow;
-  });
-  const signalLine = ema(macdLine, 9);
+  const { macdLine, signalLine } = computeMacdLines(candles.map((c) => c.close));
   const macd: IndicatorPoint[] = [];
   const signal: IndicatorPoint[] = [];
   const histogram: IndicatorPoint[] = [];
