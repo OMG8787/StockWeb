@@ -12,6 +12,7 @@ import { guessSymbolsFromText } from "./symbolResolve";
 import {
   conversationWantsMovers,
   conversationWantsTechScreen,
+  detectHistoryPeriod,
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
@@ -60,6 +61,7 @@ import {
   RULE_NO_CANT_BACKTRACK_WHEN_DATA,
   RULE_YES_NO_DIRECT,
   RULE_USE_HISTORICAL_CONTEXT,
+  RULE_CONCISE_ANSWER,
   RULE_FOLLOWUP_SUGGESTIONS,
   RULE_CONSECUTIVE_GAIN_DAYS_FILTER,
   RULE_MARKET_RANKINGS_USAGE,
@@ -177,7 +179,12 @@ export async function answerQuestion(
     newsFeed,
   ] =
     await Promise.all([
-      Promise.all(targets.map((t) => buildStockGrounding(t))),
+      // 問到過去某天/某段期間時，個股【歷史脈絡】多附該期間逐日明細；多檔比較時每檔歷史脈絡精簡版。
+      Promise.all(
+        targets.map((t) =>
+          buildStockGrounding(t, { period: detectHistoryPeriod(question, taipeiTodayForAsk()), compact: targets.length > 1 })
+        )
+      ),
       Promise.all([getIndices(), getTaifexNightFutures().catch(() => null), getMacroSnapshot()])
         .then(([indices, taifexFutures, macro]) => buildMarketOverviewText(indices, taifexFutures, macro))
         .catch(() => ""),
@@ -415,6 +422,7 @@ ${actionBriefText}` : "",
     RULE_THEME_STOCKS_USAGE,
     RULE_FULL_NAME_WITH_TICKER,
     wantsMarketWide ? RULE_MARKET_WIDE_RECOMMENDATION : "",
+    RULE_CONCISE_ANSWER,
   ].filter(Boolean).join("\n");
 
   const userContent = grounding

@@ -214,3 +214,132 @@ export const HOLDINGS_ANALYSIS_INTENT_PATTERN =
 // mention "走勢".
 export const SINGLE_STOCK_ANALYSIS_INTENT_PATTERN =
   /最近走勢|該不該(買|賣|進場|出場)|值得(買|進場)|現在.{0,4}(能不能|可以|該).{0,4}(買|賣|進場)|(買|賣)點|現在.{0,6}(如何|怎麼樣|狀況)/;
+
+// ---------------------------------------------------------------------------
+// 使用者明確問「過去某一天／某段期間」（昨天、上週、10月1日、這個月、近10天）時，
+// 個股【歷史脈絡】額外附該期間的逐日收盤／漲跌／成交量（見 grounding/history.ts）。
+// 偵測刻意保守：只認得下面幾種明確說法，對不上就不附（不附只是少一段，不會答錯）。
+// ---------------------------------------------------------------------------
+
+/** 期間：日曆區間（含頭尾，YYYY-MM-DD），或「最近 N 個交易日」 */
+export type HistoryPeriod =
+  | { label: string; from: string; to: string }
+  | { label: string; lastTradingDays: number };
+
+/** 逐日明細最多列幾個交易日 */
+export const HISTORY_PERIOD_MAX_DAYS = 20;
+
+const ZH_DIGITS: Record<string, number> = { 一: 1, 二: 2, 兩: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+
+function parseSmallNumber(raw: string): number | undefined {
+  if (/^\d+$/.test(raw)) return parseInt(raw, 10);
+  if (raw === "十") return 10;
+  const m = raw.match(/^([一二兩两三四五六七八九])?十([一二三四五六七八九])?$/);
+  if (m) return (m[1] ? ZH_DIGITS[m[1]] : 1) * 10 + (m[2] ? ZH_DIGITS[m[2]] : 0);
+  return ZH_DIGITS[raw];
+}
+
+function isoOf(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(d: Date, n: number): Date {
+  const c = new Date(d);
+  c.setUTCDate(c.getUTCDate() + n);
+  return c;
+}
+
+/** 月/日（沒寫年份）→ 最近一次出現的那天：比今天晚就當成去年。不合法日期回 undefined。 */
+function monthDayToIso(month: number, day: number, today: Date, year?: number): string | undefined {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  let y = year ?? today.getUTCFullYear();
+  let d = new Date(Date.UTC(y, month - 1, day));
+  if (d.getUTCMonth() !== month - 1) return undefined;
+  if (year == null && d > today) {
+    y -= 1;
+    d = new Date(Date.UTC(y, month - 1, day));
+  }
+  return isoOf(d);
+}
+
+const MD = "(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|號|号)";
+const RANGE_MD_PATTERN = new RegExp(`${MD}\s*(?:到|至|~|～|-|－)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*(?:日|號|号)`);
+const SINGLE_MD_PATTERN = new RegExp(MD);
+const ISO_DATE_PATTERN = /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/;
+// 「10/1」這種寫法也可能是分數或比例，所以要同一句裡有明顯在問行情的字才算。
+const SLASH_MD_PATTERN = /(?<![\d/])(1[0-2]|0?[1-9])\/(3[01]|[12]\d|0?[1-9])(?![\d/%])/;
+const SLASH_CONTEXT_PATTERN = /那天|當天|当天|收盤|收盘|漲|涨|跌|股價|股价|成交量|表現|表现|走勢|走势|法人|外資|外资/;
+const LAST_N_DAYS_PATTERN = /(?:最近|近|過去|过去|前)\s*(\d{1,2}|[一二兩两三四五六七八九十]{1,3})\s*(?:個|个)?\s*(?:交易日|天|日)/;
+const RECENT_FEW_DAYS_PATTERN = /(?:最近|近|這|这)幾天|(?:最近|近|過去|过去)\s*(?:一|1)\s*(?:週|周|星期|禮拜|礼拜)/;
+const DAY_BEFORE_YESTERDAY_PATTERN = /前天/;
+const YESTERDAY_PATTERN = /昨天|昨日/;
+const LAST_WEEK_PATTERN = /上(?:個|个)?(?:週|周|星期|禮拜|礼拜)/;
+const THIS_WEEK_PATTERN = /(?:這|这|本)(?:個|个)?(?:週|周|星期|禮拜|礼拜)/;
+const LAST_MONTH_PATTERN = /上(?:個|个)?月(?!營收|营收)/;
+const THIS_MONTH_PATTERN = /(?:這|这|本)(?:個|个)?月(?!營收|营收)/;
+
+/**
+ * today：台北日曆日。命中回傳期間，否則 undefined。順序：明確日期區間 → 單一明確日期 →
+ * 「近N天」→ 前天/昨天 → 上週/這週 → 上個月/這個月。
+ */
+export function detectHistoryPeriod(
+  question: string,
+  today: { year: number; month: number; day: number }
+): HistoryPeriod | undefined {
+  const t = new Date(Date.UTC(today.year, today.month - 1, today.day));
+
+  const range = question.match(RANGE_MD_PATTERN);
+  if (range) {
+    const m1 = parseInt(range[1], 10);
+    const from = monthDayToIso(m1, parseInt(range[2], 10), t);
+    const to = monthDayToIso(range[3] ? parseInt(range[3], 10) : m1, parseInt(range[4], 10), t);
+    if (from && to && from <= to) return { label: `${from}～${to}`, from, to };
+  }
+  const iso = question.match(ISO_DATE_PATTERN);
+  if (iso) {
+    const d = monthDayToIso(parseInt(iso[2], 10), parseInt(iso[3], 10), t, parseInt(iso[1], 10));
+    if (d) return { label: d, from: d, to: d };
+  }
+  const single = question.match(SINGLE_MD_PATTERN);
+  if (single) {
+    const d = monthDayToIso(parseInt(single[1], 10), parseInt(single[2], 10), t);
+    if (d) return { label: d, from: d, to: d };
+  }
+  const slash = SLASH_CONTEXT_PATTERN.test(question) ? question.match(SLASH_MD_PATTERN) : null;
+  if (slash) {
+    const d = monthDayToIso(parseInt(slash[1], 10), parseInt(slash[2], 10), t);
+    if (d) return { label: d, from: d, to: d };
+  }
+  const lastN = question.match(LAST_N_DAYS_PATTERN);
+  if (lastN) {
+    const n = parseSmallNumber(lastN[1]);
+    if (n != null && n >= 1) {
+      const days = Math.min(n, HISTORY_PERIOD_MAX_DAYS);
+      return { label: `最近${days}個交易日`, lastTradingDays: days };
+    }
+  }
+  if (RECENT_FEW_DAYS_PATTERN.test(question)) return { label: "最近5個交易日", lastTradingDays: 5 };
+  if (DAY_BEFORE_YESTERDAY_PATTERN.test(question)) {
+    const d = isoOf(addDays(t, -2));
+    return { label: `前天（${d}）`, from: d, to: d };
+  }
+  if (YESTERDAY_PATTERN.test(question)) {
+    const d = isoOf(addDays(t, -1));
+    return { label: `昨天（${d}）`, from: d, to: d };
+  }
+  // 週一為一週的第一天
+  const mondayThisWeek = addDays(t, -((t.getUTCDay() + 6) % 7));
+  if (LAST_WEEK_PATTERN.test(question)) {
+    return { label: "上週", from: isoOf(addDays(mondayThisWeek, -7)), to: isoOf(addDays(mondayThisWeek, -1)) };
+  }
+  if (THIS_WEEK_PATTERN.test(question)) return { label: "這週", from: isoOf(mondayThisWeek), to: isoOf(t) };
+  if (LAST_MONTH_PATTERN.test(question)) {
+    const first = new Date(Date.UTC(today.year, today.month - 2, 1));
+    const last = new Date(Date.UTC(today.year, today.month - 1, 0));
+    return { label: "上個月", from: isoOf(first), to: isoOf(last) };
+  }
+  if (THIS_MONTH_PATTERN.test(question)) {
+    return { label: "這個月", from: isoOf(new Date(Date.UTC(today.year, today.month - 1, 1))), to: isoOf(t) };
+  }
+  return undefined;
+}

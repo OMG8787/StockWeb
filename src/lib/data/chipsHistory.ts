@@ -229,11 +229,14 @@ function isComplete(days: TwChipsDay[]): boolean {
  * tradingDates：ISO 日期、舊到新（呼叫端用日K線的日期），只取最後 MAX_HISTORY_DAYS 天。
  * 回傳每天一筆（同順序）；抓不到的欄位是 undefined。整個函式不會丟錯。
  * 某檔股票在已成功載入的三大法人報表裡查不到，代表那天沒有任何法人進出 → 記 0。
+ * deadlineMs：冷快取時（全部要回補，TWSE 實測一天約 1~3 秒）最多等多久；時間到就先回傳
+ * 已經抓到的部分（新的日子優先抓），其餘繼續在背景跑完寫進依日期快取，下一題就齊了。
  */
 export async function getTwChipsHistory(
   symbol: string,
   exchange: TwHistoryExchange,
-  tradingDates: string[]
+  tradingDates: string[],
+  deadlineMs?: number
 ): Promise<TwChipsDay[]> {
   const dates = tradingDates.slice(-MAX_HISTORY_DAYS);
   if (dates.length === 0) return [];
@@ -263,8 +266,16 @@ export async function getTwChipsHistory(
       });
     }
   }
-  await mapWithConcurrency(tasks, HISTORY_FETCH_CONCURRENCY, (task) => task().catch(() => undefined));
-
-  if (isComplete(days)) await writeCached(summaryKey, days, SYMBOL_SUMMARY_TTL_MS).catch(() => undefined);
-  return days;
+  const all = mapWithConcurrency(tasks, HISTORY_FETCH_CONCURRENCY, (task) => task().catch(() => undefined)).then(async () => {
+    if (isComplete(days)) await writeCached(summaryKey, days, SYMBOL_SUMMARY_TTL_MS).catch(() => undefined);
+  });
+  if (deadlineMs == null) {
+    await all;
+    return days;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([all, new Promise<void>((resolve) => (timer = setTimeout(resolve, deadlineMs)))]);
+  clearTimeout(timer);
+  // 複製一份：背景還在跑的工作之後會繼續改 days，不能影響已經回傳出去的結果。
+  return days.map((d) => ({ ...d }));
 }

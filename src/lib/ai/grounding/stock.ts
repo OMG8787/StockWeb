@@ -25,13 +25,22 @@ import { getMarketStatus } from "@/lib/marketStatus";
 import { describeChipsRatios } from "./chipsRatios";
 import { getUsStockSentiment } from "@/lib/data/sentiment";
 import { describeSocialSentiment } from "./sentiment";
+import { buildHistoryContext } from "./history";
+import type { HistoryPeriod } from "../intent";
 
+/**
+ * opts.period：使用者明確問到過去某天/某段期間（intent.ts detectHistoryPeriod）時，
+ * 【歷史脈絡】多附該期間逐日明細；opts.compact：多檔比較時每檔的歷史脈絡更短。
+ */
 export async function buildStockGrounding(
-  target: { symbol: string; market: Market | undefined }
+  target: { symbol: string; market: Market | undefined },
+  opts: { period?: HistoryPeriod; compact?: boolean } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
-  const [quote, chart] = await Promise.all([
+  // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
+  const [quote, chart, chartYear] = await Promise.all([
     getQuote(target.symbol, target.market),
     getChart(target.symbol, "3m", target.market),
+    getChart(target.symbol, "1y", target.market).catch(() => null),
   ]);
   if (!quote) return undefined;
 
@@ -44,16 +53,24 @@ export async function buildStockGrounding(
   // surfaces English-language wire coverage (Reuters/Bloomberg/MarketWatch)
   // that the zh-TW edition mostly doesn't carry.
   const newsQuery = `${quote.name} ${quote.symbol}`;
-  const [earnings, news, fundamentals, chips, announcements, chipsRatios, socialSentiment] = await Promise.all([
+  const chipsRatiosPromise = getChipsRatios(quote.symbol, quote.market).catch(() => null);
+  // 各段自己有時間上限、全部 fail open（見 history.ts），跟下面其他資料並行跑。
+  const historyPromise = chipsRatiosPromise
+    .then((chipsRatios) =>
+      buildHistoryContext({ quote, candles: chartYear?.candles, chipsRatios, period: opts.period, compact: !!opts.compact })
+    )
+    .catch(() => undefined);
+  const [earnings, news, fundamentals, chips, announcements, chipsRatios, socialSentiment, historyText] = await Promise.all([
     getEarnings(quote.symbol, quote.market).catch(() => null),
     fetchStockNews(quote, newsQuery).catch(() => []),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
     getChips(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
     // 美股直接回 null（沒有這些資料），不會多打任何上游。
-    getChipsRatios(quote.symbol, quote.market).catch(() => null),
+    chipsRatiosPromise,
     // 美股限定的社群情緒（只讀快照，最多偶爾觸發1次批次刷新，見 lib/data/sentiment.ts）；缺金鑰回 null。
     quote.market === "US" ? getUsStockSentiment(quote.symbol).catch(() => null) : Promise.resolve(null),
+    historyPromise,
   ]);
 
   const changeLabel = quote.change >= 0 ? "上漲" : "下跌";
@@ -162,6 +179,7 @@ export async function buildStockGrounding(
   if (chipsRatiosText) lines.push(chipsRatiosText);
   const sentimentText = describeSocialSentiment(socialSentiment);
   if (sentimentText) lines.push(sentimentText);
+  if (historyText) lines.push(historyText);
 
   if (announcements.length > 0) {
     const shown = announcements.slice(0, 3).map((a) => `- ${a.date}：${a.subject.length > 80 ? `${a.subject.slice(0, 80)}…` : a.subject}`);
