@@ -71,7 +71,7 @@ GEMINI_API_KEY=xxxx
 
 ### AI 回答回饋（👍／👎）
 
-聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：登入後（或帶 `site_unlocked=granted` cookie）`GET /api/ask-feedback?limit=50&rating=down`，回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
+聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因）／📝回報（自由描述問題或建議，可打字或語音，最多 1000 字），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：登入後（或帶 `site_unlocked=granted` cookie）`GET /api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report），回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
 
 ### 共用快取（Redis，選用但正式站已設定）
 
