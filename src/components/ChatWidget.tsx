@@ -5,10 +5,13 @@ import { ASK_ABOUT_EVENT, type AskAboutDetail } from "@/lib/chatEvents";
 import { getWatchlist, WATCHLIST_CHANGED_EVENT } from "@/lib/watchlist";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import MarkdownLite from "./MarkdownLite";
+import AnswerFeedback from "./AnswerFeedback";
 
 interface ChatMessage {
   role: "user" | "assistant";
   text: string;
+  // 錯誤訊息（「抱歉，發生錯誤…」）不是真正的AI回答，不顯示 👍／👎。
+  isError?: boolean;
 }
 
 // 2026-09-23 Opus地毯式巡檢抓到的真實bug：畫面渲染時直接呼叫getWatchlist()
@@ -120,7 +123,7 @@ export default function ChatWidget() {
       if (!res.ok) throw new Error(data.error ?? "發生錯誤");
       setMessages((m) => [...m, { role: "assistant", text: data.answer }]);
     } catch (err) {
-      setMessages((m) => [...m, { role: "assistant", text: `抱歉，發生錯誤：${(err as Error).message}` }]);
+      setMessages((m) => [...m, { role: "assistant", text: `抱歉，發生錯誤：${(err as Error).message}`, isError: true }]);
     } finally {
       setLoading(false);
     }
@@ -230,12 +233,17 @@ export default function ChatWidget() {
                 ref={i === lastUserIndex ? lastUserMessageRef : undefined}
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                    m.role === "user" ? "bg-(--accent) text-white" : "bg-(--page-plane) text-(--text-primary)"
-                  }`}
-                >
-                  {m.role === "assistant" ? <MarkdownLite text={m.text} /> : <p className="whitespace-pre-wrap">{m.text}</p>}
+                <div className="max-w-[85%]">
+                  <div
+                    className={`rounded-lg px-3 py-2 text-sm ${
+                      m.role === "user" ? "bg-(--accent) text-white" : "bg-(--page-plane) text-(--text-primary)"
+                    }`}
+                  >
+                    {m.role === "assistant" ? <MarkdownLite text={m.text} /> : <p className="whitespace-pre-wrap">{m.text}</p>}
+                  </div>
+                  {m.role === "assistant" && !m.isError && (
+                    <AnswerFeedback question={messages[i - 1]?.text ?? ""} answer={m.text} symbol={contextSymbol?.symbol} />
+                  )}
                 </div>
               </div>
             ))}

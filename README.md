@@ -69,6 +69,10 @@ GEMINI_API_KEY=xxxx
 - `.github/workflows/warm-cache.yml`：平日主要時段每 5 分鐘、離峰每 30 分鐘（週末不觸發）呼叫 `/api/cron/warm-cache`，預熱報價/排行/技術指標篩選/今日建議等各項快取，降低 Vercel 用量與訪客等待時間；回應會附上每一項預熱任務的實際結果，排查快取問題時可以直接看這支。
 - 可選環境變數 `CRON_SECRET`：設定後，cron 路由只接受帶正確 `Authorization: Bearer <secret>` 的請求；不設定則不驗證。
 
+### AI 回答回饋（👍／👎）
+
+聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：登入後（或帶 `site_unlocked=granted` cookie）`GET /api/ask-feedback?limit=50&rating=down`，回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
+
 ### 共用快取（Redis，選用但正式站已設定）
 
 `src/lib/data/cache.ts` 的 `cached()`／`cachedMap()` 等函式優先用共用的 Redis（`src/lib/data/kv.ts`），沒設定則自動退回單一 Serverless 執行個體自己的記憶體內快取。正式站目前已設定 Upstash Redis 免費方案。
