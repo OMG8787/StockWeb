@@ -30,11 +30,11 @@ name: Warm StockRadar cache
 #  - 週末照舊不跑
 # 預熱沒跑到的空檔，靠資料層的「過期先回舊資料、背景更新」（lib/data/swrPolicy.ts）
 # 兜底：訪客拿到舊值的同時背景重算，不會現場等；沒有訪客就完全不重算。
+# 2026-10-04 起改由 cron-job.org（免費）準時觸發同一支 /api/cron/warm-cache：
+# 台北時間 週一～五 08–14 時、21–23 時，週二～六 00–04 時，每 5 分鐘（3 個排程，逾時 30 秒）。
+# GitHub 免費排程實測常延遲數小時或被丟棄，兩邊同時跑只會重複預熱、多耗 Vercel Active CPU，
+# 所以這裡拿掉 schedule、只保留手動觸發（workflow_dispatch）當備用。
 on:
-  schedule:
-    - cron: "*/5 0-6 * * 1-5"
-    - cron: "*/5 13-21 * * 1-5"
-    - cron: "0,30 7-12,22-23 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
