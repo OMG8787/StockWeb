@@ -213,7 +213,7 @@ export interface Chips {
 }
 
 /**
- * TW only — 個股頁最上方「籌碼比例」摘要（融資使用率／外資持股比例／大戶持股比例）
+ * TW only — 個股頁最上方「籌碼比例」摘要（融資使用率／券資比／外資持股比例／大戶持股比例）
  * 與前一期的比較，見 lib/data/chipsRatios.ts。每一項抓不到就是 undefined，UI 顯示
  * 「資料暫缺」；前一期抓不到（或大戶週資料還在累積）時 prev* 欄位是 undefined，
  * 不編數字、不當成 0 變化。所有百分比都是「0~100 的百分比數字」（13.44 代表 13.44%）。
@@ -230,6 +230,23 @@ export interface ChipsRatios {
     utilizationPercent: number;
     /** 前一交易日融資使用率（前日餘額 ÷ 同一個融資限額；限額只在股本變動時才會變） */
     prevUtilizationPercent?: number;
+  };
+  /**
+   * 券資比＝融券餘額 ÷ 融資餘額 × 100（看盤軟體最常用的融券指標，高代表空單相對多、
+   * 可能有軋空）。跟融資使用率同一份 MI_MARGN／TPEx 融資融券報表，不另外打上游。
+   * 融資餘額為 0 時無法計算 → 整項 undefined。
+   */
+  short?: {
+    /** 資料交易日（YYYY-MM-DD），同 margin.date */
+    date?: string;
+    /** 融券餘額（張） */
+    balance: number;
+    /** 融券餘額較前一交易日增減（張） */
+    balanceChange?: number;
+    /** 券資比 = 融券餘額 ÷ 融資餘額 × 100 */
+    shortMarginRatioPercent: number;
+    /** 前一交易日券資比（前日融券餘額 ÷ 前日融資餘額）；前日任一餘額查不到或融資為 0 時 undefined */
+    prevShortMarginRatioPercent?: number;
   };
   foreign?: {
     date: string;

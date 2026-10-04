@@ -32,7 +32,7 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
           不要讓瀏覽器用「擠壓每一欄」的方式硬塞進窄螢幕。 */}
       <p className="text-[13px] text-(--text-muted) sm:hidden">← 可左右滑動查看完整欄位 →</p>
       <div className="overflow-x-auto">
-        <table className={`w-full text-sm ${showChips ? "min-w-[990px]" : "min-w-[720px]"}`}>
+        <table className={`w-full text-sm ${showChips ? "min-w-[1080px]" : "min-w-[720px]"}`}>
         <thead>
           <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
             <th className="w-8 pr-1 text-right font-medium">#</th>

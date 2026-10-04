@@ -42,7 +42,10 @@ export const MARGIN_UTIL_SURGE_POINTS = 2;
 // 「上升／下降」的雜訊下限（百分點）：官方數字到小數第2位，變動小於這個值視為持平，
 // 不讓 0.01 個百分點這種尾數跳動被當成大戶加碼／外資減碼。
 export const HOLDING_CHANGE_MIN_POINTS = 0.05;
-export const HOLDING_STRUCTURE_FACET_NAME = "持股結構面（大戶／外資／融資）";
+export const HOLDING_STRUCTURE_FACET_NAME = "持股結構面（大戶／外資／融資／融券）";
+// 券資比（融券÷融資）2026-10-04 加入時評估過、刻意只列資訊不計分：升高可能代表看空的人變多，
+// 也可能是日後空單回補（軋空）的買盤燃料，單看這個數字方向不明確，找不到有根據的加扣分規則。
+export const SHORT_RATIO_INFO_NOTE = "（僅供參考、不計分：券資比升高可能是看空增加、也可能是軋空燃料，方向不明確）";
 
 // tone 是 "up" 但實際上是「漲多了」的警訊，不是買進理由——PROGRESS.md 記過一個真實
 // 教訓：同一筆「RSI 86 超買」資料，今日建議頁講成警訊、聊天追問裡卻拿來當正面理由。
@@ -182,7 +185,7 @@ export function holdingStructureFacet(c: Candidate): Facet {
     return {
       name,
       verdict: "無資料",
-      detail: "查無大戶持股／外資持股比例／融資使用率資料（美股沒有這類公開資料、興櫃與ETF也常查不到，這是資料源限制）",
+      detail: "查無大戶持股／外資持股比例／融資使用率／券資比資料（美股沒有這類公開資料、興櫃與ETF也常查不到，這是資料源限制）",
     };
   }
   const leans = holdingStructureLeans(c.chipsRatios);
@@ -203,6 +206,7 @@ export function holdingStructureFacet(c: Candidate): Facet {
     `${parts.major}${LEAN_TAG[leans.major]}`,
     `${parts.foreign}${LEAN_TAG[leans.foreign]}`,
     `${parts.margin}${marginNote}${LEAN_TAG[leans.margin]}`,
+    `${parts.short}${c.chipsRatios.short ? SHORT_RATIO_INFO_NOTE : ""}`,
   ].join("；");
   const verdict: Verdict = plus >= 2 && minus === 0 ? "支持" : minus >= 2 ? "不支持" : "中性";
   return { name, verdict, detail };

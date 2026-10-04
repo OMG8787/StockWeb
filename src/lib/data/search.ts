@@ -4,9 +4,10 @@ import { universeFor } from "./symbols";
 import { getMarketQuoteMap } from "./marketQuoteMap";
 import { computeVolumeMetrics, getTrailingAverageVolumeMap } from "./volumeHistory";
 import { getChipsRatiosBatch } from "./chipsRatios";
+import { CHIPS_RATIO_PICKS, ratioValue, type ChipsRatioPick } from "../chipsRatiosList";
 
-export type ChipsSortField = "major" | "foreign" | "margin";
-export const CHIPS_SORT_FIELDS: readonly ChipsSortField[] = ["major", "foreign", "margin"];
+export type ChipsSortField = ChipsRatioPick;
+export const CHIPS_SORT_FIELDS: readonly ChipsSortField[] = CHIPS_RATIO_PICKS;
 
 export interface SearchFilters {
   market?: Market;
@@ -28,7 +29,7 @@ export interface SearchFilters {
    * SearchItem.volumeTrend 說明——這是價量關係推論，不是真實買賣單量能分類。
    */
   volumeTrends?: VolumeTrend[];
-  /** major／foreign／margin＝大戶持股／外資持股／融資使用率（僅台股有資料，缺資料的墊底）。 */
+  /** major／foreign／margin／short＝大戶持股／外資持股／融資使用率／券資比（僅台股有資料，缺資料的墊底）。 */
   sortBy?: "changePercent" | "volume" | "price" | "turnover" | ChipsSortField;
   sortDir?: "asc" | "desc";
 }
@@ -123,14 +124,14 @@ export async function searchStocks(filters: SearchFilters): Promise<SearchItem[]
     items = items.filter((i) => i.volume > 0);
   }
   if ((CHIPS_SORT_FIELDS as readonly string[]).includes(sortBy)) {
-    // 籌碼比例排序：三份底層資料都是全市場整包快取，這裡只在記憶體查表。
+    // 籌碼比例排序：底層三份資料都是全市場整包快取，這裡只在記憶體查表。
     // 台股才有這些資料；美股／查不到的一律墊底（不當成 0，方向切換也維持墊底）。
     const pick = sortBy as ChipsSortField;
     const ratios = await getChipsRatiosBatch(items.filter((i) => i.market === "TW").map((i) => i.symbol));
     const valueOf = (i: SearchItem): number | null => {
       const r = ratios.get(i.symbol);
       if (!r || i.market !== "TW") return null;
-      return pick === "major" ? (r.majorHolders?.holdingPercent ?? null) : pick === "foreign" ? (r.foreign?.holdingPercent ?? null) : (r.margin?.utilizationPercent ?? null);
+      return ratioValue(r, pick);
     };
     const values = new Map(items.map((i) => [i, valueOf(i)] as const));
     items.sort((a, b) => {

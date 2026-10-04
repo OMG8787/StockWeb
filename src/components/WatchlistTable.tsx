@@ -8,6 +8,7 @@ import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, 
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
 import { ensureChipsRatios, getChipsRatioValue, useChipsRatioRow, type ChipsRatioPick } from "@/lib/useChipsRatios";
+import { CHIPS_RATIO_PICKS } from "@/lib/chipsRatiosList";
 import { ChipsRatioCells, ChipsRatioHeaderCells } from "./ChipsRatioCells";
 import WatchlistButton from "./WatchlistButton";
 
@@ -73,15 +74,16 @@ function chipsMetric(pick: ChipsRatioPick) {
   return (item: HoldingItem) => (item.market === "TW" ? getChipsRatioValue(item.symbol, pick) : null);
 }
 
-/** 依籌碼比例排序的三個欄位（值＝lib/useChipsRatios.ts 的 ChipsRatioPick）。 */
+/** 依籌碼比例排序的四個欄位（值＝lib/useChipsRatios.ts 的 ChipsRatioPick）。 */
 const CHIPS_SORT_FIELDS: { field: ChipsRatioPick; label: string; title: string }[] = [
   { field: "major", label: "大戶持股", title: "依大戶持股比例（1000張以上大戶，集保週資料）排序" },
   { field: "foreign", label: "外資持股", title: "依外資持股比例排序" },
   { field: "margin", label: "融資使用率", title: "依融資使用率排序" },
+  { field: "short", label: "券資比", title: "依券資比（融券餘額÷融資餘額）排序" },
 ];
 
 function isChipsField(field: HeldSortField): field is ChipsRatioPick {
-  return field === "major" || field === "foreign" || field === "margin";
+  return (CHIPS_RATIO_PICKS as readonly string[]).includes(field);
 }
 
 /** 「依產業」不是數值指標，所以不能跟其他欄位一樣用 metric 相減比較——它走
@@ -94,6 +96,7 @@ const HELD_SORT_METRICS: Record<Exclude<HeldSortField, "fineIndustry">, (item: H
   major: chipsMetric("major"),
   foreign: chipsMetric("foreign"),
   margin: chipsMetric("margin"),
+  short: chipsMetric("short"),
 };
 
 function sortForField(items: HoldingItem[], field: HeldSortField, dir: "asc" | "desc"): HoldingItem[] {
@@ -259,7 +262,7 @@ function DraggableGroup({
   });
 
   // 關注清單檔數少：一掛載就對這組全部台股列取齊籌碼比例（同一個批次 API＋前端快取，
-  // 不是逐檔打），使用者之後選「依大戶／外資／融資」排序時通常已經取好、不用等。
+  // 不是逐檔打），使用者之後選「依大戶／外資／融資／融券」排序時通常已經取好、不用等。
   useEffect(() => {
     if (twSymbolsKey) void ensureChipsRatios(twSymbolsKey.split(","));
   }, [twSymbolsKey]);
@@ -378,7 +381,7 @@ function DraggableGroup({
 
   // 只有一檔時排序沒有意義，按鈕只會變成誤導（按了畫面完全沒變）。
   const showIndustryButton = group === "unheld" && items.length > 1;
-  // 籌碼比例三欄只在台股表顯示（美股沒有這些公開資料）。
+  // 籌碼比例四欄只在台股表顯示（美股沒有這些公開資料）。
   const showChips = items[0].market === "TW";
 
   return (
@@ -470,11 +473,11 @@ function DraggableGroup({
       </div>
       )}
       <div className="overflow-x-auto">
-        {/* 台股表多了籌碼比例三欄（大戶持股(週)／外資持股／融資使用率），最小寬度跟著
+        {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／券資比），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
           className={`w-full text-sm ${
-            showChips ? (sortable ? "min-w-[1230px]" : "min-w-[1070px]") : sortable ? "min-w-[960px]" : "min-w-[800px]"
+            showChips ? (sortable ? "min-w-[1320px]" : "min-w-[1160px]") : sortable ? "min-w-[960px]" : "min-w-[800px]"
           }`}
         >
           <thead>

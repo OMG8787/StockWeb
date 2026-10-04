@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { Market } from "./data/types";
-import { CHIPS_BATCH_MAX_SYMBOLS, type ChipsRatiosBatchResponse, type ListChipsRatios } from "./chipsRatiosList";
+import { CHIPS_BATCH_MAX_SYMBOLS, type ChipsRatioPick, type ChipsRatiosBatchResponse, type ListChipsRatios } from "./chipsRatiosList";
 
 /**
- * 股票列表「籌碼比例」三欄的共用資料來源（StockTable 的搜尋／焦點排行／榜單，
+ * 股票列表「籌碼比例」四欄的共用資料來源（StockTable 的搜尋／焦點排行／榜單，
  * 以及 WatchlistTable 的持有中／僅關注兩組都走這裡）。
  *
  * 設計重點：
@@ -150,7 +150,7 @@ function request(symbol: string, webFallback: boolean) {
 // 依比例排序用（關注清單）：不等列捲到畫面，直接對整組台股代號取齊資料。
 // ---------------------------------------------------------------------------
 
-export type ChipsRatioPick = "major" | "foreign" | "margin";
+export type { ChipsRatioPick };
 
 function isSettled(symbol: string): boolean {
   const s = store.get(symbol)?.entry.status;

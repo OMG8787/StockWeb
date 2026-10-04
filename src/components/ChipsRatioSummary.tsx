@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { getChipsRatios } from "@/lib/data";
 import type { ChipsRatios } from "@/lib/data";
 import { priceDirectionClass } from "@/lib/format";
+import { GLOSS_SHORT_MARGIN_RATIO_TITLE } from "@/lib/ai/chipsRatiosWording";
 
 /** "2026-09-30" → "09/30" */
 function shortDate(iso: string | undefined): string {
@@ -31,6 +32,7 @@ function Delta({ current, prev, label }: { current: number; prev: number | undef
 
 function Item({
   title,
+  titleHint,
   percent,
   delta,
   detail,
@@ -38,6 +40,8 @@ function Item({
   missing,
 }: {
   title: string;
+  /** 標題的滑鼠提示（名詞解釋） */
+  titleHint?: string;
   percent?: number;
   delta?: ReactNode;
   detail?: ReactNode;
@@ -49,7 +53,9 @@ function Item({
       {/* 手機版三格直排：標題與百分比同一行、升降放不下才自動換到下一行，避免整區
           太高被擠出第一屏；md 以上三格並排時標題獨佔一行、百分比與升降同一行。 */}
       <div className="flex flex-wrap items-baseline gap-x-2">
-        <p className="text-sm text-(--text-muted) md:w-full">{title}</p>
+        <p className="text-sm text-(--text-muted) md:w-full" title={titleHint}>
+          {title}
+        </p>
         {percent == null ? (
           <p className="text-base font-medium text-(--text-secondary) md:mt-1">{missing ?? "資料暫缺"}</p>
         ) : (
@@ -69,11 +75,12 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
   const m = ratios?.margin;
   const f = ratios?.foreign;
   const h = ratios?.majorHolders;
+  const t = ratios?.short;
   return (
     <div className="mt-5 border-t border-(--gridline) pt-4" aria-label="籌碼比例摘要">
       <h2 className="mb-2 text-base font-semibold">籌碼比例</h2>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-        {/* 由左到右＝大戶／外資／融資，跟列表三欄（ChipsRatioCells）同一個順序。 */}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {/* 由左到右＝大戶／外資／融資／融券，跟列表四欄（ChipsRatioCells）同一個順序。 */}
         <Item
           title="大戶持股比例"
           percent={h?.holdingPercent}
@@ -126,6 +133,27 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
           footnote={m?.date ? `${shortDate(m.date)} 收盤後資料` : undefined}
           missing={emerging ? "資料暫缺（興櫃依規定不能融資）" : undefined}
         />
+        <Item
+          title="券資比"
+          titleHint={GLOSS_SHORT_MARGIN_RATIO_TITLE}
+          percent={t?.shortMarginRatioPercent}
+          delta={t && <Delta current={t.shortMarginRatioPercent} prev={t.prevShortMarginRatioPercent} label="較前日" />}
+          detail={
+            t && (
+              <>
+                融券餘額 {t.balance.toLocaleString("zh-TW")} 張
+                {t.balanceChange != null && (
+                  <span className={priceDirectionClass(t.balanceChange)}>
+                    （{t.balanceChange > 0 ? "+" : ""}
+                    {t.balanceChange.toLocaleString("zh-TW")} 張）
+                  </span>
+                )}
+              </>
+            )
+          }
+          footnote={t?.date ? `融券÷融資，${shortDate(t.date)} 收盤後資料` : undefined}
+          missing={emerging ? "資料暫缺（興櫃依規定不能融資融券）" : m ? undefined : "資料暫缺（沒有融資餘額無法計算）"}
+        />
       </div>
     </div>
   );
@@ -141,8 +169,8 @@ export function ChipsRatioSummarySkeleton() {
   return (
     <div className="mt-5 border-t border-(--gridline) pt-4" aria-hidden="true">
       <h2 className="mb-2 text-base font-semibold">籌碼比例</h2>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-        {[0, 1, 2].map((i) => (
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
           <div key={i} className="h-24 animate-pulse rounded-md bg-(--surface-2)" />
         ))}
       </div>

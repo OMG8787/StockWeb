@@ -2,8 +2,8 @@ import type { ChipsRatios } from "@/lib/data";
 import { pointDelta } from "./grounding/chipsRatios";
 
 /**
- * 「持股結構」三項（大戶持股比例／外資持股比例／融資使用率）在今日建議、今日快報
- * 共用的精簡文字與白話解釋。
+ * 「持股結構」四項（大戶持股比例／外資持股比例／融資使用率／券資比）在今日建議、今日快報
+ * 共用的精簡文字與白話解釋；名詞白話（GLOSS_*）全站共用（個股問答、列表表頭也用這裡）。
  *
  * 個股問答用的是 grounding/chipsRatios.ts 的 describeChipsRatios()（較完整、多行），
  * 這裡是給「一次列很多檔」的體檢表／快報用的單行精簡版——刻意不合併：兩者的詳細程度
@@ -18,10 +18,17 @@ import { pointDelta } from "./grounding/chipsRatios";
 export const GLOSS_MARGIN_UTILIZATION = "融資使用率（散戶借錢買股的程度）";
 export const GLOSS_FOREIGN_HOLDING = "外資持股比例（外資持有股數占比）";
 export const GLOSS_MAJOR_HOLDERS = "大戶（持股1000張以上股東）";
+export const GLOSS_SHORT_MARGIN_RATIO = "券資比（放空張數相對融資的比例）";
+/** 列表表頭／個股頁的滑鼠提示：比上面的括號版多講公式、怎麼解讀與期別。 */
+export const GLOSS_SHORT_MARGIN_RATIO_TITLE =
+  "券資比＝融券餘額 ÷ 融資餘額（放空張數相對融資的比例，收盤後資料）。偏高代表空單相對多，股價上漲時空單被迫回補可能引發軋空；但也代表看空的人多，方向要配合其他資料判斷。下方▲▼為較前一交易日增減的百分點；沒有融資餘額（例如興櫃）時無法計算，顯示「—」。";
 
+/** 券資比的解讀限制（方向不明確），今日建議／今日快報／個股問答共用。 */
+export const RULE_SHORT_MARGIN_RATIO_MEANING =
+  "券資比升高＝空單相對融資變多：可能代表看空的人增加，也可能成為日後空單回補（軋空）的買盤燃料，方向不明確——不可單獨當成利多或利空，只能搭配股價走勢、法人買賣等其他資料一起說明。";
 /** 三項資料的共通誠實規則：週資料、照抄升降幅度、查不到就照實說。今日建議／今日快報的提示詞都會引用。 */
 export const RULE_HOLDING_STRUCTURE_WORDING =
-  "大戶持股是集保『週資料』：每次提到都必須標資料週別（例如『09/24那週』）、比較要說『較上一週』，不可說成『今天／較昨天』；外資持股比例、融資使用率是每日資料，比『前一交易日』。升降幅度照抄參考資料，不自己相減；寫『查無資料』『無法比較』就照實說。這三項只有台股有，美股沒有是資料源限制、不是抓取失敗。";
+  "大戶持股是集保『週資料』：每次提到都必須標資料週別（例如『09/24那週』）、比較要說『較上一週』，不可說成『今天／較昨天』；外資持股比例、融資使用率、券資比是每日資料，比『前一交易日』。升降幅度照抄參考資料，不自己相減；寫『查無資料』『無法比較』就照實說。這幾項只有台股有，美股沒有是資料源限制、不是抓取失敗。";
 
 function majorText(r: ChipsRatios): string {
   const h = r.majorHolders;
@@ -53,9 +60,19 @@ function marginText(r: ChipsRatios): string {
   return `融資使用率（${m.date ?? "最近交易日"}）${m.utilizationPercent.toFixed(2)}%${cmp}`;
 }
 
+function shortText(r: ChipsRatios): string {
+  const t = r.short;
+  if (!t) return "券資比：查無資料";
+  const cmp =
+    t.prevShortMarginRatioPercent != null
+      ? `，${pointDelta(t.shortMarginRatioPercent, t.prevShortMarginRatioPercent, "前一交易日")}（前一交易日${t.prevShortMarginRatioPercent.toFixed(2)}%）`
+      : "，前一交易日資料查不到，無法比較";
+  return `券資比（${t.date ?? "最近交易日"}）${t.shortMarginRatioPercent.toFixed(2)}%${cmp}`;
+}
+
 /**
  * 今日快報用的最精簡單行（一次列十幾檔，要省 AI 輸入長度）：期別說明放在區塊標題裡講一次，
- * 每檔只留本期數字＋升降幅度；大戶仍保留週別日期，避免被講成每日資料。三項都沒有回 null。
+ * 每檔只留本期數字＋升降幅度；大戶仍保留週別日期，避免被講成每日資料。四項都沒有回 null。
  */
 export function holdingStructureCompact(r: ChipsRatios | null): string | null {
   if (!r) return null;
@@ -76,11 +93,21 @@ export function holdingStructureCompact(r: ChipsRatios | null): string | null {
       m.prevUtilizationPercent != null ? pointDelta(m.utilizationPercent, m.prevUtilizationPercent, "前一交易日") : "前一交易日無法比較";
     parts.push(`融資使用率${m.utilizationPercent.toFixed(2)}%（${cmp}）`);
   }
+  const t = r.short;
+  if (t) {
+    const cmp =
+      t.prevShortMarginRatioPercent != null
+        ? pointDelta(t.shortMarginRatioPercent, t.prevShortMarginRatioPercent, "前一交易日")
+        : "前一交易日無法比較";
+    parts.push(`券資比${t.shortMarginRatioPercent.toFixed(2)}%（${cmp}）`);
+  }
   return parts.length > 0 ? parts.join("、") : null;
 }
 
-/** 三項各自的單行文字（順序固定：大戶→外資→融資）。r 為 null 時回 null，由呼叫端決定怎麼寫「無資料」。 */
-export function holdingStructureParts(r: ChipsRatios | null): { major: string; foreign: string; margin: string } | null {
+/** 四項各自的單行文字（順序固定：大戶→外資→融資→融券）。r 為 null 時回 null，由呼叫端決定怎麼寫「無資料」。 */
+export function holdingStructureParts(
+  r: ChipsRatios | null
+): { major: string; foreign: string; margin: string; short: string } | null {
   if (!r) return null;
-  return { major: majorText(r), foreign: foreignText(r), margin: marginText(r) };
+  return { major: majorText(r), foreign: foreignText(r), margin: marginText(r), short: shortText(r) };
 }

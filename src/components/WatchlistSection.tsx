@@ -150,7 +150,7 @@ export default function WatchlistSection() {
   const scopeOf = (w: { market: Market; symbol: string }): MarketScope =>
     w.market === "TW" && emergingSymbols.current.has(w.symbol.toUpperCase()) ? "TW-EMERGING" : w.market;
 
-  // 籌碼比例（大戶／外資／融資）跟報價**同時**發出：原本要等報價回來、表格掛載後
+  // 籌碼比例（大戶／外資／融資／融券）跟報價**同時**發出：原本要等報價回來、表格掛載後
   // WatchlistTable 才去要，整張表最後一段要多等一輪。這裡用關注清單本身（localStorage，
   // 不需要報價）的台股代號直接先登記，走同一個 store／批次 API／前端快取，表格掛載後
   // 的 ensureChipsRatios／逐列登記會直接命中，不會重打。

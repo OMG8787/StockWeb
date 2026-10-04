@@ -7,7 +7,9 @@ import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
   GLOSS_MARGIN_UTILIZATION,
+  GLOSS_SHORT_MARGIN_RATIO,
   RULE_HOLDING_STRUCTURE_WORDING,
+  RULE_SHORT_MARGIN_RATIO_MEANING,
   holdingStructureCompact,
 } from "./chipsRatiosWording";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
@@ -46,7 +48,8 @@ export interface DailyBrief {
 const BRIEF_TTL_MS = 10 * 60_000;
 // v2: dropped the per-date key when this moved to a rolling TTL；v3：參考資料新增大戶／外資／融資比例區塊
 // v4：2026-10-04 輸出改成精簡格式（一句總結＋台美分開條列＋一句風險），作廢舊的長篇快取
-const BRIEF_CACHE_KEY = "daily-brief:v4";
+// v5：持股結構資訊行加上券資比（融券）
+const BRIEF_CACHE_KEY = "daily-brief:v5";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -91,7 +94,7 @@ async function buildTwHoldingStructureSummary(
       return text ? `${s.name}(${s.symbol})：${text}` : null;
     })
     .filter((l): l is string => l !== null);
-  return lines.length > 0 ? lines.join("\n") : "（今日主要漲跌個股查無大戶／外資持股／融資資料）";
+  return lines.length > 0 ? lines.join("\n") : "（今日主要漲跌個股查無大戶／外資持股／融資／融券資料）";
 }
 
 // ── 今日快報系統提示詞（具名常數，見 CLAUDE.md 規則九）──
@@ -130,7 +133,7 @@ const BRIEF_RULE_NUMBERS =
   "數字照參考資料原樣寫：指數點位寫完整點數（例如『48,417點』），漲跌寫點數加百分比（例如『跌58點（-0.12%）』），不可改寫成『萬點』或自行換算單位。法人『近N日合計』與『連買／連賣M日』方向不同時，要寫成『近N日合計賣超X億，但最近M日已轉為買超』，不可並列成看似矛盾的一句。";
 
 // 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
-const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}`;
+const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資／融券比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_MARGIN_RATIO}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_MARGIN_RATIO_MEANING}`;
 
 const BRIEF_SYSTEM_PROMPT = [
   BRIEF_ROLE,
@@ -197,7 +200,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "【今日主要漲跌個股的三大法人籌碼動向（僅台股，股數已換算好對應張數，直接引用不要自己重算）】",
       chipsSummary,
       "",
-      "【主要漲跌個股的大戶／外資／融資比例（僅台股，附前期變化；大戶是集保每週公布的週資料、跟上一週比，外資持股與融資使用率是每日資料、跟前一交易日比；升降幅度已算好，直接引用）】",
+      "【主要漲跌個股的大戶／外資／融資／融券比例（僅台股，附前期變化；大戶是集保每週公布的週資料、跟上一週比，外資持股、融資使用率與券資比是每日資料、跟前一交易日比；升降幅度已算好，直接引用）】",
       holdingSummary,
       "",
       "【近期市場新聞（台股，依時間排序，可能橫跨最近幾天）】",

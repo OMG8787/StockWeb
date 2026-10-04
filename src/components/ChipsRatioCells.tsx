@@ -1,12 +1,13 @@
 "use client";
 
 import { priceDirectionClass } from "@/lib/format";
-import type { RatioPair } from "@/lib/chipsRatiosList";
+import type { ChipsRatioPick, RatioPair } from "@/lib/chipsRatiosList";
+import { GLOSS_SHORT_MARGIN_RATIO_TITLE } from "@/lib/ai/chipsRatiosWording";
 import { useChipsRatiosMeta, type ChipsRatioEntry } from "@/lib/useChipsRatios";
 
 /**
- * 股票列表的「籌碼比例」三欄，由左到右＝大戶持股(週)／外資持股／融資使用率（使用者
- * 2026-10-01 指定的順序；個股頁 ChipsRatioSummary 也是同一個順序），StockTable 與
+ * 股票列表的「籌碼比例」四欄，由左到右＝大戶持股(週)／外資持股／融資使用率／券資比（使用者
+ * 2026-10-01 指定前三欄順序、2026-10-04 在融資右邊加融券；個股頁 ChipsRatioSummary 也是同一個順序），StockTable 與
  * WatchlistTable 共用。表頭（ChipsRatioHeaderCells）與儲存格（ChipsRatioCells）的順序
  * 必須一起改，否則會錯位。每格＝「數值%」＋下方小字「▲/▼ 升降」，升降一定同時有符號
  * 與文字（不能只靠紅綠顏色），顏色照台股慣例紅漲綠跌。缺資料一律「—」，不補 0。
@@ -37,6 +38,9 @@ export function ChipsRatioHeaderCells() {
       </th>
       <th className={th} title="融資使用率＝融資餘額 ÷ 融資限額（收盤後資料）。下方▲▼為較前一交易日增減的百分點；興櫃不能融資，顯示「—」。">
         融資使用率
+      </th>
+      <th className={th} title={GLOSS_SHORT_MARGIN_RATIO_TITLE}>
+        券資比
       </th>
     </>
   );
@@ -72,7 +76,7 @@ function Cell({
   missingPrev,
 }: {
   entry: ChipsRatioEntry;
-  pick: "margin" | "foreign" | "major";
+  pick: ChipsRatioPick;
   prevLabel: string;
   missingPrev: string;
 }) {
@@ -104,12 +108,12 @@ function Cell({
   );
 }
 
-/** 一列的三格；美股列（market !== "TW"）一律「—」。 */
+/** 一列的四格；美股列（market !== "TW"）一律「—」。 */
 export function ChipsRatioCells({ entry, isTw }: { entry: ChipsRatioEntry; isTw: boolean }) {
   if (!isTw) {
     return (
       <>
-        {[0, 1, 2].map((i) => (
+        {[0, 1, 2, 3].map((i) => (
           <td key={i} className={`${TD} text-(--text-muted)`} title="美股沒有這項公開資料">
             —
           </td>
@@ -122,6 +126,7 @@ export function ChipsRatioCells({ entry, isTw }: { entry: ChipsRatioEntry; isTw:
       <Cell entry={entry} pick="major" prevLabel="上一週" missingPrev="累積中" />
       <Cell entry={entry} pick="foreign" prevLabel="前一交易日" missingPrev="—" />
       <Cell entry={entry} pick="margin" prevLabel="前一交易日" missingPrev="—" />
+      <Cell entry={entry} pick="short" prevLabel="前一交易日" missingPrev="—" />
     </>
   );
 }
