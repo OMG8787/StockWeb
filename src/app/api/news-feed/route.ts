@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getNewsFeed, summarizeItems } from "@/lib/ai/newsfeed";
+import { getNewsFeed, NEWS_FEED_PAGE_SIZE, summarizeItems } from "@/lib/ai/newsfeed";
 
 // Building the pool fans out to a dozen+ Google News requests plus an AI
 // classification call on a cache-cold generation — same reasoning as
 // api/daily-brief's maxDuration bump.
 export const maxDuration = 60;
 
-const DEFAULT_LIMIT = 20;
+const DEFAULT_LIMIT = NEWS_FEED_PAGE_SIZE;
 const MAX_LIMIT = 50;
 
 /**

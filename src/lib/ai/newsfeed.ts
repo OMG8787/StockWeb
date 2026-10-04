@@ -394,6 +394,9 @@ async function buildDataCards(): Promise<NewsItem[]> {
   }
 }
 
+/** /news 無限捲動每頁筆數（API 預設值；第一頁的摘要在產生新聞牆時就先算好）。 */
+export const NEWS_FEED_PAGE_SIZE = 20;
+
 export async function getNewsFeed(forceRefresh = false): Promise<NewsFeed> {
   return cached(
     // Bumped from v1: the cached shape changed (summary/kind fields), so a
@@ -417,7 +420,13 @@ export async function getNewsFeed(forceRefresh = false): Promise<NewsFeed> {
       const pinned = picks
         .map((p): NewsFeedItem | undefined => (withIds[p.index] ? { ...withIds[p.index], summary: p.summary } : undefined))
         .filter((item): item is NewsFeedItem => item !== undefined);
-      const items = withIds.filter((_, i) => !pinnedIndexSet.has(i));
+      const rest = withIds.filter((_, i) => !pinnedIndexSet.has(i));
+      // 2026-10-04「5 秒內完整顯示」：第一頁的逐則摘要（抓全文＋AI）原本是訪客打開
+      // /news 時才現場算（實測冷的時候約 10 秒）。改在產生新聞牆時（SWR 背景重算／
+      // 預熱排程）就先把第一頁算好存進快取；逐則摘要本身仍有 12 小時快取，所以
+      // 只有新進來的新聞會花 AI，跟原本第一位訪客會觸發的量相同。失敗就照舊留給 API 現場補。
+      const firstPage = await summarizeItems(rest.slice(0, NEWS_FEED_PAGE_SIZE)).catch(() => null);
+      const items = firstPage ? [...firstPage, ...rest.slice(NEWS_FEED_PAGE_SIZE)] : rest;
 
       return { pinned, items, generatedAt: new Date().toISOString() };
     },
