@@ -108,6 +108,7 @@ npm run dev
 ```bash
 npm run lint    # ESLint
 npm run build   # 正式版建置
+npm test        # 單元測試（vitest，純函式、不打真實網路）
 ```
 
 ## 專案結構（重點檔案，不是全部）

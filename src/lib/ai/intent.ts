@@ -262,8 +262,12 @@ function monthDayToIso(month: number, day: number, today: Date, year?: number): 
   return isoOf(d);
 }
 
-const MD = "(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|號|号)";
-const RANGE_MD_PATTERN = new RegExp(`${MD}\s*(?:到|至|~|～|-|－)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*(?:日|號|号)`);
+// 用 String.raw 保留反斜線：一般字串／樣板字串裡的 \d、\s 會被 JS 吃掉反斜線，變成字母 d、s，
+// 日期樣式就永遠對不到（2026-10-04 補測試時發現「10月1日」「9月22日到10月2日」從來沒命中過）。
+const MD = String.raw`(\d{1,2})\s*月\s*(\d{1,2})\s*(?:日|號|号)`;
+const RANGE_MD_PATTERN = new RegExp(
+  String.raw`${MD}\s*(?:到|至|~|～|-|－)\s*(?:(\d{1,2})\s*月\s*)?(\d{1,2})\s*(?:日|號|号)`
+);
 const SINGLE_MD_PATTERN = new RegExp(MD);
 const ISO_DATE_PATTERN = /(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})/;
 // 「10/1」這種寫法也可能是分數或比例，所以要同一句裡有明顯在問行情的字才算。
