@@ -303,6 +303,13 @@ export interface SwrPolicy<S> {
 /** 同 key 跨 instance 重算鎖的存活上限：最慢的背景重算（AI 快報、全市場技術
  *  篩選）也在這之內；instance 中途被凍結時鎖會自己過期，不會永久卡住。 */
 const SWR_LOCK_MS = 90_000;
+/**
+ * 只有 TTL ≥ 這個值的資料才上跨 instance 重算鎖。Upstash 免費額度是每月 50 萬指令，
+ * 上鎖每次背景重算要多 1 個指令（SET NX）；即時報價類（TTL 25 秒）重算便宜、頻率高，
+ * 重複算一次的代價小於鎖的指令成本，所以不鎖。TTL 長的（AI 快報、全市場掃描、
+ * 市場歷史、籌碼整包）重算昂貴、頻率低，才值得鎖。
+ */
+const SWR_LOCK_MIN_TTL_MS = 5 * 60_000;
 /** 別的 instance 正在重算時，這個 instance 多久之後才會再嘗試。 */
 const SWR_LOCK_BUSY_BACKOFF_MS = 10_000;
 /** 背景重算拋錯後的退避時間：TTL 跟 60 秒取小、但至少 5 秒。 */
@@ -328,7 +335,8 @@ export async function readThroughSwr<S>(
 
   const local = readMemoryWithStaleness(key);
   if (local.state === "fresh") return local.value as S;
-  if (local.state === "stale") return serveStale(key, swrMs, load, policy, local.value as S);
+  // 記憶體裡的舊值可能別的 instance 早已在 Redis 更新過 → 背景重算前先看一眼 Redis。
+  if (local.state === "stale") return serveStale(key, swrMs, load, policy, local.value as S, true);
 
   if (kvEnabled && redis) {
     try {
@@ -342,7 +350,8 @@ export async function readThroughSwr<S>(
         }
         if (staleUntil > now) {
           writeMemoryEntry(key, hit.v, hit.e, staleUntil);
-          return serveStale(key, swrMs, load, policy, hit.v as S);
+          // 剛從 Redis 讀到的就是過期值，不用再讀一次（省 Upstash 指令）。
+          return serveStale(key, swrMs, load, policy, hit.v as S, false);
         }
       }
     } catch {
@@ -379,8 +388,15 @@ async function storeSwr<S>(key: string, value: S, swrMs: number, policy: SwrPoli
 }
 
 /** 過期值的處理：觸發背景重算；有設 revalidateWaitMs 就先等它一下，來得及回新值。 */
-async function serveStale<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>, staleValue: S): Promise<S> {
-  const task = refreshInBackground(key, swrMs, load, policy, staleValue);
+async function serveStale<S>(
+  key: string,
+  swrMs: number,
+  load: () => Promise<S>,
+  policy: SwrPolicy<S>,
+  staleValue: S,
+  recheckShared: boolean
+): Promise<S> {
+  const task = refreshInBackground(key, swrMs, load, policy, staleValue, recheckShared);
   const waitMs = policy.revalidateWaitMs ?? 0;
   if (!task || waitMs <= 0) return staleValue;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -402,13 +418,14 @@ function refreshInBackground<S>(
   swrMs: number,
   load: () => Promise<S>,
   policy: SwrPolicy<S>,
-  staleValue: S
+  staleValue: S,
+  recheckShared: boolean
 ): Promise<{ value: S } | undefined> | undefined {
   const existing = backgroundRefreshes.get(key);
   if (existing) return existing as Promise<{ value: S } | undefined>;
   const backoff = refreshBackoffUntil.get(key);
   if (backoff !== undefined && backoff > Date.now()) return undefined;
-  const task = runBackgroundRefresh(key, swrMs, load, policy, staleValue).finally(() => {
+  const task = runBackgroundRefresh(key, swrMs, load, policy, staleValue, recheckShared).finally(() => {
     backgroundRefreshes.delete(key);
   });
   backgroundRefreshes.set(key, task);
@@ -421,24 +438,29 @@ async function runBackgroundRefresh<S>(
   swrMs: number,
   load: () => Promise<S>,
   policy: SwrPolicy<S>,
-  staleValue: S
+  staleValue: S,
+  recheckShared: boolean
 ): Promise<{ value: S } | undefined> {
   const lockKey = `swr-lock:${key}`;
   let locked = false;
   if (kvEnabled && redis) {
     try {
       // 別的 instance 可能剛更新好（這邊只是記憶體裡還留著舊值）：直接沿用，不重算。
-      const current = await redis.get<CacheEnvelope>(key);
-      if (isEnvelope(current) && current.e > Date.now()) {
-        writeMemoryEntry(key, current.v, current.e, current.s ?? current.e);
-        return { value: current.v as S };
+      if (recheckShared) {
+        const current = await redis.get<CacheEnvelope>(key);
+        if (isEnvelope(current) && current.e > Date.now()) {
+          writeMemoryEntry(key, current.v, current.e, current.s ?? current.e);
+          return { value: current.v as S };
+        }
       }
-      const acquired = await redis.set(lockKey, Date.now(), { nx: true, px: SWR_LOCK_MS });
-      if (acquired === null) {
-        refreshBackoffUntil.set(key, Date.now() + SWR_LOCK_BUSY_BACKOFF_MS);
-        return undefined;
+      if (policy.ttlFor(staleValue) >= SWR_LOCK_MIN_TTL_MS) {
+        const acquired = await redis.set(lockKey, Date.now(), { nx: true, px: SWR_LOCK_MS });
+        if (acquired === null) {
+          refreshBackoffUntil.set(key, Date.now() + SWR_LOCK_BUSY_BACKOFF_MS);
+          return undefined;
+        }
+        locked = true;
       }
-      locked = true;
     } catch {
       // Redis 暫時不通：照樣在這個 instance 重算（fail open）
     }
@@ -452,13 +474,15 @@ async function runBackgroundRefresh<S>(
     }
     await storeSwr(key, value, swrMs, policy);
     refreshBackoffUntil.delete(key);
+    // 成功時不刪鎖（省一個指令）：新值已寫進 Redis，其他 instance 讀到的會是新鮮值、
+    // 不會再嘗試重算；鎖在 SWR_LOCK_MS 後自己過期。
     return { value };
   } catch (err) {
     refreshBackoffUntil.set(key, Date.now() + swrFailureBackoffMs(policy.ttlFor(staleValue)));
     console.error(`[cache] background refresh failed for "${key}" (still serving the stale value):`, err);
-    return undefined;
-  } finally {
+    // 失敗才釋放鎖，讓其他 instance 不用等鎖過期就能重試。
     if (locked && redis) await redis.del(lockKey).catch(() => undefined);
+    return undefined;
   }
 }
 

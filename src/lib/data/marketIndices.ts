@@ -162,6 +162,8 @@ export async function getIndices(): Promise<IndexQuote[]> {
  *  「用太舊的快照騙過使用者」的風險。 */
 const TAIFEX_LAST_KNOWN_TTL_MS = 24 * 60 * 60_000;
 const TAIFEX_LAST_KNOWN_KEY = "taifex:tx-night:last-known";
+/** 這個 instance 上次寫進 TAIFEX_LAST_KNOWN_KEY 的快照 asOf（避免同一份快照重複寫）。 */
+let lastWrittenTaifexAsOf: string | undefined;
 
 /**
  * 台指期（TX，大台指）夜盤近月合約報價——見 lib/data/taifex.ts 開頭的完整資料源
@@ -220,7 +222,13 @@ export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null
   if (live) {
     // 不用 await 卡住回應：這只是把「這次成功結果」順手存一份長效備份，不影響
     // 這次要回給使用者的資料，失敗也無所謂（下次成功時還會再存一次）。
-    void writeCached(TAIFEX_LAST_KNOWN_KEY, live, TAIFEX_LAST_KNOWN_TTL_MS).catch(() => undefined);
+    // 2026-10-04：同一份快照（同一個 asOf）只寫一次。原本每次呼叫都寫——首頁每次
+    // 渲染＋夜盤時段每位訪客每 30 秒輪詢都多一個 Upstash SET 指令（免費額度每月 50 萬），
+    // 但快照內容只有在 live 快取更新時才會變。
+    if (live.asOf !== lastWrittenTaifexAsOf) {
+      lastWrittenTaifexAsOf = live.asOf;
+      void writeCached(TAIFEX_LAST_KNOWN_KEY, live, TAIFEX_LAST_KNOWN_TTL_MS).catch(() => undefined);
+    }
     return live;
   }
 
