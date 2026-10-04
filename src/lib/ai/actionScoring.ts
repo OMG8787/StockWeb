@@ -1,6 +1,7 @@
-import type { Chips, Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
+import type { Chips, ChipsRatios, Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
 import type { Signal } from "@/lib/signals";
 import { formatSharesWithLots } from "@/lib/format";
+import { holdingStructureParts } from "./chipsRatiosWording";
 
 // pct() 刻意放在這個「最底層」的檔案（不依賴 actionGrounding.ts），雖然它主要是給
 // 文字組裝用的格式化函式——但 technicalFacet/earningsFacet 這兩個評分函式也要用到
@@ -13,12 +14,15 @@ export function pct(value: number): string {
 
 // 2026-09-23 從 actionBrief.ts 拆出來的「打分數」邏輯——原本跟候選名單組裝、
 // 文字組裝、AI提示詞全部擠在一個570行的檔案裡，改今日建議的評分規則要先讀懂
-// 整個檔案才敢下手。這裡只負責「一檔候選股在技術面/籌碼面/基本面/財報面/
-// 消息面各自的表現該打【支持】【中性】【不支持】【無資料】哪個評級」，不碰
+// 整個檔案才敢下手。這裡只負責「一檔候選股在技術面/籌碼面/持股結構面/基本面/
+// 財報面/消息面各自的表現該打【支持】【中性】【不支持】【無資料】哪個評級」，不碰
 // 候選名單怎麼湊齊、也不碰要組成什麼文字餵給AI——那兩塊留在 actionGrounding.ts。
 
 // 進入「建議買進」候選的客觀門檻。prompt 裡也會重述一次，但真正決定 qualified 名單、
 // 以及 AI 掛掉時 fallback 怎麼寫的是這兩個常數——不讓 AI 自己心證判斷夠不夠格。
+// 2026-10-04 新增「持股結構面」（計分面向 4→5）時評估過、刻意不調：持股結構面要拿【支持】
+// 本身就要三項裡至少兩項同向加分且零扣分，門檻不鬆；它同時也可能貢獻【不支持】，兩邊大致
+// 抵銷。維持「至少2項支持、不支持≤1項」，等實際跑一陣子看合格檔數再決定要不要動。
 export const QUALIFY_MIN_SUPPORT = 2;
 export const QUALIFY_MAX_AGAINST = 1;
 
@@ -27,6 +31,18 @@ export const QUALIFY_MAX_AGAINST = 1;
 export const PE_CHEAP = 20;
 export const PE_EXPENSIVE = 40;
 export const YIELD_GOOD = 4;
+
+// 持股結構面（大戶／外資／融資）的分界線——同樣是本站自訂的粗略門檻、不是權威標準，
+// prompt 裡要求 AI 引用實際數字與前期對照，不要只轉述「融資偏高」這種結論。
+// 融資使用率低於 LOW 視為散戶槓桿不高（加分）、達到 HIGH 以上視為散戶槓桿偏熱（扣分）；
+// 單日上升達 SURGE 個百分點視為「明顯攀升」（扣分）。
+export const MARGIN_UTIL_LOW = 30;
+export const MARGIN_UTIL_HIGH = 60;
+export const MARGIN_UTIL_SURGE_POINTS = 2;
+// 「上升／下降」的雜訊下限（百分點）：官方數字到小數第2位，變動小於這個值視為持平，
+// 不讓 0.01 個百分點這種尾數跳動被當成大戶加碼／外資減碼。
+export const HOLDING_CHANGE_MIN_POINTS = 0.05;
+export const HOLDING_STRUCTURE_FACET_NAME = "持股結構面（大戶／外資／融資）";
 
 // tone 是 "up" 但實際上是「漲多了」的警訊，不是買進理由——PROGRESS.md 記過一個真實
 // 教訓：同一筆「RSI 86 超買」資料，今日建議頁講成警訊、聊天追問裡卻拿來當正面理由。
@@ -50,6 +66,8 @@ export interface Candidate {
   sources: string[];
   signals: Signal[];
   chips: Chips | null;
+  /** 大戶／外資持股比例、融資使用率（getChipsRatiosBatch；只有台股有，查不到是 null） */
+  chipsRatios: ChipsRatios | null;
   fundamentals: Fundamentals | null;
   earnings: Earnings | null;
   announcements: MaterialAnnouncement[];
@@ -109,6 +127,87 @@ function chipsFacet(c: Candidate): Facet {
   return { name: "籌碼面", verdict, detail };
 }
 
+type Lean = 1 | 0 | -1;
+
+// 兩個到小數第2位的百分比相減會有浮點尾數（70.05-70=0.04999…），先四捨五入到第2位再跟門檻比，
+// 跟文字裡 pointDelta 顯示的數字一致。
+function roundPoints(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function marginSurged(m: NonNullable<ChipsRatios["margin"]>): boolean {
+  return m.prevUtilizationPercent != null && roundPoints(m.utilizationPercent - m.prevUtilizationPercent) >= MARGIN_UTIL_SURGE_POINTS;
+}
+
+function changeLean(current: number, prev: number | undefined): Lean {
+  if (prev == null) return 0;
+  const diff = roundPoints(current - prev);
+  return diff >= HOLDING_CHANGE_MIN_POINTS ? 1 : diff <= -HOLDING_CHANGE_MIN_POINTS ? -1 : 0;
+}
+
+/**
+ * 持股結構三項各自的傾向（+1 加分／0 不計／-1 扣分）。抽成獨立函式是為了能單獨用假資料
+ * 驗證每一種組合，不用經過文字組裝。
+ *
+ * - 大戶持股：較上一週上升 → +1、下降 → -1（週資料，沒有上一週就不計）。
+ * - 外資持股：較前一交易日上升 → +1、下降 → -1。
+ * - 融資使用率：扣分優先（≥HIGH 或單日攀升 ≥SURGE 個百分點 → -1），否則 <LOW 或較前一
+ *   交易日下降 → +1。扣分優先是因為「使用率低但一天暴衝」代表散戶正在快速加槓桿，
+ *   不該因為絕對水位還低就當成加分。
+ */
+export function holdingStructureLeans(r: ChipsRatios): { major: Lean; foreign: Lean; margin: Lean } {
+  const major = r.majorHolders ? changeLean(r.majorHolders.holdingPercent, r.majorHolders.prevHoldingPercent) : 0;
+  const foreign = r.foreign ? changeLean(r.foreign.holdingPercent, r.foreign.prevHoldingPercent) : 0;
+  let margin: Lean = 0;
+  const m = r.margin;
+  if (m) {
+    if (m.utilizationPercent >= MARGIN_UTIL_HIGH || marginSurged(m)) margin = -1;
+    else if (m.utilizationPercent < MARGIN_UTIL_LOW || changeLean(m.utilizationPercent, m.prevUtilizationPercent) === -1)
+      margin = 1;
+  }
+  return { major, foreign, margin };
+}
+
+const LEAN_TAG: Record<Lean, string> = { 1: "（加分）", 0: "", [-1]: "（扣分）" };
+
+/**
+ * 持股結構面：跟「籌碼面（三大法人當日買賣超＝流量）」刻意分開——這裡看的是持股比例
+ * 這種「存量」的變化，兩者可能方向相反（例如外資今天小賣，但持股比例仍在高檔）。
+ * 加分 ≥2 且沒有扣分 → 支持；扣分 ≥2 → 不支持；其他 → 中性；三項都查不到 → 無資料。
+ */
+export function holdingStructureFacet(c: Candidate): Facet {
+  const name = HOLDING_STRUCTURE_FACET_NAME;
+  const parts = holdingStructureParts(c.chipsRatios);
+  if (!c.chipsRatios || !parts) {
+    return {
+      name,
+      verdict: "無資料",
+      detail: "查無大戶持股／外資持股比例／融資使用率資料（美股沒有這類公開資料、興櫃與ETF也常查不到，這是資料源限制）",
+    };
+  }
+  const leans = holdingStructureLeans(c.chipsRatios);
+  const plus = Object.values(leans).filter((v) => v === 1).length;
+  const minus = Object.values(leans).filter((v) => v === -1).length;
+  const m = c.chipsRatios.margin;
+  // 註記要跟 holdingStructureLeans 的判斷順序一致（扣分優先），不然會出現「偏低（扣分）」這種讀不懂的組合。
+  const marginNote = !m
+    ? ""
+    : m.utilizationPercent >= MARGIN_UTIL_HIGH
+      ? `，偏高（≥${MARGIN_UTIL_HIGH}%，散戶槓桿偏熱）`
+      : marginSurged(m)
+        ? `，單日明顯攀升（上升≥${MARGIN_UTIL_SURGE_POINTS}個百分點，散戶槓桿快速升溫）`
+        : m.utilizationPercent < MARGIN_UTIL_LOW
+          ? `，偏低（<${MARGIN_UTIL_LOW}%）`
+          : "";
+  const detail = [
+    `${parts.major}${LEAN_TAG[leans.major]}`,
+    `${parts.foreign}${LEAN_TAG[leans.foreign]}`,
+    `${parts.margin}${marginNote}${LEAN_TAG[leans.margin]}`,
+  ].join("；");
+  const verdict: Verdict = plus >= 2 && minus === 0 ? "支持" : minus >= 2 ? "不支持" : "中性";
+  return { name, verdict, detail };
+}
+
 function valuationFacet(c: Candidate): Facet {
   const pe = c.fundamentals?.peRatio;
   const pb = c.fundamentals?.pbRatio;
@@ -152,8 +251,8 @@ function earningsFacet(c: Candidate): Facet {
  *
  * 一則標題到底是利多還是利空，程式沒辦法用規則判斷（「XX 遭調查」跟「XX 獲大單」對
  * 程式而言都只是「有消息」），硬給一個 verdict 等於編造判斷。所以這個面向只負責把
- * 真實標題原封不動端上來由 AI 自己讀，也因此不計入「面向支持數」——支持數只由技術面／
- * 籌碼面／基本面／財報面這四個有客觀規則可循的面向組成。
+ * 真實標題原封不動端上來由 AI 自己讀，也因此不計入「面向支持數」——支持數只由
+ * SCORED_FACETS 這幾個有客觀規則可循的面向組成。
  */
 function newsFacet(c: Candidate): Facet {
   const lines = c.announcements.slice(0, 2).map((a) => `${a.date}：${a.subject.length > 60 ? `${a.subject.slice(0, 60)}…` : a.subject}`);
@@ -170,8 +269,14 @@ function newsFacet(c: Candidate): Facet {
   return { name: "消息面", verdict: "中性", detail };
 }
 
+// 計入「面向支持數」的面向（消息面不計，見 newsFacet 說明）。prompt／體檢表／fallback
+// 裡的「x/5」分母一律用 SCORED_FACET_COUNT，新增面向時不用到處找寫死的數字。
+const SCORED_FACETS = [technicalFacet, chipsFacet, holdingStructureFacet, valuationFacet, earningsFacet];
+export const SCORED_FACET_COUNT = SCORED_FACETS.length;
+export const SCORED_FACET_LABEL = "技術面／籌碼面／持股結構面／基本面／財報面";
+
 export function score(c: Candidate): ScoredCandidate {
-  const facets = [technicalFacet(c), chipsFacet(c), valuationFacet(c), earningsFacet(c)];
+  const facets = SCORED_FACETS.map((f) => f(c));
   return {
     ...c,
     facets,

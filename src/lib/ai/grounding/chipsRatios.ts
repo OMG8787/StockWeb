@@ -7,7 +7,8 @@ import type { ChipsRatios } from "@/lib/data";
  * 或把股數換算成張（見 RULE_SHARES_NOT_LOTS、RULE_CHIPS_RATIOS）。
  */
 
-function pointDelta(current: number, prev: number, period: string): string {
+// export：今日建議／今日快報的精簡版（ai/chipsRatiosWording.ts）共用同一套升降措辭。
+export function pointDelta(current: number, prev: number, period: string): string {
   const diff = Math.round((current - prev) * 100) / 100;
   if (diff === 0) return `與${period}持平`;
   return `較${period}${diff > 0 ? "上升" : "下降"} ${Math.abs(diff).toFixed(2)} 個百分點`;

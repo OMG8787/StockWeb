@@ -1,6 +1,7 @@
 import {
   getChips,
   getChipsRanking,
+  getChipsRatiosBatch,
   getEarnings,
   getFundamentals,
   getIndices,
@@ -14,7 +15,7 @@ import {
   type MomentumItem,
   type ValueScreen,
 } from "@/lib/data";
-import type { Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
+import type { ChipsRatios, Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
 import type { Signal } from "@/lib/signals";
 import { getNewsFeed, type NewsFeed } from "@/lib/ai/newsfeed";
 import { formatSharesWithLots } from "@/lib/format";
@@ -29,6 +30,11 @@ import {
   YIELD_GOOD,
   QUALIFY_MIN_SUPPORT,
   QUALIFY_MAX_AGAINST,
+  SCORED_FACET_COUNT,
+  SCORED_FACET_LABEL,
+  MARGIN_UTIL_LOW,
+  MARGIN_UTIL_HIGH,
+  MARGIN_UTIL_SURGE_POINTS,
 } from "./actionScoring";
 
 // 2026-09-23 從 actionBrief.ts 拆出來的「候選名單組裝＋組成餵給AI的文字」邏輯——
@@ -52,9 +58,9 @@ const TRUST_CANDIDATE_LIMIT = 4;
 // 從一開始就沒放進去。新增這三份估值排行當作候選來源，跟其他來源一樣要通過
 // 下面的「面向支持數」門檻才會被列進合格名單，不是「便宜就直接推薦」。
 const VALUE_CANDIDATE_LIMIT = 4;
-// 體檢表的總長度上限。每一檔的四個面向全部來自「整個市場一次抓回來再查表」的既有快取
+// 體檢表的總長度上限。每一檔的各個面向全部來自「整個市場一次抓回來再查表」的既有快取
 // （fundamentals:TW:all、chips:TW:institutional、earnings:TW:revenue、
-// announcements:TW:all），所以多一檔幾乎不花額外的網路成本，真正的限制是 prompt 長度
+// announcements:TW:all，以及持股結構面的融資／外資持股／集保週快照），所以多一檔幾乎不花額外的網路成本，真正的限制是 prompt 長度
 // 跟 AI 一次能認真讀完的資訊量。從16調高到22，讓新增的估值類候選來源有實際空間，
 // 不會被動能類來源早早佔滿名額（見 buildCandidates 裡的加入順序）。
 const CANDIDATE_LIMIT = 22;
@@ -70,7 +76,7 @@ const US_ENRICH_LIMIT = 4;
 function describeCandidate(c: ScoredCandidate): string {
   const head = `● ${c.name}(${c.symbol})　現價 ${c.price}　今日 ${pct(c.changePercent)}　入選原因：${c.sources.join("／")}`;
   const body = [...c.facets, c.newsFacet].map((f) => `　- ${f.name}【${f.verdict}】${f.detail}`);
-  const tail = `　→ 面向支持數：${c.supportCount}/4（其中明確不支持 ${c.againstCount} 項）`;
+  const tail = `　→ 面向支持數：${c.supportCount}/${SCORED_FACET_COUNT}（其中明確不支持 ${c.againstCount} 項）`;
   return [head, ...body, tail].join("\n");
 }
 
@@ -110,6 +116,7 @@ async function buildCandidates(
       sources: [source],
       signals: signals ?? [],
       chips: null,
+      chipsRatios: null,
       fundamentals: null,
       earnings: null,
       announcements: [],
@@ -135,6 +142,12 @@ async function buildCandidates(
   const realHeadlines = [...newsFeed.pinned, ...newsFeed.items].filter((n) => n.kind === "news").map((n) => n.title);
 
   const candidates = [...base.values()];
+  // 持股結構面（大戶／外資／融資）：全市場整包快取、純記憶體查表，整批一次查，不用每檔各打一次。
+  // 不開 majorPrevFromWeb：候選股遠超過 MAJOR_WEB_FALLBACK_MAX_SYMBOLS，開了也不會生效，
+  // 本站週快照沒有上一週的那幾檔就照實標「無法比較」。
+  const ratiosPromise = getChipsRatiosBatch(candidates.map((c) => c.symbol)).catch(
+    () => new Map<string, ChipsRatios | null>()
+  );
   await Promise.all(
     candidates.map(async (c) => {
       const [chips, fundamentals, earnings, announcements] = await Promise.all([
@@ -150,6 +163,8 @@ async function buildCandidates(
       c.headlines = realHeadlines.filter((t) => t.includes(c.name) || t.includes(c.symbol));
     })
   );
+  const ratios = await ratiosPromise;
+  for (const c of candidates) c.chipsRatios = ratios.get(c.symbol) ?? null;
 
   return candidates
     .map(score)
@@ -244,7 +259,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     "",
     "【今日台股候選股「多面向體檢表」——這是你做買進判斷的主要依據】",
     "候選來源刻意混合四種挑法：技術訊號共振清單、今日漲幅榜、三大法人買超榜、投信買超榜，所以這份名單裡同時有「多面向都到位的標的」跟「只有單一面向亮眼、其他面向沒跟上的假訊號」，請自己分辨，不要因為某檔出現在名單上就當成推薦。",
-    `「面向支持數」是本站用客觀規則算好的（技術面／籌碼面／基本面／財報面四項，各自標【支持】【中性】【不支持】【無資料】），直接引用即可，不要自己重算或改成別的數字。消息面刻意不判斷利多利空、也不計入支持數，只把真實標題端給你，方向要你自己讀標題判斷。本站設定的估值分界：本益比 ${PE_CHEAP} 倍以下算便宜、${PE_EXPENSIVE} 倍以上算貴、殖利率 ${YIELD_GOOD}% 以上算高。`,
+    `「面向支持數」是本站用客觀規則算好的（${SCORED_FACET_LABEL}共 ${SCORED_FACET_COUNT} 項，各自標【支持】【中性】【不支持】【無資料】），直接引用即可，不要自己重算或改成別的數字。「籌碼面」是三大法人當天的買賣超（流量）；「持股結構面」是大戶持股比例（集保週資料，跟上一週比）、外資持股比例（跟前一交易日比）、融資使用率這三項持股比例（存量）的變化，兩者是不同的面向。持股結構面的規則（本站自訂、非權威標準）：大戶持股較上一週上升、外資持股較前一交易日上升、融資使用率低於 ${MARGIN_UTIL_LOW}% 或下降各算加分；大戶週減、外資持股下降、融資使用率 ${MARGIN_UTIL_HIGH}% 以上或單日上升 ${MARGIN_UTIL_SURGE_POINTS} 個百分點以上（散戶槓桿過熱）各算扣分；加分≥2且無扣分為【支持】、扣分≥2為【不支持】，每一項後面標的（加分）（扣分）就是這樣算出來的。消息面刻意不判斷利多利空、也不計入支持數，只把真實標題端給你，方向要你自己讀標題判斷。本站設定的估值分界：本益比 ${PE_CHEAP} 倍以下算便宜、${PE_EXPENSIVE} 倍以上算貴、殖利率 ${YIELD_GOOD}% 以上算高。`,
     candidates.length > 0 ? candidates.map(describeCandidate).join("\n") : "（今日無候選股資料）",
     "",
     `【本站已先幫你篩過的結果】今日候選股中，面向支持數 ≥${QUALIFY_MIN_SUPPORT} 且明確不支持面向 ≤${QUALIFY_MAX_AGAINST} 的共 ${qualified.length} 檔：${
