@@ -7,6 +7,7 @@
 // 資料有附才帶規則，資料沒附時規則本來就用不到。
 import { HISTORY_SECTION_TITLE } from "./grounding/history";
 import { RECENT_CROSSES_TITLE } from "./grounding/indicators";
+import { SECTOR_FACTORS_TITLE } from "./grounding/sectorFactors";
 import { MARKET_HISTORY_TITLE } from "./marketHistoryText";
 import {
   SYSTEM_ROLE,
@@ -24,6 +25,7 @@ import {
   RULE_TW_CHIPS,
   RULE_CHIPS_RATIOS,
   RULE_SOCIAL_SENTIMENT,
+  RULE_SECTOR_FACTORS,
   RULE_MULTI_STOCK_COMPARISON,
   RULE_INTRADAY_TW,
   RULE_INTRADAY_US,
@@ -46,6 +48,7 @@ import {
 /** 這些字串必須跟各 grounding 產生的區塊文字一致；改那邊的標題要一起改這裡。 */
 export const BLOCK_MARKERS = {
   recentCrosses: RECENT_CROSSES_TITLE, // grounding/indicators.ts（共用常數）
+  sectorFactors: SECTOR_FACTORS_TITLE, // grounding/sectorFactors.ts（共用常數）
   chipsRatios: "籌碼比例（", // grounding/chipsRatios.ts
   socialSentiment: "社群情緒（", // grounding/sentiment.ts
   institutional: "三大法人", // grounding/stock.ts、movers.ts、techScreen.ts
@@ -123,6 +126,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     BLOCK_MARKERS.indicators.test(dataText) ? RULE_INDICATORS : "",
     dataText.includes(BLOCK_MARKERS.institutional) ? RULE_TW_CHIPS : "",
     dataText.includes(BLOCK_MARKERS.chipsRatios) ? RULE_CHIPS_RATIOS : "",
+    dataText.includes(BLOCK_MARKERS.sectorFactors) ? RULE_SECTOR_FACTORS : "",
     dataText.includes(BLOCK_MARKERS.socialSentiment) || SOCIAL_TOPIC_PATTERN.test(c.question) ? RULE_SOCIAL_SENTIMENT : "",
     c.stockCount > 1 ? RULE_MULTI_STOCK_COMPARISON : "",
     c.twMarketOpen && (hasStockLike || c.moversText || c.techScreenText) ? RULE_INTRADAY_TW : "",

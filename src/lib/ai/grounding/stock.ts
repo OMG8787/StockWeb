@@ -26,6 +26,8 @@ import { describeChipsRatios } from "./chipsRatios";
 import { getUsStockSentiment } from "@/lib/data/sentiment";
 import { describeSocialSentiment } from "./sentiment";
 import { buildHistoryContext } from "./history";
+import { describeSectorFactors } from "./sectorFactors";
+import { findInUniverse } from "@/lib/data";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -60,7 +62,13 @@ export async function buildStockGrounding(
       buildHistoryContext({ quote, candles: chartYear?.candles, chipsRatios, period: opts.period, compact: !!opts.compact })
     )
     .catch(() => undefined);
-  const [earnings, news, fundamentals, chips, announcements, chipsRatios, socialSentiment, historyText] = await Promise.all([
+  // 油價敏感產業（航空、塑化…）才會多抓油價，其餘股票不多打任何請求（見 sectorFactors.ts）。
+  const sectorFactorsPromise = describeSectorFactors({
+    symbol: quote.symbol,
+    market: quote.market,
+    sector: findInUniverse(quote.symbol, quote.market)?.sector ?? "",
+  }).catch(() => undefined);
+  const [earnings, news, fundamentals, chips, announcements, chipsRatios, socialSentiment, historyText, sectorFactorsText] = await Promise.all([
     getEarnings(quote.symbol, quote.market).catch(() => null),
     fetchStockNews(quote, newsQuery).catch(() => []),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
@@ -71,6 +79,7 @@ export async function buildStockGrounding(
     // 美股限定的社群情緒（只讀快照，最多偶爾觸發1次批次刷新，見 lib/data/sentiment.ts）；缺金鑰回 null。
     quote.market === "US" ? getUsStockSentiment(quote.symbol).catch(() => null) : Promise.resolve(null),
     historyPromise,
+    sectorFactorsPromise,
   ]);
 
   const changeLabel = quote.change >= 0 ? "上漲" : "下跌";
@@ -182,6 +191,7 @@ export async function buildStockGrounding(
   const sentimentText = describeSocialSentiment(socialSentiment);
   if (sentimentText) lines.push(sentimentText);
   if (historyText) lines.push(historyText);
+  if (sectorFactorsText) lines.push(sectorFactorsText);
 
   if (announcements.length > 0) {
     const shown = announcements.slice(0, 3).map((a) => `- ${a.date}：${a.subject.length > 80 ? `${a.subject.slice(0, 80)}…` : a.subject}`);
