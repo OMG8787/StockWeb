@@ -1,4 +1,5 @@
 import { cachedMapWithDegradedShortTtl } from "./degradedCache";
+import { LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
 import type { Market, Quote } from "./types";
 import { fetchTwseQuote, fetchTwseQuotesBatch } from "./twse";
 import { fetchTpexQuote, fetchTpexQuotesBatch } from "./tpex";
@@ -120,12 +121,9 @@ const MARKET_MAP_TTL_MS = 2 * 60_000;
  * 會動」跟「不要重演那次變慢」之間的取捨：焦點排行實際最快每分鐘換一次數字，
  * 個股報價/大盤指數/關注清單那些單檔報價則是真正的 10 秒級。
  */
-// 2026-10-04 改回 55 秒（曾在同一天跟著全站輪詢統一縮到 25 秒）：Vercel Fluid
-// Active CPU 已超過免費額度（約 136%），這張表是 CPU 大戶之一（全市場 JSON 解析＋
-// 合併），25 秒等於重算頻率加倍。前端仍每 30 秒輪詢；搭配 SWR（過期時先等背景重算
-// 1.5 秒），每次輪詢拿到的是「最多約 1 分鐘內」的最新可得數字。個股單檔報價／指數
-// 仍維持 LIVE_CACHE_TTL_MS（25 秒）。
-const TW_LIVE_MARKET_MAP_TTL_MS = 55_000;
+// 2026-10-04 曾評估改回 55 秒省 Active CPU（這張表是 CPU 大戶之一），但使用者決定
+// 「每 30 秒更新」優先於省 CPU（Hobby 方案超量不會產生費用），維持 25 秒。
+const TW_LIVE_MARKET_MAP_TTL_MS = LIVE_CACHE_TTL_MS;
 
 // 抓失敗/部分降級時只快取這麼短——見下方 getMarketQuoteMap() 的完整說明。
 // 3 秒跟 marketIndices.ts 的 INDEX_DEGRADED_TTL_MS 同一個量級：短到能自我
