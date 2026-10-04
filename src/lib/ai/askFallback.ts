@@ -7,7 +7,9 @@
 const LEAKED_MARKER_PATTERN = /(?:【內部系統標記[^】]*】|【查詢結果】)/g;
 
 export function sanitizeLeakedMarkers(answer: string): string {
-  const cleaned = answer.replace(LEAKED_MARKER_PATTERN, "").trim();
+  // 2026-10-04 正式站實測：免費模型偶爾把換行輸出成字面上的反斜線＋n 兩個字元（例如「建議續抱\n- 損益…」），
+  // 聊天泡泡會原樣顯示反斜線。中文回答裡不會有真正需要保留的字面反斜線＋n，一律還原成換行。
+  const cleaned = answer.replace(/\\n/g, "\n").replace(LEAKED_MARKER_PATTERN, "").trim();
   if (cleaned) return cleaned;
   return "目前查不到這檔股票/公司的資料，可能是名稱或代號打錯、或不在本站資料涵蓋範圍（本站台股目前涵蓋證交所上市（TWSE）、櫃買中心上櫃（TPEx）與興櫃（Emerging）公司；美股則是約150多檔精選跨產業大型股，不是完整美股市場，用公司名稱或代號都可以查）。";
 }
