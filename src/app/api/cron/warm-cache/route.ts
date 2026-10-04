@@ -44,7 +44,9 @@ export const maxDuration = 120;
 // 2026-10-02 16:22 UTC 那次排程失敗就是 curl 等滿 60 秒逾時（exit 28）——所有項目
 // 一起等，最慢那項拖住整個回應，Actions 紀錄裡連哪一項慢都看不到。改成最多等這麼久
 // 就先回應（沒完成的標成「仍在背景執行」），其餘交給 after() 繼續。
-const RESPOND_DEADLINE_MS = 45_000;
+// 2026-10-04 再由 45 秒降到 25 秒：改用 cron-job.org（免費）觸發預熱，它的請求逾時上限是 30 秒，
+// 回應必須在那之前送出，否則每次都被記成失敗；沒做完的項目一樣交給 after() 繼續。
+const RESPOND_DEADLINE_MS = 25_000;
 
 // Fundamentals/chips/earnings/announcements are cached as one whole-market
 // map per category (see lib/data/index.ts), not per symbol — asking for any
