@@ -18,12 +18,12 @@ import { fetchTpexJson } from "./tpex";
  * 每檔只存 [持有股數, 持股比率] 兩個數字，避免 Redis payload 過大。
  */
 
-type Exchange = "TWSE" | "TPEX";
+export type Exchange = "TWSE" | "TPEX";
 
 /** [全體外資及陸資持有股數(股), 持股比率(%)] */
 type HoldingRow = [number, number];
 
-interface HoldingSnapshot {
+export interface HoldingSnapshot {
   /** YYYYMMDD；非交易日（或查無資料）時仍是查詢的日期，rows 為空 */
   date: string;
   rows: Record<string, HoldingRow>;
@@ -109,7 +109,8 @@ function latestSnapshot(exchange: Exchange): Promise<HoldingSnapshot> {
   return cached(`foreign-holdings:${exchange}:latest:v1`, LATEST_TTL_MS, () => FETCHERS[exchange]());
 }
 
-function datedSnapshot(exchange: Exchange, yyyymmdd: string): Promise<HoldingSnapshot> {
+/** export：個股歷史脈絡（chipsHistory.ts）逐日讀外資持股比例，共用同一份依日期長效快取。 */
+export function datedSnapshot(exchange: Exchange, yyyymmdd: string): Promise<HoldingSnapshot> {
   return cached(`foreign-holdings:${exchange}:${yyyymmdd}:v1`, DATED_TTL_MS, () => FETCHERS[exchange](yyyymmdd));
 }
 

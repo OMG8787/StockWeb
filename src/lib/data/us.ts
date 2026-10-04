@@ -371,7 +371,7 @@ interface YahooQuoteSummaryResponse {
  * earnings date, which TWSE's monthly-revenue/quarterly-EPS open data has
  * no equivalent-free US source for otherwise.
  */
-export async function fetchUsEarnings(symbol: string): Promise<Earnings | null> {
+async function fetchUsEarningsModule(symbol: string): Promise<YahooEarningsModule | undefined> {
   const auth = await getYahooAuth();
   const crumbParam = auth ? `&crumb=${encodeURIComponent(auth.crumb)}` : "";
   const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
@@ -385,7 +385,17 @@ export async function fetchUsEarnings(symbol: string): Promise<Earnings | null> 
     },
   });
   const data = (await res.json()) as YahooQuoteSummaryResponse;
-  const chart = data.quoteSummary?.result?.[0]?.earnings?.earningsChart;
+  return data.quoteSummary?.result?.[0]?.earnings;
+}
+
+/** 近幾季（Yahoo earnings 模組通常給 4 季）實際 EPS，舊到新；個股歷史脈絡（fundamentalsHistory.ts）用。 */
+export async function fetchUsQuarterlyEpsHistory(symbol: string): Promise<Array<{ period: string; eps: number }>> {
+  const quarters = (await fetchUsEarningsModule(symbol))?.earningsChart?.quarterly ?? [];
+  return quarters.flatMap((q) => (q.actual?.raw != null && Number.isFinite(q.actual.raw) ? [{ period: q.date, eps: round2(q.actual.raw) }] : []));
+}
+
+export async function fetchUsEarnings(symbol: string): Promise<Earnings | null> {
+  const chart = (await fetchUsEarningsModule(symbol))?.earningsChart;
   if (!chart) return null;
 
   const quarters = chart.quarterly ?? [];

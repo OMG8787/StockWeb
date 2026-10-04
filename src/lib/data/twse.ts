@@ -394,8 +394,9 @@ function parseTwseNumber(raw: string | undefined): number | undefined {
  * 使用時要分開標示避免混淆）。一次回傳全市場，所以整包快取一次、依代號查表，
  * 不對每檔股票各打一次。
  */
-export async function fetchTwseInstitutionalTradingAll(): Promise<Map<string, Chips>> {
-  const url = "https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=&selectType=ALL";
+export async function fetchTwseInstitutionalTradingAll(queryDate?: string): Promise<Map<string, Chips>> {
+  // queryDate：YYYYMMDD，查指定交易日（個股歷史脈絡用，見 chipsHistory.ts）；不帶＝最新一天。
+  const url = `https://www.twse.com.tw/rwd/zh/fund/T86?response=json&date=${queryDate ?? ""}&selectType=ALL`;
   const res = await fetchWithTimeout(url, 8000);
   const payload = (await res.json()) as InstitutionalTradingResponse;
   const map = new Map<string, Chips>();
@@ -448,8 +449,9 @@ interface MarginTradingResponse {
  * 需要的「次一營業日限額」。rwd 表格的欄位名稱融資/融券兩組重複（前日餘額、
  * 今日餘額、次一營業日限額各出現兩次），所以融資取第一次出現、融券取最後一次。
  */
-export async function fetchTwseMarginTradingAll(): Promise<Map<string, Chips>> {
-  const url = "https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?response=json&date=&selectType=ALL";
+export async function fetchTwseMarginTradingAll(queryDate?: string): Promise<Map<string, Chips>> {
+  // queryDate：YYYYMMDD，查指定交易日（個股歷史脈絡用，見 chipsHistory.ts）；不帶＝最新一天。
+  const url = `https://www.twse.com.tw/rwd/zh/marginTrading/MI_MARGN?response=json&date=${queryDate ?? ""}&selectType=ALL`;
   const res = await fetchWithTimeout(url, 10_000);
   const payload = (await res.json()) as MarginTradingResponse;
   const map = new Map<string, Chips>();
