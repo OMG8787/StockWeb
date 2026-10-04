@@ -2,6 +2,7 @@ import { peekCached, writeCached } from "./cache";
 import { cachedWithDegradedNullTtl } from "./degradedCache";
 import type { IndexQuote, Market, TaifexFuturesQuote } from "./types";
 import { fetchTwseQuote } from "./twse";
+import { reconcileTaiexQuote } from "./twOffHoursQuote";
 import { fetchUsQuote } from "./us";
 import { fetchTaifexNightFutures } from "./taifex";
 import { QUOTE_TTL_MS, quoteTtlMs } from "./quote";
@@ -60,7 +61,10 @@ async function loadIndex(def: (typeof INDEX_DEFS)[number]): Promise<IndexQuote |
   for (let attempt = 0; ; attempt++) {
     try {
       const q =
-        def.market === "TW" && def.misCode ? await fetchTwseQuote(def.misCode) : await fetchUsQuote(def.symbol);
+        def.market === "TW" && def.misCode
+          ? // 非交易時段 MIS 可能回重置／測試狀態，改用官方收盤（盤中原樣回傳），見 twOffHoursQuote.ts。
+            await reconcileTaiexQuote(await fetchTwseQuote(def.misCode))
+          : await fetchUsQuote(def.symbol);
       return {
         symbol: def.symbol,
         name: def.name,

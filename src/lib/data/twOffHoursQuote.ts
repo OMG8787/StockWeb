@@ -1,7 +1,7 @@
 import { classifyTwQuoteTradeDate } from "@/lib/pollingSchedule";
 import { getChart } from "./chart";
-import { cachedMapWithDegradedShortTtl } from "./degradedCache";
-import { fetchTwseDailyBarsAll } from "./twse";
+import { cachedMapWithDegradedShortTtl, cachedWithDegradedNullTtl } from "./degradedCache";
+import { fetchTaiexLatestClose, fetchTwseDailyBarsAll } from "./twse";
 import { fetchTpexDailyBarsAll } from "./tpex";
 import type { Quote, TwDailyBar } from "./types";
 
@@ -126,4 +126,31 @@ export async function reconcileTwListedQuoteMap(
     if (bar) map.set(symbol, quoteFromDailyBar(quote, bar));
   }
   return map;
+}
+
+/**
+ * 加權指數（MIS t00）：同一套規則。非交易時段且 t00 的交易日不可信時，改用 FMTQIK 的
+ * 官方收盤（price＝收盤、change＝官方漲跌點數）。指數沒有開高低量要換，只換價與漲跌；
+ * 盤中原樣回傳、不發任何額外請求。呼叫端只有 marketIndices.ts 的 loadIndex()。
+ */
+export async function reconcileTaiexQuote(quote: Quote, now: Date = new Date()): Promise<Quote> {
+  if (!needsDailyBar(quote, now)) return quote;
+  const latest = await cachedWithDegradedNullTtl(
+    "tw-daily-bars:TAIEX",
+    DAILY_BARS_TTL_MS,
+    DAILY_BARS_DEGRADED_TTL_MS,
+    () => fetchTaiexLatestClose().catch(() => null)
+  );
+  if (!latest) return quote;
+  const bar: TwDailyBar = { ...latest, open: latest.close, high: latest.close, low: latest.close, volume: 0 };
+  if (!pickDailyBar(quote, bar, now)) return quote;
+  const change = latest.close - latest.prevClose;
+  return {
+    ...quote,
+    price: round2(latest.close),
+    change: round2(change),
+    changePercent: latest.prevClose ? round2((change / latest.prevClose) * 100) : 0,
+    prevClose: round2(latest.prevClose),
+    tradeDate: latest.date,
+  };
 }

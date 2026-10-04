@@ -231,6 +231,29 @@ export async function fetchTwseDailyBarsAll(): Promise<Map<string, TwDailyBar>> 
   return map;
 }
 
+interface FmtqikRow {
+  Date: string; // ROC compact, e.g. "1151002"
+  TAIEX: string;
+  Change: string;
+}
+
+/**
+ * 加權指數「最近一個交易日」官方收盤（openapi FMTQIK，本月每日市場成交資訊，一次幾十列、
+ * 幾 KB）。只在非交易時段 MIS t00 不可信時用到，見 twOffHoursQuote.ts 的
+ * reconcileTaiexQuote()。取最後一列（最新交易日）；格式不對就 throw。
+ */
+export async function fetchTaiexLatestClose(): Promise<{ date: string; close: number; prevClose: number }> {
+  const res = await fetchWithTimeout("https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK", 8000);
+  const rows = (await res.json()) as FmtqikRow[];
+  const last = rows
+    .filter((r) => r.Date && parseTwseNumber(r.TAIEX) != null && parseTwseNumber(r.Change) != null)
+    .sort((a, b) => a.Date.localeCompare(b.Date))
+    .at(-1);
+  if (!last) throw new Error("FMTQIK returned no usable rows");
+  const close = parseTwseNumber(last.TAIEX)!;
+  return { date: rocCompactToIso(last.Date), close, prevClose: round2(close - parseTwseNumber(last.Change)!) };
+}
+
 const RANGE_MONTHS: Partial<Record<ChartRange, number>> = { "1m": 1, "3m": 3, "6m": 6, "1y": 12, "2y": 24, "5y": 60, "10y": 120 };
 // 5d/10d are day-COUNT ranges, not month ranges — trimmed by candle count
 // after fetching, not by a date cutoff (see fetchTwseCandles below).
