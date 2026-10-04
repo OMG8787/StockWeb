@@ -114,7 +114,7 @@
 
 - 這個專案**不能產生任何費用**。超過免費額度最壞只能是「被限流／停用」，絕不能是「被收費」。
 - 新增任何外部服務、API、套件之前，先確認是免費方案、不需要綁付款方式；付費／按量計費的服務**一律要有明確開關（opt-in 環境變數）才啟用**，不能只因為「環境變數裡有金鑰」就自動使用。範例：Claude API 需要 `ALLOW_PAID_AI=true` 才會進 AI 備援鏈（`providerAdapters.ts`）。
-- 2026-10-04 已查證：Vercel＝Hobby、無付款方式（Fluid Active CPU 已超標，使用者決定接受，只要不收費）；Upstash＝Free、$0；GitHub＝Free、無付款方式、預算皆 $0 且勾 Stop usage；Gemini＝Free tier；Finnhub＝Free；Anthropic Console＝免費評估、$0、已刪除 Vercel 上的 ANTHROPIC_API_KEY。未查證：Groq、NVIDIA、FRED、Adanos 的帳號頁（皆以免費方案申請）。
+- 2026-10-04 已查證：Vercel＝Hobby、無付款方式（Fluid Active CPU 已超標，使用者決定接受，只要不收費）；Upstash＝Free、$0；GitHub＝Free、無付款方式、預算皆 $0 且勾 Stop usage；Gemini＝Free tier；Finnhub＝Free；Anthropic Console＝免費評估、$0、已刪除 Vercel 上的 ANTHROPIC_API_KEY。Groq、NVIDIA、FRED＝使用者 2026-10-04 親自確認皆為免費方案。Adanos 沒有帳號後台可查，公開免費方案標示不需信用卡（每月 250 次）。
 
 # 多個 agent 平行改程式的 git 規矩（派 agent 時直接引用這段，不用每次重抄）
 
