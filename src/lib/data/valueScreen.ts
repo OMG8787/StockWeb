@@ -1,9 +1,6 @@
-import { cached, cachedMap } from "./cache";
+import { cached } from "./cache";
 import type { Market } from "./types";
-import { fetchTwseFundamentalsAll } from "./twse";
-import { fetchTpexFundamentalsAll } from "./tpex";
-import { mergeTwMaps } from "./twMergedMaps";
-import { FUNDAMENTALS_TTL_MS } from "./companyData";
+import { getTwFundamentalsMap } from "./companyData";
 import { searchStocks } from "./search";
 
 export interface ValueScreenItem {
@@ -58,9 +55,7 @@ export async function getValueScreen(market: Market): Promise<ValueScreen> {
   return cached(`value-screen:${market}:v1`, VALUE_SCREEN_TTL_MS, async () => {
     const [items, fundamentalsMap] = await Promise.all([
       searchStocks({ market, sortBy: "turnover", sortDir: "desc" }),
-      cachedMap("fundamentals:TW:all", FUNDAMENTALS_TTL_MS, () =>
-        mergeTwMaps(fetchTwseFundamentalsAll, fetchTpexFundamentalsAll)
-      ),
+      getTwFundamentalsMap(),
     ]);
 
     const liquid = items.filter((i) => i.turnover >= VALUE_SCREEN_MIN_TURNOVER_TWD);

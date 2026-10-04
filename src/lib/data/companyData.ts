@@ -1,5 +1,5 @@
 import { cached, cachedMap } from "./cache";
-import { DAILY_DATA_SWR_MS } from "./swrPolicy";
+import { DAILY_DATA_SWR_MS, HEAVY_SWR_MS } from "./swrPolicy";
 import type { Chips, Earnings, Fundamentals, Market, MaterialAnnouncement } from "./types";
 import {
   fetchTwseFundamentalsAll,
@@ -57,6 +57,17 @@ async function withFinnhubFallback<T>(primary: () => Promise<T | null>, fallback
 }
 
 /**
+ * 全市場本益比／殖利率／淨值比表（上市＋上櫃）。個股頁（getFundamentals）與價值篩選
+ * （valueScreen.ts）共用：集中在唯一入口，同一個 key 的快取模式（含 SWR）才不會不一致。
+ * 每日才更新一次，過期先回舊表、背景重抓（swrPolicy.ts）。
+ */
+export function getTwFundamentalsMap(): Promise<Map<string, Fundamentals>> {
+  return cachedMap("fundamentals:TW:all", FUNDAMENTALS_TTL_MS, () => mergeTwMaps(fetchTwseFundamentalsAll, fetchTpexFundamentalsAll), {
+    staleWhileRevalidateMs: DAILY_DATA_SWR_MS,
+  });
+}
+
+/**
  * Returns null when unavailable — fabricating a P/E ratio or dividend
  * yield next to a real price would be more misleading than just omitting it.
  */
@@ -65,16 +76,18 @@ export async function getFundamentals(symbolInput: string, marketHint?: Market):
   const market = marketHint ?? detectMarket(symbol);
   try {
     if (market === "TW") {
-      const map = await cachedMap("fundamentals:TW:all", FUNDAMENTALS_TTL_MS, () =>
-        mergeTwMaps(fetchTwseFundamentalsAll, fetchTpexFundamentalsAll)
-      );
+      const map = await getTwFundamentalsMap();
       return map.get(symbol) ?? null;
     }
-    return await cached(`fundamentals:US:${symbol}`, FUNDAMENTALS_TTL_MS, () =>
-      withFinnhubFallback(
-        () => fetchUsFundamentals(symbol),
-        () => fetchFinnhubFundamentals(symbol)
-      )
+    return await cached(
+      `fundamentals:US:${symbol}`,
+      FUNDAMENTALS_TTL_MS,
+      () =>
+        withFinnhubFallback(
+          () => fetchUsFundamentals(symbol),
+          () => fetchFinnhubFundamentals(symbol)
+        ),
+      { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
     );
   } catch {
     return null;
@@ -96,11 +109,17 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
   try {
     if (market === "TW") {
       const [revenueMap, epsMap] = await Promise.all([
-        cachedMap("earnings:TW:revenue:v2", EARNINGS_TTL_MS, () =>
-          mergeTwMaps(fetchTwseMonthlyRevenueAll, fetchTpexMonthlyRevenueAll, fetchEmergingMonthlyRevenueAll)
+        cachedMap(
+          "earnings:TW:revenue:v2",
+          EARNINGS_TTL_MS,
+          () => mergeTwMaps(fetchTwseMonthlyRevenueAll, fetchTpexMonthlyRevenueAll, fetchEmergingMonthlyRevenueAll),
+          { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
         ),
-        cachedMap("earnings:TW:eps:v2", EARNINGS_TTL_MS, () =>
-          mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll, fetchEmergingQuarterlyEpsAll)
+        cachedMap(
+          "earnings:TW:eps:v2",
+          EARNINGS_TTL_MS,
+          () => mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll, fetchEmergingQuarterlyEpsAll),
+          { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
         ),
       ]);
       const revenue = revenueMap.get(symbol);
@@ -108,11 +127,15 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
       if (!revenue && !eps) return null;
       return { ...revenue, ...eps };
     }
-    return await cached(`earnings:US:${symbol}`, EARNINGS_TTL_MS, () =>
-      withFinnhubFallback(
-        () => fetchUsEarnings(symbol),
-        () => fetchFinnhubEarnings(symbol)
-      )
+    return await cached(
+      `earnings:US:${symbol}`,
+      EARNINGS_TTL_MS,
+      () =>
+        withFinnhubFallback(
+          () => fetchUsEarnings(symbol),
+          () => fetchFinnhubEarnings(symbol)
+        ),
+      { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
     );
   } catch {
     return null;
@@ -181,8 +204,12 @@ export async function getMaterialAnnouncements(symbolInput: string, marketHint?:
   const market = marketHint ?? detectMarket(symbol);
   if (market !== "TW") return [];
   try {
-    const map = await cachedMap("announcements:TW:all", ANNOUNCEMENTS_TTL_MS, () =>
-      mergeTwMaps(fetchTwseMaterialAnnouncementsAll, fetchTpexMaterialAnnouncementsAll)
+    // 公告盤中可能新增：寬限 60 分鐘（過期先回舊表、背景重抓）。
+    const map = await cachedMap(
+      "announcements:TW:all",
+      ANNOUNCEMENTS_TTL_MS,
+      () => mergeTwMaps(fetchTwseMaterialAnnouncementsAll, fetchTpexMaterialAnnouncementsAll),
+      { staleWhileRevalidateMs: HEAVY_SWR_MS }
     );
     return map.get(symbol) ?? [];
   } catch {
