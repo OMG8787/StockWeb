@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DailyBrief } from "@/lib/ai/brief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
 import MarkdownLite from "./MarkdownLite";
@@ -21,12 +21,24 @@ import MarkdownLite from "./MarkdownLite";
 // ends up being, rather than depending on the model reliably hitting its
 // requested word count (it doesn't — actual output has run ~2x the prompt's
 // stated target).
-const COLLAPSED_HEIGHT_PX = 220;
+// 2026-10-04：快報改成精簡格式（總結＋台美條列＋留意，約300-450字）後，正常長度在
+// 320px 內就能完整顯示；收合改成「真的超過才出現」，避免短內容也蓋一層漸層＋展開按鈕。
+const COLLAPSED_HEIGHT_PX = 320;
 
 export default function DailyBriefCard() {
   const { data, failed } = useFetchOnce<{ brief: DailyBrief }>("/api/daily-brief");
   const brief = data?.brief ?? null;
   const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setOverflowing(el.scrollHeight > COLLAPSED_HEIGHT_PX + 4));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5">
@@ -38,6 +50,7 @@ export default function DailyBriefCard() {
       </div>
       <div className="relative mt-2">
         <div
+          ref={contentRef}
           className="space-y-1 overflow-hidden text-sm leading-relaxed text-(--text-secondary)"
           style={{ maxHeight: expanded ? undefined : `${COLLAPSED_HEIGHT_PX}px` }}
         >
@@ -49,14 +62,14 @@ export default function DailyBriefCard() {
             <BriefSkeleton />
           )}
         </div>
-        {brief && !expanded && (
+        {brief && overflowing && !expanded && (
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-12"
             style={{ background: "linear-gradient(to bottom, transparent, var(--surface-1))" }}
           />
         )}
       </div>
-      {brief && (
+      {brief && overflowing && (
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}

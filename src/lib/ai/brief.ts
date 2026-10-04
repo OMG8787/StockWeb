@@ -1,7 +1,7 @@
 import { cached } from "@/lib/data/cache";
 import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getChipsRatiosBatch, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
-import { RULE_MACRO_DATA } from "./askSystemPrompt";
+import { RULE_MACRO_DATA_COMPACT } from "./compactRules";
 import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
@@ -41,9 +41,11 @@ export interface DailyBrief {
 // 外部AI（成本、延遲都不小），5分鐘的 warm-cache 排程若每次都重算，是 Vercel
 // 用量吃緊後盤點出來的浪費源頭之一，理由同 lib/data/index.ts 的 FUNDAMENTALS_TTL_MS
 // 說明；30分鐘仍然遠比3小時的舊版本新鮮很多。
-const BRIEF_TTL_MS = 30 * 60_000;
+// 2026-10-04：使用者要求縮短為10分鐘（輸出改精簡格式後單次AI成本也較低）。
+const BRIEF_TTL_MS = 10 * 60_000;
 // v2: dropped the per-date key when this moved to a rolling TTL；v3：參考資料新增大戶／外資／融資比例區塊
-const BRIEF_CACHE_KEY = "daily-brief:v3";
+// v4：2026-10-04 輸出改成精簡格式（一句總結＋台美分開條列＋一句風險），作廢舊的長篇快取
+const BRIEF_CACHE_KEY = "daily-brief:v4";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -91,8 +93,49 @@ async function buildTwHoldingStructureSummary(
   return lines.length > 0 ? lines.join("\n") : "（今日主要漲跌個股查無大戶／外資持股／融資資料）";
 }
 
+// ── 今日快報系統提示詞（具名常數，見 CLAUDE.md 規則九）──
+// 2026-10-04 使用者要求「更精簡且明確」：從四段 550-800 字（實測常寫到 2,000-2,900 字）
+// 改成「一句總結＋台美分開條列＋一句風險」。精簡的是輸出與提示詞冗餘，誠實守則全部保留、改寫成短句。
+
+const BRIEF_ROLE = "你是股票研究網站的「今日市場快報」撰稿人，用台灣繁體中文寫給忙碌的讀者，讓他30秒看完就掌握今天台股、美股發生什麼事。";
+
+const BRIEF_FORMAT = [
+  "【輸出格式，嚴格照這個骨架，不要多加段落】",
+  "**總結**：一句話講今天台美股整體狀況（≤40字）。",
+  "**台股**",
+  "- 2~3點（指數無資料時改用漲跌榜、法人、新聞補足），每點1~2句、必帶關鍵數字（指數或個股漲跌幅、法人買賣超張數等）。",
+  "**美股**",
+  "- 1~2點，同上。",
+  "**留意**：一句話講接下來要注意的風險，取材只能來自參考資料的新聞或數據，不可寫資料沒提到的事件。",
+  "台股＋美股合計3~5點，超過5點就刪到5點；全文（含數字）不超過500字。",
+  "不要開場白、不要結尾總結或客套、不要免責聲明（網站會自動附上），不要用 # 標題。",
+].join("\n");
+
+const BRIEF_RULE_CONTENT =
+  "每點挑當天最重要的事（大盤走勢、最大漲跌族群或個股、明確的原因），不要逐檔列清單。原因只在新聞、籌碼或總經資料能支撐時才寫，因果用『可能／通常』，沒有明顯關聯就不寫、不要牽拖；台美連動有資料支撐才提。";
+
+const BRIEF_RULE_MARKET_STATUS =
+  "依【市場狀態】描述數字：已收盤才可用『收在／終場／收盤』；盤中絕對不可用這些字，改用『目前／盤中來到』。台股、美股各依自己的狀態，不互相套用。";
+
+const BRIEF_RULE_NO_ADVICE =
+  "只描述現象，不給買賣／加減碼建議或目標價，不用『值得買』『即將噴出』這類預測字眼；技術訊號只描述現狀，RSI超買是『漲多警訊』不是利多。";
+
+const BRIEF_RULE_HONESTY =
+  "只用參考資料裡的真實數字與名稱（資料沒出現的股票、數字、事件一律不寫），股數換算的張數直接照抄；資料標示無法取得就寫『無資料』或略過，不可編造。大盤概況沒有某指數的當日報價就寫『今日指數無資料』，不可拿台指期或歷史走勢代替當日漲跌；總結必須跟條列數字一致，指數無資料的市場不可說它漲或跌。美股沒有法人籌碼資料是資料源限制，不是抓取失敗。";
+
 // 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
-const RULE_BRIEF_HOLDING_STRUCTURE = `「主要漲跌個股的大戶／外資／融資比例」那段資料可以在第二部分「台股焦點」拿來當解釋漲跌的線索（例如大戶持股連續增加、外資持股比例下滑、融資使用率攀升代表散戶槓桿升溫），但不是唯一原因，也不可以由此推論未來會漲會跌或給操作建議。第一次提到這三個詞時要在同一句裡附上白話解釋：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}`;
+const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}`;
+
+const BRIEF_SYSTEM_PROMPT = [
+  BRIEF_ROLE,
+  BRIEF_FORMAT,
+  BRIEF_RULE_CONTENT,
+  BRIEF_RULE_MARKET_STATUS,
+  BRIEF_RULE_NO_ADVICE,
+  BRIEF_RULE_HONESTY,
+  RULE_MACRO_DATA_COMPACT,
+  BRIEF_RULE_HOLDING_STRUCTURE,
+].join("\n");
 
 export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
   return cached(BRIEF_CACHE_KEY, BRIEF_TTL_MS, async () => {
@@ -156,55 +199,44 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       usNews.length > 0 ? usNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
     ].join("\n");
 
-    const system = [
-      "你是一個股票研究網站的市場快報撰稿人，用繁體中文寫一份「今日市場快報」。",
-      "字數約550-800字，語氣客觀、專業、口語化，像深度一點的新聞摘要，分成四個部分，每部分前面用一行**粗體小標題**（例如「**大盤與台美連動**」），標題後才是內容，內容用換行分段、不用條列（第四部分除外，見下方）：",
-      "第一部分「大盤與台美連動」：大盤整體表現（台股加權指數 + 美股道瓊/S&P/那斯達克），並具體分析台股與美股之間『為什麼』會有這樣的連動——盡量綜合大盤數字、新聞裡提到的具體事件（例如利率/通膨數據、特定產業消息）、以及籌碼資料（例如某檔權值股被外資大舉調節，是否呼應美股同族群的漲跌）三者一起講出因果關係，不要只講『有沒有關聯』這種空泛結論；真的沒有明顯關聯時才如實說沒有，不要牽拖。連動的角度不要每次都只套『升息/降息』，視資料情況也可以考慮其他常見關係，例如美債殖利率變化對成長股估值的影響、美元強弱牽動的匯兌與原物料價格、油價牽動的航空/塑化成本或能源類股、半導體上下游庫存週期的連動、CPI或就業數據公布本身直接改變升息預期而引發的波動、重要權值股/產業龍頭財報或財測牽動整個供應鏈類股——只在資料能支撐、真的合理時才用。如果真的要談升息，可以視情況區分階段講（剛宣布/初期通常震盪重新定價，中後期若基本面穩健會逐漸回穩，市場開始預期升息結束時反而常提前反彈），也可以提到科技成長股受衝擊通常較大、金融/防禦型高股息股相對抗跌這種產業不對稱影響，不用每次都套完整框架，只在資料能支撐時才講。",
-      "第二部分「台股焦點」：具體點名至少5-6檔漲跌幅顯著的個股並說明數字，其中只要「三大法人籌碼動向」資料裡有對應的股票，要把法人是買超還是賣超一併講進去，作為解釋這檔為什麼漲跌的其中一個線索（不是唯一原因）。",
-      "第三部分「美股焦點」：具體點名至少5-6檔漲跌幅顯著的個股並說明數字；如果「技術訊號共振股」資料中有股票，可以自然帶到一兩檔，說明其同時出現哪些客觀技術訊號（例如爆量、站上均線、KD交叉、布林通道），但只能描述「目前呈現的數據狀態」，絕對不能說這代表未來會漲或該買。",
-      "第四部分「近期重點回顧」：這部分不是重複今天的漲跌數字，而是根據「近期市場新聞」兩份資料裡橫跨最近幾天的新聞標題與日期，整理出3-5個這幾天持續出現、值得關注的脈絡或主題（例如某個總經事件的後續發展、某產業的連續性消息、某公司連續幾天被提及的事件），用條列呈現，每點一行、簡短講清楚是什麼事件以及大概哪幾天出現，不要逐條複製新聞標題，也不要跟前三段的內容重複。新聞資料不足以整理出脈絡時，如實說明近期消息面相對平淡即可，不要硬湊。",
-      "參考資料開頭的「【市場狀態】」會告訴你台股、美股現在分別是「盤中」還是「已收盤」——這決定你怎麼描述那個市場的數字：那個市場「已收盤」時才能用『收在』『終場』『收盤』這類字眼；「盤中」時數字還在跳動、還沒定案，絕對不能用『收在』『終場』『收盤』，要改用『目前來到』『截至目前』『盤中來到』這類語氣，並且可以提醒讀者這是撰稿當下的即時數字、盤中仍會變動。台股跟美股的交易時段不重疊，兩邊要各自依照自己的狀態描述，不要因為其中一個收盤了就假設另一個也收盤（或反過來）。",
-      "全文只描述現象與客觀關聯，絕對不要給出「建議買進/賣出/加碼/減碼」等任何操作建議或目標價，也不要用「值得買」「該賣」「即將噴出」「準備上漲」這類預測性或推薦性字眼。",
-      "若參考資料中某部分標示為無法取得，請如實反映（例如略過或簡短說明查無資料），不要編造數字。",
-      RULE_MACRO_DATA,
-      RULE_BRIEF_HOLDING_STRUCTURE,
-      "結尾不需要再加免責聲明，網站會自動附上。",
-    ].join("\n");
 
-    // Longer timeout/output cap than the chat default: this now generates a
-    // four-section, 550-800 word write-up (vs. a typical short chat answer)
-    // from a bigger prompt, and it's never on a path a user is actively
-    // staring at a spinner for — it runs via the daily Vercel Cron, or lazily
-    // once for whoever is the first visitor after a cache-cold day (streamed
-    // in client-side by DailyBriefCard, not blocking the rest of the
-    // homepage), so trading some extra patience for a completed answer
-    // instead of a premature abort is the right tradeoff here.
-    // maxOutputTokens is generous relative to the ~550-800 *character* target
-    // in the prompt: CJK text costs noticeably more tokens per character than
-    // that budget first assumed (a live run got cut off mid-sentence at
-    // 1600), and a completed answer is worth far more than saving a few
-    // hundred unused tokens on a call that isn't latency-sensitive anyway.
-    const result = await callAiProviders(system, [{ role: "user", content: `參考資料：\n${grounding}` }], {
+    // Not on a path a user stares at a spinner for (cron / client-fetched),
+    // so a longer timeout is fine. maxOutputTokens stays well above the <=500
+    // character target: CJK costs more tokens per character than a naive
+    // estimate (an old 550-800 char prompt got cut mid-sentence at 1600), and
+    // a truncated answer makes the provider layer fail over to the next one.
+    const result = await callAiProviders(BRIEF_SYSTEM_PROMPT, [{ role: "user", content: `參考資料：\n${grounding}` }], {
       timeoutMs: 25000,
-      maxOutputTokens: 3000,
+      maxOutputTokens: 1800,
     });
 
     if (result.usedAi) {
       return { text: result.answer, usedAi: true, generatedAt: new Date().toISOString() };
     }
 
+    // AI 掛掉時的資料整理，跟 AI 版同一種骨架（總結／台股／美股／留意），只放客觀數字。
+    const pctText = (n: number) => `${n >= 0 ? "+" : ""}${n}%`;
+    const fallbackMarket = (
+      label: string,
+      market: "TW" | "US",
+      gainer?: { name: string; symbol: string; changePercent: number },
+      loser?: { name: string; symbol: string; changePercent: number }
+    ) => {
+      const idx = indices.filter((i) => i.market === market);
+      return [
+        `**${label}**`,
+        `- 指數：${idx.length > 0 ? idx.map((i) => `${i.name} ${pctText(i.changePercent)}`).join("、") : "無資料"}`,
+        `- 漲幅居首：${gainer ? `${gainer.name}(${gainer.symbol}) ${pctText(gainer.changePercent)}` : "無資料"}；跌幅居首：${
+          loser ? `${loser.name}(${loser.symbol}) ${pctText(loser.changePercent)}` : "無資料"
+        }`,
+      ];
+    };
     const fallback = [
-      indices.length > 0
-        ? `大盤：${indices.map((i) => `${i.name} ${i.change >= 0 ? "+" : ""}${i.changePercent}%`).join("、")}。`
-        : "大盤指數目前無法取得。",
-      twGainers[0] ? `台股漲幅居首：${twGainers[0].name}(${twGainers[0].symbol}) ${twGainers[0].changePercent}%。` : "",
-      usGainers[0] ? `美股漲幅居首：${usGainers[0].name}(${usGainers[0].symbol}) ${usGainers[0].changePercent}%。` : "",
-      twLosers[0] ? `台股跌幅居首：${twLosers[0].name}(${twLosers[0].symbol}) ${twLosers[0].changePercent}%。` : "",
-      usLosers[0] ? `美股跌幅居首：${usLosers[0].name}(${usLosers[0].symbol}) ${usLosers[0].changePercent}%。` : "",
-      `（AI 快報暫時無法產生：${(result.failureReason ?? "未知原因").replace(/。$/, "")}，以上為原始資料整理）`,
-    ]
-      .filter(Boolean)
-      .join(" ");
+      `**總結**：AI 快報暫時無法產生（${(result.failureReason ?? "未知原因").replace(/。$/, "")}），以下為原始數字整理。`,
+      ...fallbackMarket("台股", "TW", twGainers[0], twLosers[0]),
+      ...fallbackMarket("美股", "US", usGainers[0], usLosers[0]),
+      "**留意**：以上未經綜合分析，僅供參考。",
+    ].join("\n");
 
     return { text: fallback, usedAi: false, generatedAt: new Date().toISOString() };
   }, { forceRefresh });
