@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import {
   getChips,
   getChipsRatiosBatch,
@@ -36,7 +36,15 @@ import { getNewsFeed } from "@/lib/ai/newsfeed";
 //   representative TW symbol (2330) each, since the underlying cache key is
 //   the whole merged TWSE+TPEx map, not per-symbol
 // - the daily brief, action brief, and news feed (all AI-touching)
-export const maxDuration = 60; // the AI-touching calls below can each take up to ~25s, well past the Node default
+// 2026-10-04 由 60 拉到 120：回應最晚 RESPOND_DEADLINE_MS 就送出，沒做完的項目交給
+// after() 在同一次呼叫裡繼續跑完（SWR 背景重算也是）。等待上游／AI 的牆鐘時間不算
+// Active CPU，所以拉長上限不會增加 CPU 用量。
+export const maxDuration = 120;
+
+// 2026-10-02 16:22 UTC 那次排程失敗就是 curl 等滿 60 秒逾時（exit 28）——所有項目
+// 一起等，最慢那項拖住整個回應，Actions 紀錄裡連哪一項慢都看不到。改成最多等這麼久
+// 就先回應（沒完成的標成「仍在背景執行」），其餘交給 after() 繼續。
+const RESPOND_DEADLINE_MS = 45_000;
 
 // Fundamentals/chips/earnings/announcements are cached as one whole-market
 // map per category (see lib/data/index.ts), not per symbol — asking for any
@@ -66,7 +74,9 @@ export async function GET(req: NextRequest) {
   const outcomes: Record<string, string> = {};
   // 每一項附上耗時（牆鐘時間，非 CPU 時間；各項同時起跑、共用上游與快取，只能當
   // 「誰最慢／誰在重算」的粗估）。讀到快取通常是幾十毫秒，明顯更久代表這次真的重算了。
+  const pendingLabels: string[] = [];
   const warm = (label: string, task: Promise<unknown>) => {
+    pendingLabels.push(label);
     const startedAt = Date.now();
     const took = () => `${Date.now() - startedAt}ms`;
     return task
@@ -81,7 +91,7 @@ export async function GET(req: NextRequest) {
   };
 
   try {
-    await Promise.all([
+    const all = Promise.all([
       // 2026-09-22 地毯式審計抓到：這4項原本沒包 warm()，任何一項拋錯會讓整個
       // Promise.all直接中止、回應只剩籠統的「預熱失敗」503，跟這支路由自己
       // 在上面說明裡宣稱的「每一項獨立降級、結果都要能回報出來」設計互相矛盾。
@@ -115,6 +125,20 @@ export async function GET(req: NextRequest) {
       warm("earnings", getEarnings(WARM_PROBE_SYMBOL, "TW")),
       warm("announcements", getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW")),
     ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finishedInTime = await Promise.race([
+      all.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), RESPOND_DEADLINE_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!finishedInTime) {
+      after(all);
+      for (const label of pendingLabels) {
+        if (!(label in outcomes)) outcomes[label] = `仍在背景執行（>${RESPOND_DEADLINE_MS / 1000}s）`;
+      }
+    }
     return NextResponse.json({
       ok: true,
       warmedAt: new Date().toISOString(),
