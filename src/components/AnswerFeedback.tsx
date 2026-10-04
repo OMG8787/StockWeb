@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useVoiceInput } from "@/lib/useVoiceInput";
+import { FEEDBACK_SEND_FAILED_TEXT, postFeedback } from "@/lib/feedbackClient";
 
 type Phase = "idle" | "asking-reason" | "reporting" | "done";
 type Rating = "up" | "down" | "report";
@@ -39,15 +40,29 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
     active: phase === "reporting",
   });
 
-  function submit(r: Rating, why?: string) {
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  async function submit(r: Rating, why?: string) {
+    if (sending) return;
+    setSending(true);
+    setSendError(null);
+    const ok = await postFeedback({ rating: r, question, answer, reason: why?.trim() || undefined, symbol });
+    setSending(false);
+    if (!ok) {
+      // 失敗就留在原本的畫面（回報內容不清掉），讓使用者知道沒送到、可以再按一次
+      setSendError(FEEDBACK_SEND_FAILED_TEXT);
+      return;
+    }
     setRating(r);
     setPhase("done");
-    fetch("/api/ask-feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rating: r, question, answer, reason: why?.trim() || undefined, symbol, at: new Date().toISOString() }),
-    }).catch(() => {});
   }
+
+  const errorLine = sendError ? (
+    <p className="mt-1 text-[11px] font-medium text-(--price-up)" role="alert">
+      ⚠️ {sendError}
+    </p>
+  ) : null;
 
   if (phase === "done" && rating) {
     return (
@@ -111,12 +126,13 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
           </button>
           <button
             type="submit"
-            disabled={!report.trim()}
+            disabled={!report.trim() || sending}
             className="rounded bg-(--accent) px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
           >
-            送出回報
+            {sending ? "送出中…" : "送出回報"}
           </button>
         </div>
+        {errorLine}
       </form>
     );
   }
@@ -149,6 +165,7 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
         >
           略過
         </button>
+        {errorLine}
       </form>
     );
   }
@@ -182,6 +199,7 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
       >
         📝 回報
       </button>
+      {errorLine}
     </div>
   );
 }

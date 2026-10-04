@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useVoiceInput } from "@/lib/useVoiceInput";
+import { FEEDBACK_SEND_FAILED_TEXT, postFeedback } from "@/lib/feedbackClient";
 
 /** 跟 /api/ask-feedback 的 MAX_REPORT 一致 */
 const SITE_REPORT_MAX_CHARS = 1000;
@@ -21,15 +22,18 @@ export default function SiteFeedbackForm({ onClose }: { onClose: () => void }) {
     active: !sent,
   });
 
-  function submit() {
-    if (!text.trim()) return;
-    setSent(true);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!text.trim() || sending) return;
+    setSending(true);
+    setSendError(null);
     const page = `${window.location.pathname}${window.location.search}`;
-    fetch("/api/ask-feedback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rating: "site", reason: text.trim(), page, at: new Date().toISOString() }),
-    }).catch(() => {});
+    const ok = await postFeedback({ rating: "site", reason: text.trim(), page });
+    setSending(false);
+    if (ok) setSent(true);
+    else setSendError(FEEDBACK_SEND_FAILED_TEXT);
   }
 
   if (sent) {
@@ -92,12 +96,17 @@ export default function SiteFeedbackForm({ onClose }: { onClose: () => void }) {
         </button>
         <button
           type="submit"
-          disabled={!text.trim()}
+          disabled={!text.trim() || sending}
           className="rounded bg-(--accent) px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
         >
-          送出回報
+          {sending ? "送出中…" : "送出回報"}
         </button>
       </div>
+      {sendError && (
+        <p className="text-[11px] font-medium text-(--price-up)" role="alert">
+          ⚠️ {sendError}
+        </p>
+      )}
     </form>
   );
 }
