@@ -15,6 +15,7 @@ import {
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
+  HOLDINGS_TOPIC_PATTERN,
   SINGLE_STOCK_ANALYSIS_INTENT_PATTERN,
   TECH_INDICATOR_PATTERN,
 } from "./intent";
@@ -54,6 +55,10 @@ import {
   RULE_GIVE_DIRECT_OPINION,
   RULE_NO_FABRICATE_SIMPLE,
   RULE_CONVERSATION_CONTEXT,
+  RULE_STAY_ON_TOPIC,
+  RULE_NO_UNVERIFIABLE_CONFESSION,
+  RULE_NO_CANT_BACKTRACK_WHEN_DATA,
+  RULE_YES_NO_DIRECT,
   RULE_FOLLOWUP_SUGGESTIONS,
   RULE_CONSECUTIVE_GAIN_DAYS_FILTER,
   RULE_MARKET_RANKINGS_USAGE,
@@ -132,6 +137,23 @@ export async function answerQuestion(
   // — doesn't get inflated into a full write-up it didn't ask for.
   const wantsSingleStockAnalysis = !!contextSymbol && SINGLE_STOCK_ANALYSIS_INTENT_PATTERN.test(question);
 
+  // 關注清單只在這一句（或上一句使用者的話）真的在談持股時，才附逐檔報價損益；否則
+  // 只附一份「名單背景」（名稱＋代號，不抓報價）。2026-10-04 使用者反映 AI 聊著聊著
+  // 跳題：只要使用者有關注清單，每一題都被塞進整份逐檔損益，加上 RULE_HOLDINGS_LIGHT
+  // 要求「逐檔講重點」，模型就會在不相干的回答尾巴自己盤點起整份清單。
+  // 正在討論的那一檔剛好是持股時，只附那一檔的那一行（成本損益一句話帶過用）。
+  const lastUserTurn = [...history].reverse().find((t) => t.role === "user")?.content ?? "";
+  const holdingsTopical =
+    wantsHoldingsAnalysis || HOLDINGS_TOPIC_PATTERN.test(question) || HOLDINGS_TOPIC_PATTERN.test(lastUserTurn);
+  const targetSymbolSet = new Set(targets.map((t) => t.symbol.toUpperCase()));
+  const holdingsForGrounding = holdingsTopical
+    ? holdings
+    : holdings.filter((h) => targetSymbolSet.has(h.symbol.toUpperCase()));
+  const holdingsBackgroundNote =
+    !holdingsTopical && holdings.length > 0
+      ? `使用者的關注清單共 ${holdings.length} 檔：${holdings.map((h) => `${h.name}(${h.symbol})`).join("、")}。這只是備用背景名單：這一題沒有在問持股或關注清單，除非使用者明確問到，否則不要提、不要逐檔盤點、不要在回答結尾主動延伸到他的持股。`
+      : "";
+
   let groundedSymbol: string | undefined;
 
   // Always ground with both markets' index levels (not just whichever
@@ -163,7 +185,7 @@ export async function answerQuestion(
       themeMatch ? buildThemeGrounding(themeMatch) : Promise.resolve(""),
       (wantsHoldingsAnalysis
         ? buildHoldingsAnalysisGrounding(holdings)
-        : buildHoldingsGrounding(holdings, TECH_INDICATOR_PATTERN.test(question))
+        : buildHoldingsGrounding(holdingsForGrounding, TECH_INDICATOR_PATTERN.test(question))
       ).catch(() => ""),
       Promise.all([fetchNews("台股", 6), fetchUsMarketNews(5)]).catch(() => [[], []] as const),
       // Shares the same 20-minute cache as the /news page's AI classifier —
@@ -330,6 +352,18 @@ ${actionBriefText}` : "",
       userSafe: false,
     },
     { text: holdingsGrounding ? `【我的關注清單/持股】\n${holdingsGrounding}` : "", userSafe: true },
+    {
+      text: holdingsBackgroundNote ? `【關注清單背景（備用，非本題主題）】\n${holdingsBackgroundNote}` : "",
+      userSafe: false,
+    },
+    {
+      // 對話焦點：承接上文時明講「現在在談哪一檔」，避免大塊市場資料把注意力拉走。
+      text:
+        history.length > 0 && stockGroundings.length > 0
+          ? `【對話焦點】使用者目前正在討論：${stockGroundings.map((g) => g.symbol).join("、")}（詳見上方個股資料）。除非使用者這句話明確換了題目，這一句就是延續這個話題；回答只針對他問的事，不要岔到別的主題。`
+          : "",
+      userSafe: false,
+    },
   ];
 
   const grounding = groundingSections
@@ -366,6 +400,10 @@ ${actionBriefText}` : "",
     RULE_GIVE_DIRECT_OPINION,
     RULE_NO_FABRICATE_SIMPLE,
     RULE_CONVERSATION_CONTEXT,
+    RULE_STAY_ON_TOPIC,
+    RULE_NO_UNVERIFIABLE_CONFESSION,
+    RULE_NO_CANT_BACKTRACK_WHEN_DATA,
+    RULE_YES_NO_DIRECT,
     RULE_FOLLOWUP_SUGGESTIONS,
     RULE_CONSECUTIVE_GAIN_DAYS_FILTER,
     RULE_MARKET_RANKINGS_USAGE,

@@ -20,7 +20,8 @@ async function fetchStockNews(quote: { symbol: string; market: Market }, newsQue
 }
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
-import { describeIndicatorState } from "./indicators";
+import { describeIndicatorState, describeRecentCrosses } from "./indicators";
+import { getMarketStatus } from "@/lib/marketStatus";
 import { describeChipsRatios } from "./chipsRatios";
 import { getUsStockSentiment } from "@/lib/data/sentiment";
 import { describeSocialSentiment } from "./sentiment";
@@ -96,6 +97,10 @@ export async function buildStockGrounding(
     // 哪一側），讓任何被指名問到的指標都有真實數字可以回答，不必靠猜或改答別的。
     const indicatorLine = describeIndicatorState(computeIndicatorState(chart.candles, quote.price));
     if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「今天沒有交叉」，不要改用別的指標代答）：${indicatorLine}`);
+    // 近幾天逐日的交叉紀錄：使用者會追問「昨天有沒有」「這幾天交叉過嗎」，沒有這行 AI 只能
+    // 回「無法回溯」（2026-10-04 實測）。見 describeRecentCrosses 的說明。
+    const recentCrosses = describeRecentCrosses(chart.candles, getMarketStatus(quote.market) === "open");
+    if (recentCrosses) lines.push(`近${5}個交易日逐日的MACD／KD交叉紀錄（用當天為止的日K現算，可直接回答「昨天有沒有交叉」；今天若在盤中，這根K線會隨最新價變動，盤中出現的交叉到收盤可能消失）：${recentCrosses}`);
   } else {
     lines.push("（歷史走勢資料目前無法取得）");
   }

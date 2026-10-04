@@ -79,6 +79,11 @@ const BUY_IDEA_INTENT_PATTERN =
   /建議.{0,8}(買|布局|佈局|進場|入手|投資|加碼)|(買|布局|佈局|進場|入手|投資).{0,4}(哪|什麼|甚麼|啥|哪些|哪一)|有什麼.{0,8}(可以|適合|值得).{0,4}(買|布局|佈局|進場|入手)|可以(買|布局|佈局|進場).{0,3}(什麼|甚麼|哪)|(挑|選).{0,3}(幾|一|兩|二|三)(檔|支)/;
 const EXPLICIT_HOLDINGS_SCOPE_PATTERN = /(我的|我).{0,3}(關注|自選|持股|持有|庫存)|關注清單|自選股|持股裡|手上(的|有)/;
 
+/** 這句（或上一句使用者的話）是不是在談自己的持股／關注清單／成本損益。
+ *  沒有的話，關注清單只當背景名單附上，不附逐檔報價損益（見 ask.ts holdingsForGrounding）。 */
+export const HOLDINGS_TOPIC_PATTERN =
+  /(我的|我).{0,3}(關注|自選|持股|持有|庫存|部位)|關注清單|自選股|持股|持有|庫存|手上|成本|損益|賺|賠|虧|停損|止損|停利|止盈|續抱|加碼|減碼|該賣|要賣|賣掉|攤平|套牢|解套/;
+
 /** 開放式『建議買什麼』且沒有明講只限自己清單 → 範圍是整個市場，不是關注清單。 */
 export function wantsMarketWideBuyIdea(question: string): boolean {
   return BUY_IDEA_INTENT_PATTERN.test(question) && !EXPLICIT_HOLDINGS_SCOPE_PATTERN.test(question);
@@ -137,6 +142,13 @@ const PRONOUN_FOLLOWUP_PATTERN =
 const METRIC_FOLLOWUP_PATTERN =
   /本益比|殖利率|股價淨值比|淨值比|市值|營收|营收|EPS|財報|财报|法人|籌碼|筹码|融資|融券|技術面|技术面|基本面|新聞|新闻|消息|現價|现价|股價|股价|漲跌|涨跌|成交量|均線|均线|RSI|MACD|KD|布林/i;
 const METRIC_FOLLOWUP_MAX_LEN = 14;
+// 2026-10-04 使用者反映「AI 順著對話聊著聊著就忘了前文」。實例：「還是是昨天有，所以
+// 盤中你才說有？」「那你現在查看看」這種句子沒有代名詞、沒有指標名稱，原本兩條規則
+// 都接不住，resolveFollowupTargets 回空陣列→這輪完全沒有個股資料，AI 只能憑對話紀錄
+// 的文字瞎接。這裡補第三類：很短、而且是「核對／追問時間／質疑前後說法」的接續句。
+const VERIFY_OR_TIME_FOLLOWUP_PATTERN =
+  /查看|查一下|查查|再查|重新查|重查|確認|核對|檢查|再看|重新算|昨天|昨日|前天|前一天|上週|上周|早上|今早|稍早|剛才|剛剛|之前|先前|還是|所以|為什麼|為何|怎麼會|真的嗎|確定嗎|矛盾|不一樣|前後/;
+const VERIFY_OR_TIME_FOLLOWUP_MAX_LEN = 24;
 const SCREENING_WORDS_PATTERN = /有沒有|有没有|有哪些|哪些|哪幾|哪几|哪支|推薦|推荐|篩選|筛选|選股|选股|排行|最高|最低|前幾名|前几名/;
 
 function parseOrdinal(question: string): number | null {
@@ -163,7 +175,11 @@ export async function resolveFollowupTargets(
     METRIC_FOLLOWUP_PATTERN.test(trimmed) &&
     trimmed.length <= METRIC_FOLLOWUP_MAX_LEN &&
     !SCREENING_WORDS_PATTERN.test(trimmed);
-  if (!hasPronoun && !bareMetric) return [];
+  const verifyOrTime =
+    trimmed.length <= VERIFY_OR_TIME_FOLLOWUP_MAX_LEN &&
+    VERIFY_OR_TIME_FOLLOWUP_PATTERN.test(trimmed) &&
+    !SCREENING_WORDS_PATTERN.test(trimmed);
+  if (!hasPronoun && !bareMetric && !verifyOrTime) return [];
 
   const ordinal = parseOrdinal(trimmed);
   // 由新到舊找第一則真的有提到股票的訊息（通常是 AI 上一則點名了幾檔的回答）。

@@ -1,5 +1,6 @@
 import { getChart } from "@/lib/data";
 import type { Market, TechScreenItem } from "@/lib/data";
+import type { Candle } from "@/lib/data/types";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 
 // 一檔股票在「技術指標明細表」裡的一行。刻意把每個指標的實際數值都寫出來
@@ -56,6 +57,38 @@ export function describeTechState(item: TechScreenItem): string {
   }
   if (s.volumeRatio != null) parts.push(`量能${s.volumeRatio.toFixed(1)}倍均量`);
   return `${item.name}(${item.symbol})，現價${item.price}(${item.changePercent >= 0 ? "+" : ""}${item.changePercent}%)：${parts.join("、")}`;
+}
+
+/** 回看最近幾個交易日的 MACD／KD 交叉紀錄用的天數。 */
+const RECENT_CROSS_DAYS = 5;
+
+/**
+ * 近幾個交易日「每一天」的 MACD／KD 交叉紀錄（把K線截到那一天再算一次指標）。
+ *
+ * 2026-10-04 使用者實測：問「昨天1301有沒有兩個都黃金交叉」，AI 回「系統沒有保留
+ * 昨天的歷史指標明細，無法回溯」——其實指標本來就是用日K現算的，昨天是什麼狀態
+ * 一算就知道，只是之前資料裡只放「今天」那一行。這裡把近 N 天逐日算好附上，
+ * 「昨天有沒有」「這幾天有沒有交叉過」都能直接用資料回答，不必猜、也不必說做不到。
+ * 最後一根K線若是今天盤中尚未收盤的那根，它的指標會隨最新價跳動（盤中有交叉、收盤
+ * 後消失是正常現象），所以最後一天另外標「今天（盤中仍會變動）」或「今天」。
+ */
+export function describeRecentCrosses(candles: Candle[], marketOpen: boolean): string {
+  const lines: string[] = [];
+  for (let back = RECENT_CROSS_DAYS - 1; back >= 0; back--) {
+    const upTo = candles.slice(0, candles.length - back);
+    const last = upTo[upTo.length - 1];
+    if (!last) continue;
+    const state = computeIndicatorState(upTo, last.close);
+    if (!state) continue;
+    const events: string[] = [];
+    if (state.macdCross === "golden") events.push("MACD黃金交叉");
+    if (state.macdCross === "death") events.push("MACD死亡交叉");
+    if (state.kd?.cross === "golden") events.push("KD黃金交叉");
+    if (state.kd?.cross === "death") events.push("KD死亡交叉");
+    const label = back === 0 ? (marketOpen ? `${last.time}（今天，盤中仍會變動）` : `${last.time}（最新一個交易日）`) : last.time;
+    lines.push(`${label}：${events.length > 0 ? events.join("＋") : "沒有交叉"}`);
+  }
+  return lines.join("；");
 }
 
 /**
