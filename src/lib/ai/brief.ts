@@ -2,7 +2,7 @@ import { cached } from "@/lib/data/cache";
 import { AI_SWR_MS } from "@/lib/data/swrPolicy";
 import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getChipsRatiosBatch, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
-import { RULE_MACRO_DATA_COMPACT } from "./compactRules";
+import { RULE_MACRO_DATA_COMPACT, RULE_COPY_NUMBERS_EXACTLY, RULE_ZH_TW_ONLY, RULE_CLOSED_DAY_WORDING } from "./compactRules";
 import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
@@ -15,7 +15,7 @@ import {
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
-import { getMarketStatus, marketStatusLabel } from "@/lib/marketStatus";
+import { getMarketStatus, marketStatusLabel, weekendNoteForAi } from "@/lib/marketStatus";
 
 export interface DailyBrief {
   text: string;
@@ -143,6 +143,9 @@ const BRIEF_SYSTEM_PROMPT = [
   BRIEF_RULE_NO_ADVICE,
   BRIEF_RULE_HONESTY,
   BRIEF_RULE_NUMBERS,
+  RULE_COPY_NUMBERS_EXACTLY,
+  RULE_ZH_TW_ONLY,
+  RULE_CLOSED_DAY_WORDING,
   RULE_MACRO_DATA_COMPACT,
   BRIEF_RULE_HOLDING_STRUCTURE,
 ].join("\n");
@@ -177,7 +180,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
     const usStatus = getMarketStatus("US");
 
     const grounding = [
-      `【市場狀態】台股目前${marketStatusLabel(twStatus)}；美股目前${marketStatusLabel(usStatus)}（美股與台股交易時段不重疊，寫美股段落時以美股自己的狀態為準，不要套用台股的狀態）`,
+      `【市場狀態】台股目前${marketStatusLabel(twStatus)}；美股目前${marketStatusLabel(usStatus)}（美股與台股交易時段不重疊，寫美股段落時以美股自己的狀態為準，不要套用台股的狀態）${weekendNoteForAi() ? `；${weekendNoteForAi()}` : ""}`,
       "",
       "【大盤概況（台股＋美股）】",
       buildMarketOverviewText(indices, taifexFutures, macro),

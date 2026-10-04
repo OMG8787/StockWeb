@@ -92,6 +92,22 @@ export function getMarketStatus(scope: MarketScope, now: Date = new Date()): Mar
   return "open";
 }
 
+/**
+ * 台北時間今天是不是週六／週日（台股美股都休市）。AI 寫作規則用：週末不可用「今天／今日」
+ * 描述行情（2026-10-04 複查：週日仍寫「今天沒有夠強的訊號」）。國定假日不在此判斷內。
+ */
+export function isTaipeiWeekend(now: Date = new Date()): boolean {
+  const { weekday } = localParts(now, "Asia/Taipei");
+  return weekday === 0 || weekday === 6;
+}
+
+/** AI 參考資料用的一句話：週末時提醒「今天休市」，平日回空字串。 */
+export function weekendNoteForAi(now: Date = new Date()): string {
+  return isTaipeiWeekend(now)
+    ? "今天是週末（台北時間），台股與美股都休市；描述行情或訊號一律說「最近一個交易日（月/日）」，不可說「今天／今日」。"
+    : "";
+}
+
 export function marketStatusLabel(status: MarketStatus): string {
   if (status === "open") return "盤中";
   if (status === "pre-market") return "試撮中（08:30-09:00，尚未正式開盤）";

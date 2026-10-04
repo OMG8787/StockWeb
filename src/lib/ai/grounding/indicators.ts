@@ -26,7 +26,7 @@ export function describeTechState(item: TechScreenItem): string {
         ? `MACD死亡交叉（${s.macdAboveZero ? "0軸上方" : "0軸下方，屬續跌訊號"}）`
         : s.macdAboveZero === null
           ? "MACD資料不足"
-          : `MACD今日未交叉（MACD線在0軸${s.macdAboveZero ? "上方" : "下方"}）`
+          : `MACD最新交易日未交叉（MACD線在0軸${s.macdAboveZero ? "上方" : "下方"}）`
   );
   if (s.kd) {
     const crossText =
@@ -34,7 +34,7 @@ export function describeTechState(item: TechScreenItem): string {
         ? `KD黃金交叉（K值${s.kd.prevK.toFixed(1)}→${s.kd.k.toFixed(1)}上穿D值${s.kd.prevD.toFixed(1)}→${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`
         : s.kd.cross === "death"
           ? `KD死亡交叉（K值${s.kd.k.toFixed(1)}下穿D值${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`
-          : `KD今日未交叉（K值${s.kd.k.toFixed(1)}、D值${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`;
+          : `KD最新交易日未交叉（K值${s.kd.k.toFixed(1)}、D值${s.kd.d.toFixed(1)}，${zoneText[s.kd.zone]}）`;
     parts.push(crossText);
   } else {
     parts.push("KD資料不足");
@@ -104,20 +104,20 @@ export function describeIndicatorState(state: ReturnType<typeof computeIndicator
   const parts: string[] = [];
   parts.push(
     state.macdCross === "golden"
-      ? `MACD：今日黃金交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
+      ? `MACD：最新交易日黃金交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
       : state.macdCross === "death"
-        ? `MACD：今日死亡交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
+        ? `MACD：最新交易日死亡交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
         : state.macdAboveZero == null
           ? "MACD：K線根數不足，算不出來"
-          : `MACD：今日沒有發生交叉，MACD線（DIF）目前位於0軸${state.macdAboveZero ? "上方（多方力道相對占優）" : "下方（空方力道相對占優）"}`
+          : `MACD：最新交易日沒有發生交叉，MACD線（DIF）目前位於0軸${state.macdAboveZero ? "上方（多方力道相對占優）" : "下方（空方力道相對占優）"}`
   );
   parts.push(
     state.kd
       ? state.kd.cross === "golden"
-        ? `KD：今日黃金交叉（K值${state.kd.k.toFixed(1)}上穿D值${state.kd.d.toFixed(1)}）`
+        ? `KD：最新交易日黃金交叉（K值${state.kd.k.toFixed(1)}上穿D值${state.kd.d.toFixed(1)}）`
         : state.kd.cross === "death"
-          ? `KD：今日死亡交叉（K值${state.kd.k.toFixed(1)}下穿D值${state.kd.d.toFixed(1)}）`
-          : `KD：今日沒有交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
+          ? `KD：最新交易日死亡交叉（K值${state.kd.k.toFixed(1)}下穿D值${state.kd.d.toFixed(1)}）`
+          : `KD：最新交易日沒有交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
       : "KD：資料不足"
   );
   parts.push(state.rsi != null ? `RSI(14)：${state.rsi.toFixed(0)}` : "RSI：資料不足");
@@ -126,7 +126,7 @@ export function describeIndicatorState(state: ReturnType<typeof computeIndicator
   if (state.streakDirection && state.streakDays >= 1) {
     parts.push(`連${state.streakDirection === "up" ? "漲" : "跌"}${state.streakDays}天`);
   }
-  if (state.volumeRatio != null) parts.push(`今日量能約為近20日均量的${state.volumeRatio.toFixed(1)}倍`);
+  if (state.volumeRatio != null) parts.push(`最新交易日量能約為近20日均量的${state.volumeRatio.toFixed(1)}倍`);
   return parts.join("；");
 }
 
@@ -143,16 +143,16 @@ export async function describeHoldingTechnical(quote: { symbol: string; market: 
         ? `有MACD黃金交叉（${state.macdAboveZero ? "0軸上方" : "0軸下方"}）`
         : state.macdCross === "death"
           ? "有MACD死亡交叉"
-          : "今日沒有MACD交叉";
+          : "最新交易日沒有MACD交叉";
     const kdText = state.kd
       ? state.kd.cross === "golden"
         ? `有KD黃金交叉（K值${state.kd.k.toFixed(1)}上穿D值${state.kd.d.toFixed(1)}）`
         : state.kd.cross === "death"
           ? `有KD死亡交叉（K值${state.kd.k.toFixed(1)}下穿D值${state.kd.d.toFixed(1)}）`
-          : `今日沒有KD交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
+          : `最新交易日沒有KD交叉（K值${state.kd.k.toFixed(1)}、D值${state.kd.d.toFixed(1)}）`
       : "KD資料不足";
     const signals = computeSignals(chart.candles, quote.price, "3m");
-    const signalText = signals.length > 0 ? signals.map((s) => s.label).join("、") : "今日沒有觸發任何技術訊號";
+    const signalText = signals.length > 0 ? signals.map((s) => s.label).join("、") : "最新交易日沒有觸發任何技術訊號";
     return `；技術面：${crossText}、${kdText}；已觸發的技術訊號：${signalText}`;
   } catch {
     return "；技術面：指標計算失敗";

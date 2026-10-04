@@ -5,6 +5,7 @@
 // （問名詞解釋也帶著技術篩選、持股深度分析、連漲天數的規則）。改成條件式後，偵測方式一律
 // 是「看實際組進 userContent 的資料文字裡有沒有那個區塊」，而不是猜使用者意圖——
 // 資料有附才帶規則，資料沒附時規則本來就用不到。
+import { weekendNoteForAi } from "@/lib/marketStatus";
 import { HISTORY_SECTION_TITLE } from "./grounding/history";
 import { RECENT_CROSSES_TITLE } from "./grounding/indicators";
 import { SECTOR_FACTORS_TITLE } from "./grounding/sectorFactors";
@@ -145,6 +146,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     c.holdingsEmptyAsked ? RULE_HOLDINGS_EMPTY_NOT_NO_PERMISSION : "",
     c.singleStockDeep ? RULE_SINGLE_STOCK_DEEP_ANALYSIS : "",
     RULE_YES_NO_DIRECT,
+    weekendNoteForAi(),
     // 放最後：長度與格式規則聲明優先於前面要求多解釋的規則
     RULE_CONCISE_ANSWER,
   ]

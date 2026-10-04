@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 
 type Phase = "idle" | "asking-reason" | "reporting" | "done";
@@ -28,6 +28,11 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
   const [rating, setRating] = useState<Rating | null>(null);
   const [reason, setReason] = useState("");
   const [report, setReport] = useState("");
+  // 手機上聊天面板很矮，展開回報框時捲到看得見「送出回報」按鈕（2026-10-04 複查：390px 時按鈕被擠到看不到）
+  const reportFormRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (phase === "reporting") reportFormRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [phase]);
   const { listening, voiceError, toggleVoiceInput, clearVoiceError } = useVoiceInput({
     input: report,
     setInput: (v) => setReport(v.slice(0, REPORT_MAX_CHARS)),
@@ -55,6 +60,7 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
   if (phase === "reporting") {
     return (
       <form
+        ref={reportFormRef}
         className="mt-1 space-y-1"
         onSubmit={(e) => {
           e.preventDefault();

@@ -10,7 +10,7 @@ import {
   SCORED_FACET_COUNT,
   SCORED_FACET_LABEL,
 } from "./actionScoring";
-import { RULE_MACRO_DATA_COMPACT } from "./compactRules";
+import { RULE_MACRO_DATA_COMPACT, RULE_COPY_NUMBERS_EXACTLY, RULE_ZH_TW_ONLY, RULE_CLOSED_DAY_WORDING } from "./compactRules";
 import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
@@ -92,6 +92,9 @@ const ACTION_SYSTEM_PROMPT = [
   RULE_HOLDING_STRUCTURE_WORDING,
   ACTION_RULE_DATA_HONESTY,
   RULE_MACRO_DATA_COMPACT,
+  RULE_COPY_NUMBERS_EXACTLY,
+  RULE_ZH_TW_ONLY,
+  RULE_CLOSED_DAY_WORDING,
 ].join("\n");
 
 export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {

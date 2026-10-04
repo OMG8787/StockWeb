@@ -68,7 +68,7 @@ export default function SiteFeedbackForm({ onClose }: { onClose: () => void }) {
             if (voiceError) clearVoiceError();
           }}
           maxLength={SITE_REPORT_MAX_CHARS}
-          rows={3}
+          rows={2}
           autoFocus
           placeholder="例如：某個按鈕在手機上太小、希望首頁多一個○○功能…（可以打字或按🎤用說的）"
           aria-label="回報網站問題或建議"

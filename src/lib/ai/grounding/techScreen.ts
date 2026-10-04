@@ -34,7 +34,7 @@ export async function buildTechScreenGrounding(): Promise<string> {
     if (items.length === 0) return "";
     const fmtList = (list: TechScreenItem[]) =>
       list.length === 0
-        ? "（今天掃描範圍內一檔都沒有，這是實際比對過每一檔指標後的結果，可以直接回答「今天沒有」）"
+        ? "（最新交易日在掃描範圍內一檔都沒有，這是實際比對過每一檔指標後的結果，可以直接回答「最新交易日沒有」）"
         : list.map((i) => `- ${describeTechState(i)}`).join("\n");
 
     const macdGolden = items.filter((i) => i.state.macdCross === "golden");
@@ -66,14 +66,14 @@ export async function buildTechScreenGrounding(): Promise<string> {
       `【${marketLabel}多重技術指標篩選】掃描範圍：依今日成交金額由大到小的前 ${scanned} 檔${marketLabel}（不是全部上市櫃股票；這個排序跟「有沒有發生指標交叉」完全無關，所以不會系統性漏掉某一類股票，但極冷門、幾乎沒有成交的股票不在範圍內）。以下每一檔的指標都是用該檔近3個月真實日K線當場算出來的，不是估計值。`,
       `${marketLabel}「MACD黃金交叉 且 KD黃金交叉」同時成立（共${bothGolden.length}檔）：\n${fmtList(bothGolden)}`,
       `${marketLabel}「MACD死亡交叉 且 KD死亡交叉」同時成立（共${bothDeath.length}檔）：\n${fmtList(bothDeath)}`,
-      `${marketLabel}今日 MACD黃金交叉（共${macdGolden.length}檔）：\n${fmtList(macdGolden)}`,
-      `${marketLabel}今日 KD黃金交叉（K值上穿D值，共${kdGolden.length}檔；括號裡會註明發生在低檔/中間/高檔，低檔交叉是最標準的轉強訊號，高檔交叉要留意追高風險）：\n${fmtList(kdGolden)}`,
-      `${marketLabel}今日 MACD死亡交叉（共${macdDeath.length}檔）：\n${fmtList(macdDeath)}`,
-      `${marketLabel}今日 KD死亡交叉（共${kdDeath.length}檔）：\n${fmtList(kdDeath)}`,
+      `${marketLabel}最新交易日 MACD黃金交叉（共${macdGolden.length}檔）：\n${fmtList(macdGolden)}`,
+      `${marketLabel}最新交易日 KD黃金交叉（K值上穿D值，共${kdGolden.length}檔；括號裡會註明發生在低檔/中間/高檔，低檔交叉是最標準的轉強訊號，高檔交叉要留意追高風險）：\n${fmtList(kdGolden)}`,
+      `${marketLabel}最新交易日 MACD死亡交叉（共${macdDeath.length}檔）：\n${fmtList(macdDeath)}`,
+      `${marketLabel}最新交易日 KD死亡交叉（共${kdDeath.length}檔）：\n${fmtList(kdDeath)}`,
       `${marketLabel}「均線多頭排列 且 RSI未過熱（RSI<70）」（共${bullishMaHealthyRsi.length}檔）：\n${fmtList(bullishMaHealthyRsi)}`,
       `${marketLabel}「均線多頭排列 且 MACD黃金交叉」（共${bullishMaMacdGolden.length}檔）：\n${fmtList(bullishMaMacdGolden)}`,
       `${marketLabel}「KD黃金交叉 且 RSI仍低（RSI≤40，尚未漲多）」（共${oversoldTurning.length}檔）：\n${fmtList(oversoldTurning)}`,
-      `${marketLabel}技術指標明細表（今天有發生任一交叉的全部列出，另補上成交金額最大的幾檔；使用者問到上面沒有預先列出的其他指標組合時，一律從這張表逐檔比對後回答，不要自己回想或推測）：\n${tableRows.map((i) => `- ${describeTechState(i)}`).join("\n")}`,
+      `${marketLabel}技術指標明細表（最新交易日有發生任一交叉的全部列出，另補上成交金額最大的幾檔；使用者問到上面沒有預先列出的其他指標組合時，一律從這張表逐檔比對後回答，不要自己回想或推測）：\n${tableRows.map((i) => `- ${describeTechState(i)}`).join("\n")}`,
     ]
       .filter(Boolean)
       .join("\n\n");
