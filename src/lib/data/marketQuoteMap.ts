@@ -7,6 +7,7 @@ import { fetchUsQuote, fetchUsQuotesBatch } from "./us";
 import { isTwQuoteWindow } from "@/lib/pollingSchedule";
 import { maybeRecordDailyVolumeSnapshot } from "./volumeHistory";
 import { universeFor } from "./symbols";
+import { liveSwrOptions } from "./swrPolicy";
 
 /**
  * All of a market's universe quotes in one batched network call (plus a
@@ -152,6 +153,9 @@ export async function getMarketQuoteMap(market: Market): Promise<Map<string, Quo
     ttl,
     MARKET_MAP_DEGRADED_TTL_MS,
     (map) => map.size < expectedMin,
-    () => fetchMarketQuoteMap(market)
+    () => fetchMarketQuoteMap(market),
+    // 全站最貴的上游呼叫：過期時先回舊表、背景重抓（殘缺的表不會蓋掉舊的完整表），
+    // 見 swrPolicy.ts。
+    liveSwrOptions(market)
   );
 }

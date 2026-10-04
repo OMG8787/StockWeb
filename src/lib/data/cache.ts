@@ -163,6 +163,13 @@ export interface CachedOptions {
    * SWR 條目的過期值時會當成 miss 重算，並用傳統格式覆蓋，寬限期就沒了。
    */
   staleWhileRevalidateMs?: number;
+  /**
+   * 只在開了 staleWhileRevalidateMs 時有意義：遇到過期值時，先等背景重算最多
+   * 這麼久——來得及就直接回新值，來不及才回舊值（重算照樣在背景跑完）。
+   * 即時報價類用：上游快的時候訪客拿到的仍是最新數字（不會因為 SWR 每一輪輪詢
+   * 都晚一拍），上游慢的時候訪客也頂多多等這段時間。不傳＝0＝立刻回舊值。
+   */
+  revalidateWaitMs?: number;
 }
 
 export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>, opts: CachedOptions = {}): Promise<T> {
@@ -181,6 +188,7 @@ export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>, op
         ? readThroughSwr<T>(key, swrMs, load, {
             ttlFor: () => ttlMs,
             forceRefresh: opts.forceRefresh,
+            revalidateWaitMs: opts.revalidateWaitMs,
           })
         : runCached<T>(key, ttlMs, load, opts)
     )
@@ -288,6 +296,8 @@ export interface SwrPolicy<S> {
   isDegraded?: (value: S) => boolean;
   /** 跳過讀取直接重算並寫入（同 CachedOptions.forceRefresh）。 */
   forceRefresh?: boolean;
+  /** 同 CachedOptions.revalidateWaitMs。 */
+  revalidateWaitMs?: number;
 }
 
 /** 同 key 跨 instance 重算鎖的存活上限：最慢的背景重算（AI 快報、全市場技術
@@ -300,7 +310,7 @@ function swrFailureBackoffMs(ttlMs: number): number {
   return Math.max(5_000, Math.min(ttlMs, 60_000));
 }
 
-const backgroundRefreshes = new Map<string, Promise<void>>();
+const backgroundRefreshes = new Map<string, Promise<unknown>>();
 const refreshBackoffUntil = new Map<string, number>();
 
 /**
@@ -318,10 +328,7 @@ export async function readThroughSwr<S>(
 
   const local = readMemoryWithStaleness(key);
   if (local.state === "fresh") return local.value as S;
-  if (local.state === "stale") {
-    refreshInBackground(key, swrMs, load, policy, local.value as S);
-    return local.value as S;
-  }
+  if (local.state === "stale") return serveStale(key, swrMs, load, policy, local.value as S);
 
   if (kvEnabled && redis) {
     try {
@@ -335,8 +342,7 @@ export async function readThroughSwr<S>(
         }
         if (staleUntil > now) {
           writeMemoryEntry(key, hit.v, hit.e, staleUntil);
-          refreshInBackground(key, swrMs, load, policy, hit.v as S);
-          return hit.v as S;
+          return serveStale(key, swrMs, load, policy, hit.v as S);
         }
       }
     } catch {
@@ -372,15 +378,42 @@ async function storeSwr<S>(key: string, value: S, swrMs: number, policy: SwrPoli
   }
 }
 
-function refreshInBackground<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>, staleValue: S): void {
-  if (backgroundRefreshes.has(key)) return;
+/** 過期值的處理：觸發背景重算；有設 revalidateWaitMs 就先等它一下，來得及回新值。 */
+async function serveStale<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>, staleValue: S): Promise<S> {
+  const task = refreshInBackground(key, swrMs, load, policy, staleValue);
+  const waitMs = policy.revalidateWaitMs ?? 0;
+  if (!task || waitMs <= 0) return staleValue;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), waitMs);
+  });
+  try {
+    const fresh = await Promise.race([task, timeout]);
+    return fresh === undefined ? staleValue : fresh.value;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 回傳背景重算的 promise（成功拿到可用新值時 resolve 成 { value }，其餘
+ *  resolve 成 undefined、永不 reject）；退避中則回 undefined、不重算。 */
+function refreshInBackground<S>(
+  key: string,
+  swrMs: number,
+  load: () => Promise<S>,
+  policy: SwrPolicy<S>,
+  staleValue: S
+): Promise<{ value: S } | undefined> | undefined {
+  const existing = backgroundRefreshes.get(key);
+  if (existing) return existing as Promise<{ value: S } | undefined>;
   const backoff = refreshBackoffUntil.get(key);
-  if (backoff !== undefined && backoff > Date.now()) return;
+  if (backoff !== undefined && backoff > Date.now()) return undefined;
   const task = runBackgroundRefresh(key, swrMs, load, policy, staleValue).finally(() => {
     backgroundRefreshes.delete(key);
   });
   backgroundRefreshes.set(key, task);
   keepAliveAfterResponse(task);
+  return task;
 }
 
 async function runBackgroundRefresh<S>(
@@ -389,7 +422,7 @@ async function runBackgroundRefresh<S>(
   load: () => Promise<S>,
   policy: SwrPolicy<S>,
   staleValue: S
-): Promise<void> {
+): Promise<{ value: S } | undefined> {
   const lockKey = `swr-lock:${key}`;
   let locked = false;
   if (kvEnabled && redis) {
@@ -398,12 +431,12 @@ async function runBackgroundRefresh<S>(
       const current = await redis.get<CacheEnvelope>(key);
       if (isEnvelope(current) && current.e > Date.now()) {
         writeMemoryEntry(key, current.v, current.e, current.s ?? current.e);
-        return;
+        return { value: current.v as S };
       }
       const acquired = await redis.set(lockKey, Date.now(), { nx: true, px: SWR_LOCK_MS });
       if (acquired === null) {
         refreshBackoffUntil.set(key, Date.now() + SWR_LOCK_BUSY_BACKOFF_MS);
-        return;
+        return undefined;
       }
       locked = true;
     } catch {
@@ -415,13 +448,15 @@ async function runBackgroundRefresh<S>(
     if (policy.isDegraded?.(value) && !policy.isDegraded(staleValue)) {
       // 降級結果不蓋掉還能用的舊好值；等降級 TTL 過了再試（跟傳統路徑的重試節奏一樣）。
       refreshBackoffUntil.set(key, Date.now() + policy.ttlFor(value));
-      return;
+      return undefined;
     }
     await storeSwr(key, value, swrMs, policy);
     refreshBackoffUntil.delete(key);
+    return { value };
   } catch (err) {
     refreshBackoffUntil.set(key, Date.now() + swrFailureBackoffMs(policy.ttlFor(staleValue)));
     console.error(`[cache] background refresh failed for "${key}" (still serving the stale value):`, err);
+    return undefined;
   } finally {
     if (locked && redis) await redis.del(lockKey).catch(() => undefined);
   }

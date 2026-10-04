@@ -1,4 +1,5 @@
 import { cached, fetchWithTimeout } from "./cache";
+import { DAILY_DATA_SWR_MS } from "./swrPolicy";
 import { fetchTpexJson } from "./tpex";
 
 /**
@@ -106,7 +107,9 @@ const FETCHERS: Record<Exchange, (date?: string) => Promise<HoldingSnapshot>> = 
 };
 
 function latestSnapshot(exchange: Exchange): Promise<HoldingSnapshot> {
-  return cached(`foreign-holdings:${exchange}:latest:v1`, LATEST_TTL_MS, () => FETCHERS[exchange]());
+  return cached(`foreign-holdings:${exchange}:latest:v1`, LATEST_TTL_MS, () => FETCHERS[exchange](), {
+    staleWhileRevalidateMs: DAILY_DATA_SWR_MS,
+  });
 }
 
 /** export：個股歷史脈絡（chipsHistory.ts）逐日讀外資持股比例，共用同一份依日期長效快取。 */

@@ -4,6 +4,7 @@ import { computeIndicatorState, computeSignals, type IndicatorState, type Signal
 import { searchStocks } from "./search";
 import { getChart } from "./chart";
 import { cachedListWithDegradedEmptyTtl } from "./degradedCache";
+import { HEAVY_SWR_MS } from "./swrPolicy";
 
 export interface TechScreenItem {
   symbol: string;
@@ -123,6 +124,8 @@ export async function getTechnicalScreen(market: Market): Promise<TechScreenItem
       lastTechScreenRun[market] =
         `候選池 ${pool.length} 檔（取前 ${candidates.length}）→ 成功 ${kept.length} 檔、抓不到K線或指標算不出來 ${candidates.length - kept.length} 檔，於 ${new Date().toISOString()}`;
       return kept;
-    }
+    },
+    // 全市場掃描很貴：過期先回舊清單、背景重算（空清單不會蓋掉舊清單），見 swrPolicy.ts。
+    { staleWhileRevalidateMs: HEAVY_SWR_MS }
   );
 }

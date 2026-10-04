@@ -7,6 +7,8 @@ import { peekCached, readThroughSwr, writeCached, type SwrPolicy } from "./cache
  */
 export interface DegradedCacheOptions {
   staleWhileRevalidateMs?: number;
+  /** 同 cache.ts CachedOptions.revalidateWaitMs。 */
+  revalidateWaitMs?: number;
 }
 
 // SWR 路徑的同 key 單飛（傳統路徑各自的 inFlight map 維持原樣不動）。
@@ -63,6 +65,7 @@ export async function cachedListWithDegradedEmptyTtl<T>(
     return readSwr(key, swrMs, load, {
       ttlFor: (value) => (value.length > 0 ? ttlMs : degradedTtlMs),
       isDegraded: (value) => value.length === 0,
+      revalidateWaitMs: opts.revalidateWaitMs,
     });
   }
   const hit = await peekCached<T[]>(key);
@@ -113,6 +116,7 @@ export async function cachedWithDegradedNullTtl<T>(
     return readSwr<T | null>(key, swrMs, load, {
       ttlFor: (value) => (value === null ? degradedTtlMs : ttlMs),
       isDegraded: (value) => value === null,
+      revalidateWaitMs: opts.revalidateWaitMs,
     });
   }
   const hit = await peekCached<T | null>(key);
@@ -166,6 +170,7 @@ export async function cachedMapWithDegradedShortTtl<K, V>(
     const entries = await readSwr<Array<[K, V]>>(key, swrMs, async () => Array.from((await load()).entries()), {
       ttlFor: (value) => (degradedEntries(value) ? degradedTtlMs : ttlMs),
       isDegraded: degradedEntries,
+      revalidateWaitMs: opts.revalidateWaitMs,
     });
     return new Map(entries);
   }
@@ -207,6 +212,7 @@ export async function cachedWithDegradedPredicate<T>(
     return readSwr<T>(key, swrMs, load, {
       ttlFor: (value) => (isDegraded(value) ? degradedTtlMs : ttlMs),
       isDegraded,
+      revalidateWaitMs: opts.revalidateWaitMs,
     });
   }
   const hit = await peekCached<T>(key);

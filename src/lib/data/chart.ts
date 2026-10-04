@@ -6,6 +6,7 @@ import { fetchTpexCandles } from "./tpex";
 import { fetchEmergingCandles } from "./emerging";
 import { fetchUsCandles, fetchYahooIntradayCandles } from "./us";
 import { detectMarket, normalizeSymbol, resolveTwExchange } from "./symbols";
+import { liveSwrOptions } from "./swrPolicy";
 
 const CHART_TTL_MS = 5 * 60_000;
 // The "today" intraday range updates roughly once a minute at the source
@@ -106,7 +107,11 @@ export async function getChart(
       if (lastChartFailure.size > 50) lastChartFailure.delete(lastChartFailure.keys().next().value as string);
       return null;
     }
-  });
+  },
+  // 只有當日走勢開 SWR：日K／3個月等區間會被技術篩選用 mapWithConcurrency 批次呼叫，
+  // 若也「過期先回舊值、背景重抓」，背景重抓就不受併發上限管控，會一次對 TWSE
+  // 打出上百個請求（cache.ts mapWithConcurrency 註解那種被限流的爆量）。
+  range === "today" ? liveSwrOptions(market) : undefined);
 }
 
 const lastChartFailure = new Map<string, string>();

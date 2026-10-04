@@ -1,4 +1,5 @@
 import { cached, mapWithConcurrency } from "./cache";
+import { HEAVY_SWR_MS } from "./swrPolicy";
 import type { Market, SearchItem } from "./types";
 import { computeSignals, type Signal } from "@/lib/signals";
 import { universeFor } from "./symbols";
@@ -88,5 +89,5 @@ export async function getMultiSignalStocks(market: Market, minSignals = 2): Prom
     return results
       .filter((r): r is MomentumItem => r !== null)
       .sort((a, b) => b.signals.length - a.signals.length);
-  });
+  }, { staleWhileRevalidateMs: HEAVY_SWR_MS });
 }

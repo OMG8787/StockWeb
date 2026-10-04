@@ -5,6 +5,7 @@ import { fetchTwseQuote } from "./twse";
 import { fetchUsQuote } from "./us";
 import { fetchTaifexNightFutures } from "./taifex";
 import { QUOTE_TTL_MS, quoteTtlMs } from "./quote";
+import { LIVE_REVALIDATE_WAIT_MS, LIVE_SWR_MS, liveSwrOptions } from "./swrPolicy";
 
 // "美股四大指數" as this site's Taiwanese audience means it: 道瓊/S&P 500/
 // 那斯達克 plus 費城半導體指數（SOX）— the semiconductor-heavy Philadelphia
@@ -146,7 +147,8 @@ export async function getIndices(): Promise<IndexQuote[]> {
         `index:${def.symbol}`,
         quoteTtlMs(def.market),
         INDEX_DEGRADED_TTL_MS,
-        () => loadIndex(def)
+        () => loadIndex(def),
+        liveSwrOptions(def.market)
       )
     )
   );
@@ -209,7 +211,10 @@ export async function getTaifexNightFutures(): Promise<TaifexFuturesQuote | null
           await sleep(INDEX_RETRY_DELAY_MS);
         }
       }
-    }
+    },
+    // 夜盤時段（15:00~05:00）不在台股輪詢窗內，不能套 liveSwrOptions 的「盤後 3 天」
+    // 寬限期，固定用盤中的 5 分鐘。
+    { staleWhileRevalidateMs: LIVE_SWR_MS, revalidateWaitMs: LIVE_REVALIDATE_WAIT_MS }
   );
 
   if (live) {

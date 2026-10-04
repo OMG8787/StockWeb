@@ -1,9 +1,6 @@
-import { cached, cachedMap } from "./cache";
+import { cached } from "./cache";
 import type { Chips, Market } from "./types";
-import { fetchTwseInstitutionalTradingAll } from "./twse";
-import { fetchTpexInstitutionalTradingAll } from "./tpex";
-import { mergeTwMaps } from "./twMergedMaps";
-import { CHIPS_TTL_MS } from "./companyData";
+import { getTwInstitutionalMap } from "./companyData";
 import { searchStocks } from "./search";
 
 export interface ChipsRankingItem {
@@ -53,9 +50,7 @@ export async function getChipsRanking(market: Market): Promise<ChipsRanking> {
   return cached(`chips-ranking:${market}:v1`, CHIPS_RANKING_TTL_MS, async () => {
     const [items, institutionalMap] = await Promise.all([
       searchStocks({ market, sortBy: "turnover", sortDir: "desc" }),
-      cachedMap("chips:TW:institutional", CHIPS_TTL_MS, () =>
-        mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll)
-      ),
+      getTwInstitutionalMap(),
     ]);
 
     // 排行只涵蓋「站上有即時報價的股票」，這樣每一筆都能附上現價與今日漲跌幅，

@@ -2,6 +2,7 @@ import { cached, mapWithConcurrency, peekCached, writeCached } from "@/lib/data/
 import { fetchNewsFeedPool, type NewsItem } from "@/lib/data/news";
 import { fetchArticleFullText } from "@/lib/data/articleExtract";
 import { getMultiSignalStocks } from "@/lib/data";
+import { AI_SWR_MS } from "@/lib/data/swrPolicy";
 import { callAiProviders } from "@/lib/ai/provider";
 
 export interface NewsFeedItem extends NewsItem {
@@ -420,6 +421,7 @@ export async function getNewsFeed(forceRefresh = false): Promise<NewsFeed> {
 
       return { pinned, items, generatedAt: new Date().toISOString() };
     },
-    { forceRefresh }
+    // 新聞牆含 AI 挑選置頂：過期先回舊的、背景重算，訪客不現場等 AI（swrPolicy.ts）。
+    { forceRefresh, staleWhileRevalidateMs: AI_SWR_MS }
   );
 }

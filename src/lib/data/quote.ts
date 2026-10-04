@@ -9,6 +9,7 @@ import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth"
 import { isTwQuoteWindow, LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
 import { detectMarket, normalizeSymbol, resolveTwExchange } from "./symbols";
 import { ensureTwUniverseWarm } from "./universe";
+import { liveSwrOptions } from "./swrPolicy";
 
 export const QUOTE_TTL_MS = LIVE_CACHE_TTL_MS;
 /**
@@ -74,13 +75,20 @@ export async function getQuote(symbolInput: string, marketHint?: Market): Promis
   // 快取完整 TTL，免得每秒都對三個交易所各試一次。
   const ttl = quoteTtlMs(market);
   const degradedTtl = market === "TW" && !resolveTwExchange(symbol) ? ttl : QUOTE_DEGRADED_TTL_MS;
-  return cachedWithDegradedNullTtl(`quote:${market}:${symbol}`, ttl, degradedTtl, async () => {
-    try {
-      return market === "TW" ? await fetchTwQuote(symbol) : await fetchUsQuote(symbol);
-    } catch {
-      return null;
-    }
-  });
+  // 過期先回舊值、背景更新（swrPolicy.ts）：過期時先等背景重算 1.5 秒，來不及才回舊值。
+  return cachedWithDegradedNullTtl(
+    `quote:${market}:${symbol}`,
+    ttl,
+    degradedTtl,
+    async () => {
+      try {
+        return market === "TW" ? await fetchTwQuote(symbol) : await fetchUsQuote(symbol);
+      } catch {
+        return null;
+      }
+    },
+    liveSwrOptions(market)
+  );
 }
 
 /** 單檔報價抓失敗時 null 的快取時間：要短於關注清單前端的重試間隔（1.2 秒，見

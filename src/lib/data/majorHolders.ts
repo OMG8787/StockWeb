@@ -1,4 +1,5 @@
 import { cached, fetchWithTimeout, peekCached, writeCached } from "./cache";
+import { DAILY_DATA_SWR_MS } from "./swrPolicy";
 
 /**
  * 大戶持股比例——集保結算所「集保戶股權分散表」，**每週公布一次**（以每週最後一個
@@ -129,7 +130,7 @@ function snapshotPreviousWeek(weeks: WeekSnapshot[]): WeekSnapshot | undefined {
 }
 
 function getWeeks(): Promise<WeeksBlob> {
-  return cached("major-holders:TW:v1", LATEST_TTL_MS, loadWeeks);
+  return cached("major-holders:TW:v1", LATEST_TTL_MS, loadWeeks, { staleWhileRevalidateMs: DAILY_DATA_SWR_MS });
 }
 
 // ---------------------------------------------------------------------------

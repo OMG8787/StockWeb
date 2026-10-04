@@ -1,5 +1,6 @@
 import { cached, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import { cachedWithDegradedPredicate } from "./degradedCache";
+import { HEAVY_SWR_MS } from "./swrPolicy";
 import { fetchObservations, isMacroConfigured } from "./fred";
 import {
   computeIndexTrend,
@@ -345,7 +346,8 @@ export async function getMarketHistory(): Promise<MarketHistory> {
       BUNDLE_TTL_MS,
       BUNDLE_DEGRADED_TTL_MS,
       isDegraded,
-      loadMarketHistory
+      loadMarketHistory,
+      { staleWhileRevalidateMs: HEAVY_SWR_MS }
     );
   } catch {
     return { indices: [], institutional: [], institutionalMissing: [], margin: [], vix: null };

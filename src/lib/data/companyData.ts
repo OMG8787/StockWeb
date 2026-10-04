@@ -1,4 +1,5 @@
 import { cached, cachedMap } from "./cache";
+import { DAILY_DATA_SWR_MS } from "./swrPolicy";
 import type { Chips, Earnings, Fundamentals, Market, MaterialAnnouncement } from "./types";
 import {
   fetchTwseFundamentalsAll,
@@ -128,7 +129,23 @@ export const CHIPS_TTL_MS = 60 * 60_000;
  * v2（2026-09-30）：每檔多了 marginQuota/marginDate，換 key 避免讀到舊形狀的快取。
  */
 export function getTwMarginMap(): Promise<Map<string, Chips>> {
-  return cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll));
+  return cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll), {
+    staleWhileRevalidateMs: DAILY_DATA_SWR_MS,
+  });
+}
+
+/**
+ * 全市場三大法人買賣超表（上市＋上櫃，整包快取 1 小時）。getChips() 與籌碼排行
+ * （chipsRanking.ts）共用：集中在這個唯一入口，同一個 key 的快取模式（含 SWR
+ * 寬限期）才不會因為兩個呼叫端各寫各的而不一致。
+ */
+export function getTwInstitutionalMap(): Promise<Map<string, Chips>> {
+  return cachedMap(
+    "chips:TW:institutional",
+    CHIPS_TTL_MS,
+    () => mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll),
+    { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
+  );
 }
 
 /**
@@ -142,9 +159,7 @@ export async function getChips(symbolInput: string, marketHint?: Market): Promis
   if (market !== "TW") return null;
   try {
     const [institutionalMap, marginMap] = await Promise.all([
-      cachedMap("chips:TW:institutional", CHIPS_TTL_MS, () =>
-        mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll)
-      ),
+      getTwInstitutionalMap(),
       getTwMarginMap(),
     ]);
     const institutional = institutionalMap.get(symbol);
