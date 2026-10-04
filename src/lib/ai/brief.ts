@@ -124,6 +124,11 @@ const BRIEF_RULE_NO_ADVICE =
 const BRIEF_RULE_HONESTY =
   "只用參考資料裡的真實數字與名稱（資料沒出現的股票、數字、事件一律不寫），股數換算的張數直接照抄；資料標示無法取得就寫『無資料』或略過，不可編造。大盤概況沒有某指數的當日報價就寫『今日指數無資料』，不可拿台指期或歷史走勢代替當日漲跌；總結必須跟條列數字一致，指數無資料的市場不可說它漲或跌。美股沒有法人籌碼資料是資料源限制，不是抓取失敗。";
 
+// 2026-10-04 Opus 正式站複查：快報把指數 48,4xx 點的小跌寫成「收跌0.48萬點」（讀者會以為跌了4,800點），
+// 也把「近5日合計賣超、最近3日轉買」寫成矛盾的「近5日-401億（連買3日）」。
+const BRIEF_RULE_NUMBERS =
+  "數字照參考資料原樣寫：指數點位寫完整點數（例如『48,417點』），漲跌寫點數加百分比（例如『跌58點（-0.12%）』），不可改寫成『萬點』或自行換算單位。法人『近N日合計』與『連買／連賣M日』方向不同時，要寫成『近N日合計賣超X億，但最近M日已轉為買超』，不可並列成看似矛盾的一句。";
+
 // 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
 const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}`;
 
@@ -134,6 +139,7 @@ const BRIEF_SYSTEM_PROMPT = [
   BRIEF_RULE_MARKET_STATUS,
   BRIEF_RULE_NO_ADVICE,
   BRIEF_RULE_HONESTY,
+  BRIEF_RULE_NUMBERS,
   RULE_MACRO_DATA_COMPACT,
   BRIEF_RULE_HOLDING_STRUCTURE,
 ].join("\n");

@@ -116,7 +116,7 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
           { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
         ),
         cachedMap(
-          "earnings:TW:eps:v2",
+          "earnings:TW:eps:v3", // v3：標籤改「Q1～Qn累計」（data/earningsLabel.ts），要讓舊標籤的快取失效
           EARNINGS_TTL_MS,
           () => mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll, fetchEmergingQuarterlyEpsAll),
           { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }

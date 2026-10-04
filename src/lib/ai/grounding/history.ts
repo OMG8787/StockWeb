@@ -300,7 +300,22 @@ export function describePeriodDetail(
       chips?.foreignNet != null ? ` 外資${signedLots(chips.foreignNet)}張 投信${signedLots(chips.trustNet ?? 0)}張` : "";
     return `${mmdd(c.time)} 收${fmtPrice(c.close)}(${pct(chg, 2)}) 量${fmtVolume(c.volume, isTw)}${chipsText}`;
   });
-  return `- 使用者問的期間（${period.label}）逐日，回答這段期間要用這幾天的數字${note}：${rows.join("；")}`;
+  // 期間合計一律由程式算好附上：2026-10-04 Opus 正式站複查發現 AI 自己加總逐日數字會算錯
+  // （四天 -8,098 張寫成 -11,531 張），而且只有部分天數有籌碼資料時要明講是哪幾天。
+  const first = candles[idxs[0]];
+  const last = candles[idxs[idxs.length - 1]];
+  const basePrice = candles[idxs[0] - 1].close;
+  const periodChg = basePrice > 0 ? (last.close / basePrice - 1) * 100 : 0;
+  const totalVolume = idxs.reduce((sum, i) => sum + candles[i].volume, 0);
+  const withChips = idxs.filter((i) => chipsByDate.get(candles[i].time)?.foreignNet != null);
+  const sumLots = (pick: (d: TwChipsDay) => number | null | undefined) =>
+    withChips.reduce((sum, i) => sum + (pick(chipsByDate.get(candles[i].time)!) ?? 0), 0);
+  const chipsTotal =
+    isTw && withChips.length > 0
+      ? `；外資合計${signedLots(sumLots((d) => d.foreignNet))}張、投信合計${signedLots(sumLots((d) => d.trustNet))}張（${withChips.length === idxs.length ? `${idxs.length}個交易日齊全` : `只有${withChips.length}／${idxs.length}個交易日有資料，其餘天數這次沒取得，不可說成整段期間的合計`}）`
+      : "";
+  const total = `期間合計（程式已算好，直接引用，不要自己再加總）：${mmdd(first.time)}～${mmdd(last.time)}共${idxs.length}個交易日，區間漲跌${pct(periodChg, 2)}（${fmtPrice(basePrice)}→${fmtPrice(last.close)}）、成交量合計${fmtVolume(totalVolume, isTw)}${chipsTotal}`;
+  return `- 使用者問的期間（${period.label}）逐日，回答這段期間要用這幾天的數字${note}：${rows.join("；")}。${total}`;
 }
 
 export interface HistoryContextInput {

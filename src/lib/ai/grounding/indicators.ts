@@ -85,7 +85,7 @@ export function describeRecentCrosses(candles: Candle[], marketOpen: boolean): s
     if (state.macdCross === "death") events.push("MACD死亡交叉");
     if (state.kd?.cross === "golden") events.push("KD黃金交叉");
     if (state.kd?.cross === "death") events.push("KD死亡交叉");
-    const label = back === 0 ? (marketOpen ? `${last.time}（今天，盤中仍會變動）` : `${last.time}（最新一個交易日）`) : last.time;
+    const label = back === 0 ? (marketOpen ? `${last.time}（今天，盤中仍會變動）` : `${last.time}（最新一個交易日；若今天是休市日，使用者說的「昨天」就是這一天）`) : last.time;
     lines.push(`${label}：${events.length > 0 ? events.join("＋") : "沒有交叉"}`);
   }
   return lines.join("；");

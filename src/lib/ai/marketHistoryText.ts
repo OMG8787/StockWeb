@@ -88,7 +88,10 @@ function describeInstitutional(h: MarketHistory): string | null {
   const perWho = who
     .map(([name, series]) => {
       const streak = streakText(series.slice(0, contiguous));
-      return `${name}${signed(sumFirst([...series], n5))}億${streak ? `（${streak}）` : ""}`;
+      const sum = sumFirst([...series], n5);
+      // 合計方向與連續天數方向相反時明講「轉為」，避免「-401億（連買3日）」讀起來像矛盾
+      const turned = streak && ((sum < 0 && streak.startsWith("連買")) || (sum > 0 && streak.startsWith("連賣")));
+      return `${name}${signed(sum)}億${streak ? (turned ? `（但最近已轉為${streak}）` : `（${streak}）`) : ""}`;
     })
     .join("、");
   const totals = days.map((d) => d.total);

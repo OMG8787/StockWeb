@@ -329,6 +329,14 @@ export function detectHistoryPeriod(
   }
   // 週一為一週的第一天
   const mondayThisWeek = addDays(t, -((t.getUTCDay() + 6) % 7));
+  // 週六、週日問「上週」，使用者指的是剛結束的這個交易週（週一～週五），不是更早一週
+  // （2026-10-04 週日實測：問「6488上週外資怎麼買」被解成 9/21～9/27，而不是剛過完的 9/28～10/2）。
+  const isWeekend = t.getUTCDay() === 0 || t.getUTCDay() === 6;
+  if (LAST_WEEK_PATTERN.test(question) && isWeekend) {
+    const from = isoOf(mondayThisWeek);
+    const to = isoOf(addDays(mondayThisWeek, 4));
+    return { label: `上週（剛結束的交易週 ${from}～${to}）`, from, to };
+  }
   if (LAST_WEEK_PATTERN.test(question)) {
     const from = isoOf(addDays(mondayThisWeek, -7));
     const to = isoOf(addDays(mondayThisWeek, -1));
