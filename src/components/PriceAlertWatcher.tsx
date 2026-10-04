@@ -39,6 +39,8 @@ export default function PriceAlertWatcher() {
 
   useLivePolling({
     fetchOnMount: true,
+    // 到價提醒的用途就是使用者在看別的分頁時也要通知，背景不能暫停。
+    pauseWhenHidden: false,
     decide: (now, settledDayKey) => {
       const scopes: MarketScope[] = ["TW", "US"];
       // 只有真的還有「未觸發的興櫃提醒」時才把興櫃時段納入，否則 13:30~15:00

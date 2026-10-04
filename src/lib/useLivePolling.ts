@@ -21,6 +21,14 @@ export interface LivePollingOptions {
   fetchOnMount?: boolean;
   /** 改變時整組重新啟動（例如切換股票代號、關注清單內容變了） */
   restartKey?: string;
+  /**
+   * 分頁在背景（看不到）時暫停輪詢，切回前景立刻補抓一次。預設 true。
+   * 2026-10-04 加：原本背景分頁照樣每 30 秒打 API（Vercel Function Invocations
+   * 近 30 天 656K、Active CPU 超過免費額度），使用者看不到的畫面更新是純浪費；
+   * 切回來時立刻補抓，看到的仍是最新數字。到價提醒（PriceAlertWatcher）要在
+   * 背景持續檢查，傳 false。
+   */
+  pauseWhenHidden?: boolean;
 }
 
 /**
@@ -35,7 +43,13 @@ export interface LivePollingOptions {
  *  2. 下一次的等待時間會扣掉這次抓取實際花掉的時間，讓實測間隔貼近 10 秒，
  *     同時保證上一次請求結束後才發下一次，不會塞車重疊。
  */
-export function useLivePolling({ decide, onFetch, fetchOnMount = false, restartKey = "" }: LivePollingOptions): void {
+export function useLivePolling({
+  decide,
+  onFetch,
+  fetchOnMount = false,
+  restartKey = "",
+  pauseWhenHidden = true,
+}: LivePollingOptions): void {
   const decideRef = useRef(decide);
   const fetchRef = useRef(onFetch);
   // 在 effect 裡更新（而不是 render 當下直接賦值），避免在 render 階段做副作用；
@@ -51,15 +65,26 @@ export function useLivePolling({ decide, onFetch, fetchOnMount = false, restartK
     // 「今天的 14:40 補抓已經做過了」——記台北日期字串，跨日自動失效。
     let settledDayKey: string | null = null;
     let mount = true;
+    let skippedWhileHidden = false;
+    const isHidden = () => pauseWhenHidden && typeof document !== "undefined" && document.visibilityState === "hidden";
 
     async function run() {
       if (cancelled) return;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
       const startedAt = Date.now();
       const now = new Date();
       const decision = decideRef.current(now, settledDayKey);
-      if (decision.settle) settledDayKey = taipeiDayKey(now);
       const isMountFetch = mount && fetchOnMount;
       mount = false;
+      if (isHidden() && !isMountFetch) {
+        // 背景分頁：這一輪不抓（也不記成「今天已補抓收盤」，切回前景時才會補抓到）。
+        if (decision.fetch) skippedWhileHidden = true;
+        timer = setTimeout(run, Math.max(500, decision.nextCheckMs));
+        return;
+      }
+      skippedWhileHidden = false;
+      if (decision.settle) settledDayKey = taipeiDayKey(now);
 
       if (decision.fetch || isMountFetch) {
         try {
@@ -73,10 +98,17 @@ export function useLivePolling({ decide, onFetch, fetchOnMount = false, restartK
       timer = setTimeout(run, Math.max(500, decision.nextCheckMs - elapsed));
     }
 
+    // 切回前景：背景期間有該抓沒抓的輪次就立刻補一次，再接回正常節奏。
+    const onVisibility = () => {
+      if (!isHidden() && skippedWhileHidden) void run();
+    };
+    if (pauseWhenHidden && typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+
     run();
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
+      if (pauseWhenHidden && typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [fetchOnMount, restartKey]);
+  }, [fetchOnMount, restartKey, pauseWhenHidden]);
 }
