@@ -6,18 +6,18 @@ import { fetchTpexQuote } from "./tpex";
 import { fetchEmergingQuote } from "./emerging";
 import { fetchUsQuote } from "./us";
 import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth";
-import { isTwQuoteWindow } from "@/lib/pollingSchedule";
+import { isTwQuoteWindow, LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
 import { detectMarket, normalizeSymbol, resolveTwExchange } from "./symbols";
 import { ensureTwUniverseWarm } from "./universe";
 
-export const QUOTE_TTL_MS = 20_000;
+export const QUOTE_TTL_MS = LIVE_CACHE_TTL_MS;
 /**
  * 台股 08:30~14:30（股市運作期間）的報價快取 TTL。前端在這段時間改成每 1 分鐘
  * 輪詢一次（見 lib/pollingSchedule.ts，2026-09-20 從10秒調整成1分鐘），這裡跟著
  * 對齊成 60 秒——沒必要比前端輪詢間隔還短，快取命中率才會高，白白重抓的次數
  * 才會降到最低。這段時間以外前端根本不輪詢，所以沿用原本的 20 秒即可。
  */
-const TW_LIVE_QUOTE_TTL_MS = 60_000;
+const TW_LIVE_QUOTE_TTL_MS = LIVE_CACHE_TTL_MS;
 
 /** 台股盤中 1 分鐘、其餘情況（含所有美股報價）維持原本的 20 秒。 */
 export function quoteTtlMs(market: Market): number {

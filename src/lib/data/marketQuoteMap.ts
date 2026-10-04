@@ -1,4 +1,5 @@
 import { cachedMapWithDegradedShortTtl } from "./degradedCache";
+import { LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
 import type { Market, Quote } from "./types";
 import { fetchTwseQuote, fetchTwseQuotesBatch } from "./twse";
 import { fetchTpexQuote, fetchTpexQuotesBatch } from "./tpex";
@@ -119,7 +120,7 @@ const MARKET_MAP_TTL_MS = 2 * 60_000;
  * 會動」跟「不要重演那次變慢」之間的取捨：焦點排行實際最快每分鐘換一次數字，
  * 個股報價/大盤指數/關注清單那些單檔報價則是真正的 10 秒級。
  */
-const TW_LIVE_MARKET_MAP_TTL_MS = 60_000;
+const TW_LIVE_MARKET_MAP_TTL_MS = LIVE_CACHE_TTL_MS;
 
 // 抓失敗/部分降級時只快取這麼短——見下方 getMarketQuoteMap() 的完整說明。
 // 3 秒跟 marketIndices.ts 的 INDEX_DEGRADED_TTL_MS 同一個量級：短到能自我

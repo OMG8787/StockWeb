@@ -1,4 +1,5 @@
 import { cachedWithDegradedNullTtl } from "./degradedCache";
+import { LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
 import type { Candle, ChartRange, ChartResponse, Market } from "./types";
 import { fetchTwseCandles } from "./twse";
 import { fetchTpexCandles } from "./tpex";
@@ -12,7 +13,7 @@ const CHART_TTL_MS = 5 * 60_000;
 // snapshot for several new bars in a row, defeating the point of an
 // intraday view. 60s keeps it genuinely near-live without re-fetching for
 // every single poll of a chart a user might have open.
-const INTRADAY_CHART_TTL_MS = 60_000;
+const INTRADAY_CHART_TTL_MS = LIVE_CACHE_TTL_MS;
 // 抓失敗（null）只快取 30 秒：TWSE 對連續請求會暫時回 428 限流，5y/10y 一次要打
 // 60~120 個月份請求，任何一個月失敗整張圖就是 null。原本用 cached() 會把這個 null
 // 當正常結果寫進共用 Redis 存活整個 5 分鐘，全站訪客都看到「無法取得」，即使上游

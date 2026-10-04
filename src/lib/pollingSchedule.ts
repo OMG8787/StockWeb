@@ -60,10 +60,20 @@ export const TW_LIVE_END_MINUTES = 14 * 60 + 30;
 /** 14:40 台北時間——收盤後補抓一次最終數字的時間點。 */
 export const TW_SETTLE_MINUTES = 14 * 60 + 40;
 
-/** 台股盤中輪詢間隔（原訂10秒，2026-09-20改為1分鐘，見上方檔案說明）。 */
-export const TW_LIVE_POLL_MS = 60_000;
-/** 美股輪詢間隔——維持改動前的 20 秒，不套用台股規則。 */
-export const US_POLL_MS = 20_000;
+/**
+ * 全站盤中輪詢間隔：台股、美股統一 30 秒（2026-10-04 使用者要求「全站刷新統一30秒」；
+ * 之前台股是 1 分鐘〔2026-09-20 由 10 秒調整〕、美股 20 秒）。伺服器端的即時報價快取
+ * TTL 刻意設得比這個間隔略短（見 data/quote.ts、marketQuoteMap.ts、chart.ts 的
+ * LIVE_*_TTL_MS），否則剛好整 30 秒才輪詢到的請求會撞上還沒過期的快取，實際
+ * 更新間隔會被拉長成 60 秒。
+ */
+export const LIVE_POLL_MS = 30_000;
+/** 台股盤中輪詢間隔。 */
+export const TW_LIVE_POLL_MS = LIVE_POLL_MS;
+/** 美股輪詢間隔。 */
+export const US_POLL_MS = LIVE_POLL_MS;
+/** 伺服器端即時資料快取 TTL：比輪詢間隔短 5 秒，確保每一輪輪詢都拿得到新資料。 */
+export const LIVE_CACHE_TTL_MS = LIVE_POLL_MS - 5_000;
 /**
  * 非輪詢時段的「心跳」間隔：不會發出任何網路請求，只是每分鐘重新評估一次
  * 現在是不是已經跨進交易時段（例如使用者 08:25 就開著頁面，08:30 要能自己
