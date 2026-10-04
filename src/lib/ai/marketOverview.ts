@@ -1,6 +1,7 @@
 import type { IndexQuote, MacroSnapshot, TaifexFuturesQuote } from "@/lib/data";
 import { describeTaifexNightFutures } from "@/lib/data";
 import { describeMacroSnapshot } from "./macroText";
+import { describeMarketHistory } from "./marketHistoryText";
 
 /**
  * 「【大盤概況（台股＋美股）】」這段文字，`ask.ts`（AI問答）、`actionBrief.ts`
@@ -16,6 +17,10 @@ import { describeMacroSnapshot } from "./macroText";
  * 必須自己 `getMacroSnapshot()` 帶進來，編譯器會擋下漏帶的呼叫端，不會出現「某一頁
  * 的 AI 看得到總經、另一頁看不到」的隱藏落差（規則九第3點）。沒設定 FRED 金鑰時
  * getMacroSnapshot() 回 null，這裡輸出跟加功能之前逐字相同。
+ *
+ * 2026-10-04：`macro.marketHistory`（getMacroSnapshot() 一併抓好的大盤／總體歷史脈絡）
+ * 有內容時，最後再接一段【市場歷史與情緒走勢】（見 marketHistoryText.ts）；這個函式
+ * 維持同步、簽名不變，三個呼叫端不用改。
  */
 export function buildMarketOverviewText(
   indices: IndexQuote[],
@@ -29,5 +34,6 @@ export function buildMarketOverviewText(
   // 台指期夜盤跟前面的加權指數/道瓊等現貨指數不同，是「盤後衍生性商品」，
   // 一定要附帶交易中/已收盤狀態跟資料時間，不能讓 AI 誤把它講成即時現貨指數。
   const macroText = describeMacroSnapshot(macro);
-  return `${indexLines}\n${describeTaifexNightFutures(taifexFutures)}${macroText ? `\n${macroText}` : ""}`;
+  const historyText = describeMarketHistory(macro?.marketHistory);
+  return `${indexLines}\n${describeTaifexNightFutures(taifexFutures)}${macroText ? `\n${macroText}` : ""}${historyText ? `\n${historyText}` : ""}`;
 }
