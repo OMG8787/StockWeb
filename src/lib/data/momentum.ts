@@ -1,5 +1,5 @@
 import { cached, mapWithConcurrency } from "./cache";
-import { HEAVY_SWR_MS } from "./swrPolicy";
+import { HEAVY_SWR_MS, sessionAwareTtl } from "./swrPolicy";
 import type { Market, SearchItem } from "./types";
 import { computeSignals, type Signal } from "@/lib/signals";
 import { universeFor } from "./symbols";
@@ -45,7 +45,8 @@ const MOMENTUM_CHART_CONCURRENCY = 20;
  * isn't something technical data can honestly support anyway.
  */
 export async function getMultiSignalStocks(market: Market, minSignals = 2): Promise<MomentumItem[]> {
-  return cached(`momentum:${market}:${minSignals}`, MOMENTUM_TTL_MS, async () => {
+  // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
+  return cached(`momentum:${market}:${minSignals}`, sessionAwareTtl(market, MOMENTUM_TTL_MS), async () => {
     const pool = await universeFor(market);
     const quoteMap = await getMarketQuoteMap(market);
     const avgVolumeMap = await getTrailingAverageVolumeMap(market);

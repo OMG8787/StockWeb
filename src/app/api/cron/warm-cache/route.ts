@@ -64,16 +64,21 @@ export async function GET(req: NextRequest) {
   // 反覆猜測是「算出空的」還是「整個拋錯」。把結果直接回在這支 cron 的回應裡，
   // 之後同類問題可以一眼看出是哪一項壞掉、壞在哪裡，不用再猜。
   const outcomes: Record<string, string> = {};
-  const warm = (label: string, task: Promise<unknown>) =>
-    task
+  // 每一項附上耗時（牆鐘時間，非 CPU 時間；各項同時起跑、共用上游與快取，只能當
+  // 「誰最慢／誰在重算」的粗估）。讀到快取通常是幾十毫秒，明顯更久代表這次真的重算了。
+  const warm = (label: string, task: Promise<unknown>) => {
+    const startedAt = Date.now();
+    const took = () => `${Date.now() - startedAt}ms`;
+    return task
       .then((value) => {
-        outcomes[label] = Array.isArray(value) ? `ok (${value.length} 筆)` : value == null ? "ok (無資料)" : "ok";
+        outcomes[label] = `${Array.isArray(value) ? `ok (${value.length} 筆)` : value == null ? "ok (無資料)" : "ok"} ${took()}`;
         return value;
       })
       .catch((err) => {
-        outcomes[label] = `失敗：${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
+        outcomes[label] = `失敗（${took()}）：${err instanceof Error ? err.message : String(err)}`.slice(0, 300);
         console.error(`[cron] warm-cache: ${label} warm-up failed:`, err);
       });
+  };
 
   try {
     await Promise.all([

@@ -36,6 +36,18 @@ function isLiveSession(market: Market): boolean {
   return market === "TW" ? isTwQuoteWindow() : getMarketStatus("US") === "open";
 }
 
+/**
+ * 昂貴的全市場掃描（技術指標篩選、多訊號共振：各要對上百檔抓 K 線算指標）在該市場
+ * 收盤後／週末的 TTL。2026-10-04 Vercel Fluid Active CPU 已用到免費額度約 136%：
+ * 收盤後數字不再變動，照盤中 15~30 分鐘的節奏重算純屬浪費。
+ */
+export const OFF_SESSION_HEAVY_TTL_MS = 3 * 60 * 60_000;
+
+/** 依市場是否盤中挑 TTL：盤中用 liveTtlMs，收盤後／週末用 OFF_SESSION_HEAVY_TTL_MS。 */
+export function sessionAwareTtl(market: Market, liveTtlMs: number): number {
+  return isLiveSession(market) ? liveTtlMs : Math.max(liveTtlMs, OFF_SESSION_HEAVY_TTL_MS);
+}
+
 /** 即時報價類資料的 SWR 選項：盤中寬限 5 分鐘、盤後／週末 3 天，過期時先等 1.5 秒。 */
 export function liveSwrOptions(market: Market): { staleWhileRevalidateMs: number; revalidateWaitMs: number } {
   return {

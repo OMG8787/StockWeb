@@ -4,7 +4,7 @@ import { computeIndicatorState, computeSignals, type IndicatorState, type Signal
 import { searchStocks } from "./search";
 import { getChart } from "./chart";
 import { cachedListWithDegradedEmptyTtl } from "./degradedCache";
-import { HEAVY_SWR_MS } from "./swrPolicy";
+import { HEAVY_SWR_MS, sessionAwareTtl } from "./swrPolicy";
 
 export interface TechScreenItem {
   symbol: string;
@@ -81,7 +81,8 @@ export function getLastTechScreenRun(): Record<string, string> {
 export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
   return cachedListWithDegradedEmptyTtl(
     `tech-screen:${market}:v1`,
-    TECH_SCREEN_TTL_MS,
+    // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
+    sessionAwareTtl(market, TECH_SCREEN_TTL_MS),
     TECH_SCREEN_DEGRADED_TTL_MS,
     async () => {
       const pool = await searchStocks({ market, sortBy: "turnover", sortDir: "desc" });
