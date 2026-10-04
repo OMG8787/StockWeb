@@ -1,4 +1,32 @@
-import { peekCached, writeCached } from "./cache";
+import { peekCached, readThroughSwr, writeCached, type SwrPolicy } from "./cache";
+
+/**
+ * 四個降級變體共用的選項。`staleWhileRevalidateMs` 語意同 cache.ts 的
+ * CachedOptions：過期但在寬限期內先回舊值、背景重算。降級值（null／空／殘缺）
+ * 不給寬限期，背景重算得到降級值時也不覆蓋舊的好值。不傳＝原本行為逐字不變。
+ */
+export interface DegradedCacheOptions {
+  staleWhileRevalidateMs?: number;
+}
+
+// SWR 路徑的同 key 單飛（傳統路徑各自的 inFlight map 維持原樣不動）。
+const swrInFlight = new Map<string, Promise<unknown>>();
+
+function swrSingleFlight<S>(key: string, run: () => Promise<S>): Promise<S> {
+  const pending = swrInFlight.get(key);
+  if (pending) return pending as Promise<S>;
+  const promise = Promise.resolve()
+    .then(run)
+    .finally(() => {
+      swrInFlight.delete(key);
+    });
+  swrInFlight.set(key, promise);
+  return promise;
+}
+
+function readSwr<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>): Promise<S> {
+  return swrSingleFlight(key, () => readThroughSwr(key, swrMs, load, policy));
+}
 
 /**
  * `cached()` 的變體：算出來是**空清單**時只給一個很短的 TTL，真的算出資料才
@@ -27,8 +55,16 @@ export async function cachedListWithDegradedEmptyTtl<T>(
   key: string,
   ttlMs: number,
   degradedTtlMs: number,
-  load: () => Promise<T[]>
+  load: () => Promise<T[]>,
+  opts: DegradedCacheOptions = {}
 ): Promise<T[]> {
+  const swrMs = opts.staleWhileRevalidateMs ?? 0;
+  if (swrMs > 0) {
+    return readSwr(key, swrMs, load, {
+      ttlFor: (value) => (value.length > 0 ? ttlMs : degradedTtlMs),
+      isDegraded: (value) => value.length === 0,
+    });
+  }
   const hit = await peekCached<T[]>(key);
   if (hit) return hit;
   const pending = degradedEmptyInFlight.get(key);
@@ -69,8 +105,16 @@ export async function cachedWithDegradedNullTtl<T>(
   key: string,
   ttlMs: number,
   degradedTtlMs: number,
-  load: () => Promise<T | null>
+  load: () => Promise<T | null>,
+  opts: DegradedCacheOptions = {}
 ): Promise<T | null> {
+  const swrMs = opts.staleWhileRevalidateMs ?? 0;
+  if (swrMs > 0) {
+    return readSwr<T | null>(key, swrMs, load, {
+      ttlFor: (value) => (value === null ? degradedTtlMs : ttlMs),
+      isDegraded: (value) => value === null,
+    });
+  }
   const hit = await peekCached<T | null>(key);
   if (hit !== undefined) return hit;
   const pending = degradedNullInFlight.get(key);
@@ -112,8 +156,19 @@ export async function cachedMapWithDegradedShortTtl<K, V>(
   ttlMs: number,
   degradedTtlMs: number,
   isDegraded: (map: Map<K, V>) => boolean,
-  load: () => Promise<Map<K, V>>
+  load: () => Promise<Map<K, V>>,
+  opts: DegradedCacheOptions = {}
 ): Promise<Map<K, V>> {
+  const swrMs = opts.staleWhileRevalidateMs ?? 0;
+  if (swrMs > 0) {
+    // 降級判斷要在 Map 上做（呼叫端的 isDegraded 吃 Map），存的是 entries 陣列。
+    const degradedEntries = (entries: Array<[K, V]>) => isDegraded(new Map(entries));
+    const entries = await readSwr<Array<[K, V]>>(key, swrMs, async () => Array.from((await load()).entries()), {
+      ttlFor: (value) => (degradedEntries(value) ? degradedTtlMs : ttlMs),
+      isDegraded: degradedEntries,
+    });
+    return new Map(entries);
+  }
   const hit = await peekCached<Array<[K, V]>>(key);
   if (hit) return new Map(hit);
   const pending = degradedMapInFlight.get(key);
@@ -144,8 +199,16 @@ export async function cachedWithDegradedPredicate<T>(
   ttlMs: number,
   degradedTtlMs: number,
   isDegraded: (value: T) => boolean,
-  load: () => Promise<T>
+  load: () => Promise<T>,
+  opts: DegradedCacheOptions = {}
 ): Promise<T> {
+  const swrMs = opts.staleWhileRevalidateMs ?? 0;
+  if (swrMs > 0) {
+    return readSwr<T>(key, swrMs, load, {
+      ttlFor: (value) => (isDegraded(value) ? degradedTtlMs : ttlMs),
+      isDegraded,
+    });
+  }
   const hit = await peekCached<T>(key);
   if (hit !== undefined && hit !== null) return hit;
   const pending = degradedPredicateInFlight.get(key);

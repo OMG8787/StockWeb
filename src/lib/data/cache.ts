@@ -1,8 +1,18 @@
+import { after } from "next/server";
 import { kvEnabled, redis } from "./kv";
 
 interface CacheEntry {
   value: unknown;
   expiresAt: number;
+  /** 只有開了 staleWhileRevalidateMs 的 key 才有：過了 expiresAt 之後、這個時間點
+   *  之前，值仍可當「舊資料」先回給訪客（同時背景重算）。沒有這個欄位＝傳統條目，
+   *  行為跟加入 SWR 之前逐字相同。 */
+  staleUntil?: number;
+}
+
+/** 條目真正可以從記憶體丟掉的時間：傳統條目＝expiresAt；SWR 條目＝寬限期結束。 */
+function retainUntil(entry: CacheEntry): number {
+  return entry.staleUntil !== undefined && entry.staleUntil > entry.expiresAt ? entry.staleUntil : entry.expiresAt;
 }
 
 // Process-local TTL cache — the fallback used whenever Redis (see ./kv)
@@ -24,10 +34,31 @@ function readMemory(key: string): { hit: boolean; value: unknown } {
   const entry = memoryStore.get(key);
   if (!entry) return { hit: false, value: undefined };
   if (entry.expiresAt <= Date.now()) {
-    memoryStore.delete(key);
+    // SWR 條目過期後在寬限期內要留著給 readMemoryWithStaleness() 當舊資料用；
+    // 傳統條目（沒有 staleUntil）照舊直接刪掉。
+    if (retainUntil(entry) <= Date.now()) memoryStore.delete(key);
     return { hit: false, value: undefined };
   }
   return { hit: true, value: entry.value };
+}
+
+type MemoryLookup = { state: "fresh" | "stale"; value: unknown } | { state: "miss" };
+
+/** SWR 專用的記憶體讀取：分得出「新鮮」「過期但還在寬限期內」「沒有」三種。 */
+function readMemoryWithStaleness(key: string): MemoryLookup {
+  const entry = memoryStore.get(key);
+  if (!entry) return { state: "miss" };
+  const now = Date.now();
+  if (entry.expiresAt > now) return { state: "fresh", value: entry.value };
+  if (retainUntil(entry) > now) return { state: "stale", value: entry.value };
+  memoryStore.delete(key);
+  return { state: "miss" };
+}
+
+/** 以絕對時間寫入 SWR 條目（從 Redis 回填時，保留共用快取上真正剩下的新鮮期／寬限期）。 */
+function writeMemoryEntry(key: string, value: unknown, expiresAt: number, staleUntil: number): void {
+  memoryStore.set(key, { value, expiresAt, staleUntil });
+  if (memoryStore.size > MAX_MEMORY_ENTRIES) evictMemory();
 }
 
 function writeMemory(key: string, value: unknown, ttlMs: number): void {
@@ -45,7 +76,7 @@ function writeMemory(key: string, value: unknown, ttlMs: number): void {
 function evictMemory(): void {
   const now = Date.now();
   for (const [key, entry] of memoryStore) {
-    if (entry.expiresAt <= now) memoryStore.delete(key);
+    if (retainUntil(entry) <= now) memoryStore.delete(key);
   }
   for (const key of memoryStore.keys()) {
     if (memoryStore.size <= MAX_MEMORY_ENTRIES) break;
@@ -69,6 +100,11 @@ interface CacheEnvelope {
    *  shared cache keeps its own copy only for the time that's actually left
    *  rather than restarting the TTL and serving it for up to twice as long */
   e: number;
+  /** SWR 條目才有：寫入時間（epoch ms），方便判讀新鮮度／除錯 */
+  w?: number;
+  /** SWR 條目才有：可當舊資料回傳到這個時間點（epoch ms）為止；Redis 的 key
+   *  實際存活時間也延長到這裡。傳統條目沒有這個欄位。 */
+  s?: number;
 }
 
 function isEnvelope(value: unknown): value is CacheEnvelope {
@@ -116,6 +152,17 @@ export interface CachedOptions {
    *  clearing out a bad cached value (e.g. a truncated AI response) without
    *  waiting out its TTL, rather than a knob callers reach for routinely. */
   forceRefresh?: boolean;
+  /**
+   * 「過期先回舊資料、背景更新」（stale-while-revalidate）的寬限期（毫秒）。
+   * 值超過 TTL 但還在這段寬限期內時，**立刻回傳舊值**，同時在背景重算一次
+   * （見 refreshInBackground：同 key 單飛、跨 instance 用 Redis 鎖、用 Next 的
+   * after() 讓回應送出後重算仍能跑完）。超過寬限期才會讓訪客現場等重算。
+   * 不傳（或 0）＝傳統行為，跟加入這個選項之前逐字相同。
+   *
+   * 同一個 key 的所有呼叫端必須用同一種模式（都開或都不開）：傳統路徑讀到
+   * SWR 條目的過期值時會當成 miss 重算，並用傳統格式覆蓋，寬限期就沒了。
+   */
+  staleWhileRevalidateMs?: number;
 }
 
 export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>, opts: CachedOptions = {}): Promise<T> {
@@ -127,8 +174,16 @@ export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>, op
   // directly would run it (and, on the memory-only path, load() itself)
   // synchronously up to its first await — i.e. before inFlight.set() below
   // — leaving a window in which a re-entrant call still saw a miss.
+  const swrMs = opts.staleWhileRevalidateMs ?? 0;
   const promise = Promise.resolve()
-    .then(() => runCached<T>(key, ttlMs, load, opts))
+    .then(() =>
+      swrMs > 0
+        ? readThroughSwr<T>(key, swrMs, load, {
+            ttlFor: () => ttlMs,
+            forceRefresh: opts.forceRefresh,
+          })
+        : runCached<T>(key, ttlMs, load, opts)
+    )
     .finally(() => {
       inFlight.delete(key);
     });
@@ -148,9 +203,10 @@ export function cached<T>(key: string, ttlMs: number, load: () => Promise<T>, op
 export async function cachedMap<K, V>(
   key: string,
   ttlMs: number,
-  load: () => Promise<Map<K, V>>
+  load: () => Promise<Map<K, V>>,
+  opts: CachedOptions = {}
 ): Promise<Map<K, V>> {
-  const entries = await cached<Array<[K, V]>>(key, ttlMs, async () => Array.from(await load()));
+  const entries = await cached<Array<[K, V]>>(key, ttlMs, async () => Array.from(await load()), opts);
   return new Map(entries);
 }
 
@@ -168,7 +224,9 @@ async function runCached<T>(key: string, ttlMs: number, load: () => Promise<T>, 
   if (kvEnabled && redis) {
     try {
       const hit = await redis.get<CacheEnvelope>(key);
-      if (isEnvelope(hit)) {
+      // SWR 條目（有 s 欄位）在 Redis 裡會活到寬限期結束；傳統路徑不回舊資料，
+      // 所以它過了新鮮期就當 miss。傳統條目沒有 s，這個判斷對它們永遠不成立。
+      if (isEnvelope(hit) && !(hit.s !== undefined && hit.e <= Date.now())) {
         const remainingMs = hit.e - Date.now();
         if (remainingMs > 0) writeMemory(key, hit.v, remainingMs);
         return hit.v as T;
@@ -201,6 +259,181 @@ async function writeRedis(key: string, value: unknown, ttlMs: number): Promise<v
     });
   } catch {
     // best-effort; a shared-cache write failure shouldn't break the response
+  }
+}
+
+// ── 過期先回舊資料、背景更新（stale-while-revalidate）──────────────────────
+//
+// 2026-10-04 使用者要求：「快取過期後的第一位訪客要現場抓整個市場報價／現場等
+// AI 重算，這樣不行」。開了 staleWhileRevalidateMs 的 key：
+//  - 新鮮 → 直接回傳（跟傳統一樣）
+//  - 過期但在寬限期內 → **立刻回傳舊值**，背景重算一次寫回記憶體＋Redis
+//  - 超過寬限期／從來沒算過 → 跟傳統一樣現場算
+// 背景重算的保護：
+//  - 同一個 instance 同一個 key 只會有一個背景重算（backgroundRefreshes）
+//  - 跨 instance 先看 Redis 是不是別人已經更新好了，再用 Redis 鎖（SET NX PX）
+//    確保同一時間只有一個 instance 在重算——AI 快報這類重算很貴（AI 額度＋CPU）
+//  - 失敗（拋錯）不覆蓋舊值，退避一段時間才再試，避免上游掛掉時每個請求都重打
+//  - 算出「降級」結果（呼叫端用 isDegraded 判斷，例如 null／空清單／筆數過少）
+//    時也不覆蓋手上還能用的舊好值——延續「失敗不當成正常結果放大」的設計
+//  - Vercel serverless 回應送出後背景工作會被凍結，所以用 Next 官方的 after()
+//    （底層是 Vercel 的 waitUntil）讓重算在回應送出後仍能跑完；在 Next 請求範圍
+//    外（例如 node 腳本）呼叫時 after() 會拋錯，此時就只是一般的背景 promise。
+
+export interface SwrPolicy<S> {
+  /** 剛算出來的值要給多長的新鮮 TTL（降級值通常給較短的 TTL）。 */
+  ttlFor: (value: S) => number;
+  /** 這個值算不算降級（null／空／殘缺）。降級值不給寬限期——過期就是真的 miss，
+   *  跟傳統「降級短 TTL」行為一致；背景重算得到降級值時也不覆蓋舊的好值。 */
+  isDegraded?: (value: S) => boolean;
+  /** 跳過讀取直接重算並寫入（同 CachedOptions.forceRefresh）。 */
+  forceRefresh?: boolean;
+}
+
+/** 同 key 跨 instance 重算鎖的存活上限：最慢的背景重算（AI 快報、全市場技術
+ *  篩選）也在這之內；instance 中途被凍結時鎖會自己過期，不會永久卡住。 */
+const SWR_LOCK_MS = 90_000;
+/** 別的 instance 正在重算時，這個 instance 多久之後才會再嘗試。 */
+const SWR_LOCK_BUSY_BACKOFF_MS = 10_000;
+/** 背景重算拋錯後的退避時間：TTL 跟 60 秒取小、但至少 5 秒。 */
+function swrFailureBackoffMs(ttlMs: number): number {
+  return Math.max(5_000, Math.min(ttlMs, 60_000));
+}
+
+const backgroundRefreshes = new Map<string, Promise<void>>();
+const refreshBackoffUntil = new Map<string, number>();
+
+/**
+ * SWR 讀取核心。`cached()`（開了 staleWhileRevalidateMs）與 degradedCache.ts 的
+ * 各種降級變體共用這一份，各自只決定 TTL／降級判斷。本身不做同 key 去重——呼叫端
+ * 自己包單飛（cached() 已有 inFlight）。
+ */
+export async function readThroughSwr<S>(
+  key: string,
+  swrMs: number,
+  load: () => Promise<S>,
+  policy: SwrPolicy<S>
+): Promise<S> {
+  if (policy.forceRefresh) return loadAndStoreSwr(key, swrMs, load, policy);
+
+  const local = readMemoryWithStaleness(key);
+  if (local.state === "fresh") return local.value as S;
+  if (local.state === "stale") {
+    refreshInBackground(key, swrMs, load, policy, local.value as S);
+    return local.value as S;
+  }
+
+  if (kvEnabled && redis) {
+    try {
+      const hit = await redis.get<CacheEnvelope>(key);
+      if (isEnvelope(hit)) {
+        const now = Date.now();
+        const staleUntil = hit.s ?? hit.e;
+        if (hit.e > now) {
+          writeMemoryEntry(key, hit.v, hit.e, staleUntil);
+          return hit.v as S;
+        }
+        if (staleUntil > now) {
+          writeMemoryEntry(key, hit.v, hit.e, staleUntil);
+          refreshInBackground(key, swrMs, load, policy, hit.v as S);
+          return hit.v as S;
+        }
+      }
+    } catch {
+      // Redis unreachable; fall through to computing a fresh value below
+    }
+  }
+
+  return loadAndStoreSwr(key, swrMs, load, policy);
+}
+
+async function loadAndStoreSwr<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>): Promise<S> {
+  const value = await load();
+  await storeSwr(key, value, swrMs, policy);
+  return value;
+}
+
+async function storeSwr<S>(key: string, value: S, swrMs: number, policy: SwrPolicy<S>): Promise<void> {
+  const now = Date.now();
+  const expiresAt = now + policy.ttlFor(value);
+  const staleUntil = expiresAt + (policy.isDegraded?.(value) ? 0 : swrMs);
+  writeMemoryEntry(key, value, expiresAt, staleUntil);
+  if (!(kvEnabled && redis)) return;
+  if (value instanceof Map || value instanceof Set) {
+    console.error(`[cache] not storing a ${value.constructor.name} in Redis for key "${key}" — JSON can't represent it; use cachedMap`);
+    return;
+  }
+  try {
+    await redis.set(key, { v: value, e: expiresAt, w: now, s: staleUntil } satisfies CacheEnvelope, {
+      ex: Math.max(1, Math.round((staleUntil - now) / 1000)),
+    });
+  } catch {
+    // best-effort; a shared-cache write failure shouldn't break the response
+  }
+}
+
+function refreshInBackground<S>(key: string, swrMs: number, load: () => Promise<S>, policy: SwrPolicy<S>, staleValue: S): void {
+  if (backgroundRefreshes.has(key)) return;
+  const backoff = refreshBackoffUntil.get(key);
+  if (backoff !== undefined && backoff > Date.now()) return;
+  const task = runBackgroundRefresh(key, swrMs, load, policy, staleValue).finally(() => {
+    backgroundRefreshes.delete(key);
+  });
+  backgroundRefreshes.set(key, task);
+  keepAliveAfterResponse(task);
+}
+
+async function runBackgroundRefresh<S>(
+  key: string,
+  swrMs: number,
+  load: () => Promise<S>,
+  policy: SwrPolicy<S>,
+  staleValue: S
+): Promise<void> {
+  const lockKey = `swr-lock:${key}`;
+  let locked = false;
+  if (kvEnabled && redis) {
+    try {
+      // 別的 instance 可能剛更新好（這邊只是記憶體裡還留著舊值）：直接沿用，不重算。
+      const current = await redis.get<CacheEnvelope>(key);
+      if (isEnvelope(current) && current.e > Date.now()) {
+        writeMemoryEntry(key, current.v, current.e, current.s ?? current.e);
+        return;
+      }
+      const acquired = await redis.set(lockKey, Date.now(), { nx: true, px: SWR_LOCK_MS });
+      if (acquired === null) {
+        refreshBackoffUntil.set(key, Date.now() + SWR_LOCK_BUSY_BACKOFF_MS);
+        return;
+      }
+      locked = true;
+    } catch {
+      // Redis 暫時不通：照樣在這個 instance 重算（fail open）
+    }
+  }
+  try {
+    const value = await load();
+    if (policy.isDegraded?.(value) && !policy.isDegraded(staleValue)) {
+      // 降級結果不蓋掉還能用的舊好值；等降級 TTL 過了再試（跟傳統路徑的重試節奏一樣）。
+      refreshBackoffUntil.set(key, Date.now() + policy.ttlFor(value));
+      return;
+    }
+    await storeSwr(key, value, swrMs, policy);
+    refreshBackoffUntil.delete(key);
+  } catch (err) {
+    refreshBackoffUntil.set(key, Date.now() + swrFailureBackoffMs(policy.ttlFor(staleValue)));
+    console.error(`[cache] background refresh failed for "${key}" (still serving the stale value):`, err);
+  } finally {
+    if (locked && redis) await redis.del(lockKey).catch(() => undefined);
+  }
+}
+
+/** 讓回應送出後背景工作仍能跑完（Vercel：waitUntil）。不在 Next 請求範圍內時
+ *  after() 會拋錯，此時 promise 本來就會自己跑完（例如本機腳本），忽略即可。 */
+function keepAliveAfterResponse(task: Promise<unknown>): void {
+  try {
+    after(task);
+  } catch {
+    // outside a Next request scope — nothing to extend
   }
 }
 
