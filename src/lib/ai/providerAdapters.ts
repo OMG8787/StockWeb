@@ -140,7 +140,11 @@ const groqAdapter: ProviderAdapter = {
 const anthropicAdapter: ProviderAdapter = {
   id: "anthropic",
   label: "Claude",
-  isConfigured: () => Boolean(process.env.ANTHROPIC_API_KEY),
+  // 本專案最高原則是「不能有任何花費」，Claude API 是唯一按用量計費的供應商，所以
+  // 光是環境變數裡有金鑰不夠：還要明確設 ALLOW_PAID_AI=true 才會啟用。2026-10-04
+  // 發現 Vercel 上其實留著一把 ANTHROPIC_API_KEY（9/9 新增，使用者不記得自己有用過 Claude API），
+  // 在這道閘門之前，只要 Gemini／NVIDIA／Groq 全部失敗，系統就會悄悄改打這把金鑰而產生費用。
+  isConfigured: () => Boolean(process.env.ANTHROPIC_API_KEY) && process.env.ALLOW_PAID_AI === "true",
   canHandle: () => true,
   // 接入前 Anthropic 沒有設逾時（SDK 預設很長）；這裡只用整條鏈剩下的時間當上限。
   preferredTimeoutMs: () => Number.POSITIVE_INFINITY,
