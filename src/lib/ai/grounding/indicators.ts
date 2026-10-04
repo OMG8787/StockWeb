@@ -61,6 +61,9 @@ export function describeTechState(item: TechScreenItem): string {
 
 /** 回看最近幾個交易日的 MACD／KD 交叉紀錄用的天數。 */
 const RECENT_CROSS_DAYS = 5;
+/** 個股資料裡這一行的固定標題。askSystemCompose.ts 靠它判斷要不要帶「不可說無法回溯」規則，
+ *  所以兩邊一律 import 這個常數，不可各自手寫字串（改字就會讓規則悄悄消失）。 */
+export const RECENT_CROSSES_TITLE = `近${RECENT_CROSS_DAYS}個交易日逐日的MACD／KD交叉紀錄`;
 
 /**
  * 近幾個交易日「每一天」的 MACD／KD 交叉紀錄（把K線截到那一天再算一次指標）。

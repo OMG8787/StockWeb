@@ -6,6 +6,7 @@
 // 是「看實際組進 userContent 的資料文字裡有沒有那個區塊」，而不是猜使用者意圖——
 // 資料有附才帶規則，資料沒附時規則本來就用不到。
 import { HISTORY_SECTION_TITLE } from "./grounding/history";
+import { RECENT_CROSSES_TITLE } from "./grounding/indicators";
 import { MARKET_HISTORY_TITLE } from "./marketHistoryText";
 import {
   SYSTEM_ROLE,
@@ -44,7 +45,7 @@ import {
 
 /** 這些字串必須跟各 grounding 產生的區塊文字一致；改那邊的標題要一起改這裡。 */
 export const BLOCK_MARKERS = {
-  recentCrosses: "近5個交易日逐日的MACD／KD交叉紀錄", // grounding/stock.ts
+  recentCrosses: RECENT_CROSSES_TITLE, // grounding/indicators.ts（共用常數）
   chipsRatios: "籌碼比例（", // grounding/chipsRatios.ts
   socialSentiment: "社群情緒（", // grounding/sentiment.ts
   institutional: "三大法人", // grounding/stock.ts、movers.ts、techScreen.ts
