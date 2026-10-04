@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import WatchlistTable, { type HoldingItem, type WatchlistQuote } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
-import type { Market, Quote } from "@/lib/data";
+import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
@@ -16,6 +16,13 @@ import {
   type WatchlistItem,
 } from "@/lib/watchlist";
 import { sortByFineIndustry } from "@/lib/fineIndustry";
+import { ensureChipsRatios } from "@/lib/useChipsRatios";
+import {
+  QUOTES_BATCH_MAX_SYMBOLS,
+  quoteBatchKey,
+  type QuoteWithSector,
+  type QuotesBatchResponse,
+} from "@/lib/quotesBatchApi";
 
 function subscribe(callback: () => void) {
   window.addEventListener(WATCHLIST_CHANGED_EVENT, callback);
@@ -96,6 +103,30 @@ function exportCsv(items: HoldingItem[]) {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * 一次批次取得多檔報價（超過上限就分批並行）。整批請求失敗時該批每一檔都視為抓不到，
+ * 交給呼叫端的「失敗重試一次」處理。
+ */
+async function fetchQuotesBatch(targets: WatchlistItem[]): Promise<Map<string, QuoteWithSector | null>> {
+  const out = new Map<string, QuoteWithSector | null>();
+  const chunks: WatchlistItem[][] = [];
+  for (let i = 0; i < targets.length; i += QUOTES_BATCH_MAX_SYMBOLS) chunks.push(targets.slice(i, i + QUOTES_BATCH_MAX_SYMBOLS));
+  await Promise.all(
+    chunks.map(async (group) => {
+      try {
+        const items = group.map((w) => quoteBatchKey(w.market, w.symbol)).join(",");
+        const res = await fetch(`/api/quotes?items=${encodeURIComponent(items)}`);
+        if (!res.ok) return;
+        const body = (await res.json()) as QuotesBatchResponse;
+        for (const [key, q] of Object.entries(body.items)) out.set(key, q);
+      } catch {
+        // 整批失敗：這批每一檔都留在 out 之外＝抓不到。
+      }
+    })
+  );
+  return out;
+}
+
 export default function WatchlistSection() {
   const list = useSyncExternalStore(
     subscribe,
@@ -119,6 +150,18 @@ export default function WatchlistSection() {
   const scopeOf = (w: { market: Market; symbol: string }): MarketScope =>
     w.market === "TW" && emergingSymbols.current.has(w.symbol.toUpperCase()) ? "TW-EMERGING" : w.market;
 
+  // 籌碼比例（大戶／外資／融資）跟報價**同時**發出：原本要等報價回來、表格掛載後
+  // WatchlistTable 才去要，整張表最後一段要多等一輪。這裡用關注清單本身（localStorage，
+  // 不需要報價）的台股代號直接先登記，走同一個 store／批次 API／前端快取，表格掛載後
+  // 的 ensureChipsRatios／逐列登記會直接命中，不會重打。
+  const twSymbolsKey = list
+    .filter((w) => w.market === "TW")
+    .map((w) => w.symbol.toUpperCase())
+    .join(",");
+  useEffect(() => {
+    if (twSymbolsKey) void ensureChipsRatios(twSymbolsKey.split(","));
+  }, [twSymbolsKey]);
+
   // 這份清單會同時混著台股跟美股，兩邊交易時段完全不同，所以刷新節奏是
   // 「各市場各自判斷」：台股 08:30~14:30 每 10 秒重抓、收盤後停、14:40 補一次；
   // 美股維持原本的盤中每 20 秒；興櫃則是自己的 09:00~15:10。掛載那一次一律全部
@@ -135,67 +178,52 @@ export default function WatchlistSection() {
       if (list.length === 0) return;
       const targets = list.filter((w) => shouldRefreshSymbol(scopeOf(w), ctx.now, ctx));
       if (targets.length === 0) return;
-      const results = await Promise.all(
-        targets.map(async (w): Promise<WatchlistQuote> => {
-          // 這一檔的報價抓失敗時**不再回 null**（回 null 會讓它整列從畫面上
-          // 消失，使用者以為自己的關注清單資料掉了）。先自己重試一次（多數失敗
-          // 是上游那一刻剛好抽到一次逾時，重試就會好），真的兩次都失敗就回一個
-          // 報價欄位全部為 null 的「佔位列」，由 WatchlistTable 顯示成
-          // 「資料暫缺」——名稱/代號/市場都拿 localStorage 裡的關注清單資料，
-          // 不需要報價也一定有。2026-09-21 根治，取代原本只有重試的緩解措施。
-          // /api/quote/[symbol] 這條路由是伺服器端執行，可以直接查官方股票
-          // 清單附加真實產業別（跟 /api/search 的批次資料同一個來源）回傳；
-          // 不能直接在 client 端 import findInUniverse 來查——那個函式所在的
-          // lib/data 模組圖會把 node:tls 之類的 server-only 依賴一起拉進
-          // 瀏覽器端 bundle，導致 build 失敗（實測驗證過）。之前這裡寫死
-          // 「自選」，就算 fineIndustry.ts 找不到細分族群、想退回官方產業別
-          // 當備案，備案本身也是假的、等於沒用。
-          const fetchOnce = async (): Promise<(Quote & { sector?: string }) | null> => {
-            try {
-              const res = await fetch(`/api/quote/${encodeURIComponent(w.symbol)}?market=${w.market}`);
-              return res.ok ? await res.json() : null;
-            } catch {
-              return null;
-            }
-          };
-          let q = await fetchOnce();
-          if (!q) {
-            await new Promise((r) => setTimeout(r, 1200));
-            q = await fetchOnce();
-          }
-          if (!q) {
-            return {
-              symbol: w.symbol,
-              market: w.market,
-              name: w.name,
-              sector: "自選",
-              price: null,
-              changePercent: null,
-              volume: null,
-              turnover: null,
-              volumeTrend: "neutral",
-            } satisfies WatchlistQuote;
-          }
-          // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。
-          if (q.board === "emerging") emergingSymbols.current.add(q.symbol.toUpperCase());
+      // 2026-10-04 改成一次批次（/api/quotes，見 lib/data/quoteBatch.ts）：原本逐檔打
+      // /api/quote/[symbol]，表格要 4~6 秒才完整出現。抓失敗的檔**不回 null**（回 null
+      // 會讓它整列從畫面上消失，使用者以為關注清單資料掉了）：失敗的那幾檔 1.2 秒後再
+      // 用同一支批次 API 重試一次（多數失敗是上游那一刻剛好逾時，伺服器端失敗只快取 1 秒，
+      // 重試會真的重抓），兩次都失敗才回報價欄位全為 null 的「佔位列」，由 WatchlistTable
+      // 顯示「資料暫缺」——名稱/代號/市場用 localStorage 的關注清單資料。產業別由伺服器端
+      // 查官方股票清單附加（client 端不能 import findInUniverse：那個模組圖會把 node:tls
+      // 之類 server-only 依賴拉進瀏覽器 bundle，實測 build 會失敗）。
+      let quotes = await fetchQuotesBatch(targets);
+      const failed = targets.filter((w) => !quotes.get(quoteBatchKey(w.market, w.symbol)));
+      if (failed.length > 0) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const retried = await fetchQuotesBatch(failed);
+        quotes = new Map([...quotes, ...Array.from(retried).filter(([, q]) => q)]);
+      }
+      const results = targets.map((w): WatchlistQuote => {
+        const q = quotes.get(quoteBatchKey(w.market, w.symbol));
+        if (!q) {
           return {
-            symbol: q.symbol,
-            market: q.market,
-            name: q.name,
-            sector: q.sector || "自選",
-            price: q.price,
-            changePercent: q.changePercent,
-            volume: q.volume,
-            turnover: q.price * q.volume,
-            // This view fetches one quote at a time (/api/quote/[symbol]),
-            // not the batched search list that has the trailing-average
-            // volume map alongside it (see lib/data/volumeHistory.ts) — so
-            // there's genuinely no basis to compute a real volumeTrend here.
-            // "neutral" is honest (no signal), not a fabricated guess.
+            symbol: w.symbol,
+            market: w.market,
+            name: w.name,
+            sector: "自選",
+            price: null,
+            changePercent: null,
+            volume: null,
+            turnover: null,
             volumeTrend: "neutral",
           } satisfies WatchlistQuote;
-        })
-      );
+        }
+        // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。
+        if (q.board === "emerging") emergingSymbols.current.add(q.symbol.toUpperCase());
+        return {
+          symbol: q.symbol,
+          market: q.market,
+          name: q.name,
+          sector: q.sector || "自選",
+          price: q.price,
+          changePercent: q.changePercent,
+          volume: q.volume,
+          turnover: q.price * q.volume,
+          // 這裡是單檔報價，沒有搜尋列表那份「近期平均量」可比，算不出真的
+          // volumeTrend（見 lib/data/volumeHistory.ts）；"neutral" 是誠實的「沒有訊號」。
+          volumeTrend: "neutral",
+        } satisfies WatchlistQuote;
+      });
       setItems((prev) => {
         const keyOf = (i: WatchlistQuote) => `${i.market}:${i.symbol.toUpperCase()}`;
         const prevByKey = new Map((prev ?? []).map((i) => [keyOf(i), i]));
