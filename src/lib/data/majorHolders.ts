@@ -37,7 +37,7 @@ interface WeekSnapshot {
 }
 
 interface WeeksBlob {
-  /** 新到舊，最多 2 週（本週、上一週） */
+  /** 新到舊（本週、上一週、…） */
   weeks: WeekSnapshot[];
 }
 
@@ -46,7 +46,18 @@ const TDCC_QUERY_URL = "https://www.tdcc.com.tw/portal/zh/smWeb/qryStock";
 
 const LATEST_TTL_MS = 6 * 60 * 60_000;
 const HISTORY_KEY = "major-holders:TW:weeks:v1";
-const HISTORY_TTL_MS = 60 * 24 * 60 * 60_000;
+/**
+ * 週快照最多保留幾週（2026-10-04 由 2 週延長到 12 週，讓 AI 能看大戶持股的週趨勢）。
+ * Redis 容量估算：集保 CSV 約 4,100 檔有第15級資料，每檔存 [人數,股數,比例] 約 32 bytes，
+ * 一週約 130KB，12 週約 1.6MB（Upstash 免費額度 256MB，目前總共用約 4MB）。
+ * 只有「本週＋上一週」會放進 6 小時熱路徑快取（loadWeeks 回傳值），完整 12 週只存在
+ * HISTORY_KEY、由 getMajorHoldingHistory 專門讀，列表／單檔報價的讀取量不會變大。
+ */
+export const MAJOR_HOLDER_WEEKS_KEPT = 12;
+/** 熱路徑（getWeeks）只需要本週與上一週 */
+const HOT_PATH_WEEKS = 2;
+/** 12 週＝84 天；TTL 留到 120 天，每週換週時寫入都會重新計時，遠大於保留期限 */
+const HISTORY_TTL_MS = 120 * 24 * 60 * 60_000;
 const WEB_WEEK_TTL_MS = 30 * 24 * 60 * 60_000;
 
 const MAJOR_TIER = "15";
@@ -106,11 +117,12 @@ async function loadWeeks(): Promise<WeeksBlob> {
     (await peekCached<WeeksBlob>(HISTORY_KEY).catch(() => undefined)) ??
     (await peekCached<WeeksBlob>(HISTORY_KEY).catch(() => undefined));
   const older = (history?.weeks ?? []).filter((w) => w.date < latest.date);
-  const weeks = [latest, ...older].slice(0, 2);
+  const weeks = [latest, ...older].slice(0, MAJOR_HOLDER_WEEKS_KEPT);
   if (history?.weeks[0]?.date !== latest.date) {
     await writeCached(HISTORY_KEY, { weeks } satisfies WeeksBlob, HISTORY_TTL_MS).catch(() => undefined);
   }
-  return { weeks };
+  // 回傳值同時是 getWeeks() 的 6 小時快取內容，只放本週與上一週（見 MAJOR_HOLDER_WEEKS_KEPT）。
+  return { weeks: weeks.slice(0, HOT_PATH_WEEKS) };
 }
 
 /** 集保每週公布一次；兩份快照相隔超過這個天數，代表中間有一週本站沒解析到
@@ -261,6 +273,29 @@ export async function getMajorHoldingsBatch(symbols: string[]): Promise<Map<stri
     if (holding) out.set(symbol, holding);
   }
   return out;
+}
+
+export interface MajorHoldingWeek {
+  /** YYYY-MM-DD */
+  date: string;
+  holdingPercent: number;
+}
+
+/**
+ * 這一檔大戶持股比例近幾週走勢（舊到新，最後一筆＝最新一週），最多 maxWeeks 週，
+ * 只含本站已累積到的週（可能不足；週與週之間若有缺週，日期會不連續，呼叫端照實列日期）。
+ * 讀不到快照或該檔不在集保清單回空陣列。
+ * 前提（已在內部處理，呼叫端不用管）：週快照是 getWeeks() 載入時順便寫入的，所以先 await getWeeks()。
+ */
+export async function getMajorHoldingHistory(symbol: string, maxWeeks = 6): Promise<MajorHoldingWeek[]> {
+  await getWeeks();
+  const blob = await peekCached<WeeksBlob>(HISTORY_KEY).catch(() => undefined);
+  const out: MajorHoldingWeek[] = [];
+  for (const w of (blob?.weeks ?? []).slice(0, maxWeeks)) {
+    const row = w.rows[symbol];
+    if (row) out.push({ date: toIso(w.date), holdingPercent: row[2] });
+  }
+  return out.reverse();
 }
 
 /** 大戶（1000張以上）持股＋上一週；本週資料抓不到或代號不在集保清單裡回 undefined。

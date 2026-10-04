@@ -2,6 +2,7 @@ import { getChart } from "@/lib/data";
 import type { Candle, ChipsRatios, Quote } from "@/lib/data";
 import { getTwChipsHistory, RATIO_DAYS, type TwChipsDay } from "@/lib/data/chipsHistory";
 import { getTwFundamentalsHistory, getUsFundamentalsHistory, type FundamentalsHistory } from "@/lib/data/fundamentalsHistory";
+import { getMajorHoldingHistory, type MajorHoldingWeek } from "@/lib/data/majorHolders";
 import { ensureTwUniverseWarm } from "@/lib/data/universe";
 import { resolveTwExchange } from "@/lib/data/symbols";
 import { HISTORY_PERIOD_MAX_DAYS, type HistoryPeriod } from "../intent";
@@ -12,7 +13,7 @@ import { pointDelta } from "./chipsRatios";
  * RULE_USE_HISTORICAL_CONTEXT）。所有數字都在這裡由程式算好，不丟原始K線給 AI：
  * 1. 價格：近1週/1月/3月/6月/1年報酬、52週區間位置、近3個月最大回檔、量能比、相對大盤
  * 2. 台股籌碼：三大法人近5/10/20日累計與連續買賣超天數、融資使用率與外資持股比例近幾日走勢、
- *    大戶（週資料）累積了幾週
+ *    大戶（週資料）近幾週持股比例走勢（最多 6 週，不足照實寫累積幾週）
  * 3. 基本面：月營收年增率、季EPS多期走勢
  * 4. 使用者明確問過去某天/某段期間時（intent.ts detectHistoryPeriod）：該期間逐日明細
  * 每一段各自 fail open：缺資料就整段省略。整個區塊目標 ≤600 字（多檔比較時更短）。
@@ -25,6 +26,8 @@ const CHIPS_PARTIAL_DEADLINE_MS = 8000;
 
 const TRADING_DAYS = { week: 5, month: 21, quarter: 63, half: 126 } as const;
 const DRAWDOWN_WINDOW = 63;
+/** 大戶持股週走勢最多列幾週 */
+const MAJOR_WEEKS_SHOWN = 6;
 const VOLUME_SHORT = 20;
 const VOLUME_LONG = 60;
 const RELATIVE_WINDOWS = [5, 20] as const;
@@ -170,7 +173,13 @@ function streak(values: Array<number | undefined>): string | undefined {
   return `連${latest > 0 ? "買" : "賣"}${n === values.length ? "至少" : ""}${n}天`;
 }
 
-export function describeChipsHistory(days: TwChipsDay[], ratios: ChipsRatios | null, compact: boolean): string[] {
+export function describeChipsHistory(
+  days: TwChipsDay[],
+  ratios: ChipsRatios | null,
+  compact: boolean,
+  /** 大戶持股近幾週（舊到新，getMajorHoldingHistory）；沒給或空就退回只用本週＋上一週 */
+  majorWeeks: MajorHoldingWeek[] = []
+): string[] {
   const lines: string[] = [];
   // 從最後一個有資料的日子（最新幾天可能是「還沒公布」）往回取「連續都有資料」的那一段；
   // 更早的天數沒抓到（冷快取逾時、限流）就不顯示那個累計區間，不拿缺資料的天數硬加。
@@ -217,10 +226,24 @@ export function describeChipsHistory(days: TwChipsDay[], ratios: ChipsRatios | n
   }
   const major = ratios?.majorHolders;
   if (major && !compact) {
-    const weeks = major.prevDate ? [major.prevDate, major.date] : [major.date];
-    lines.push(
-      `- 大戶持股（集保週資料）：本站只累積了${weeks.length}週（${weeks.map(mmdd).join("、")}那週），沒有更長的週趨勢`
-    );
+    const weeks: MajorHoldingWeek[] =
+      majorWeeks.length >= 2
+        ? majorWeeks
+        : major.prevDate && major.prevHoldingPercent != null
+          ? [
+              { date: major.prevDate, holdingPercent: major.prevHoldingPercent },
+              { date: major.date, holdingPercent: major.holdingPercent },
+            ]
+          : [{ date: major.date, holdingPercent: major.holdingPercent }];
+    if (weeks.length >= 2) {
+      const first = weeks[0];
+      const last = weeks[weeks.length - 1];
+      lines.push(
+        `- 大戶持股比例（集保週資料，持股1000張以上）：本站累積了${weeks.length}週，${weeks.map((w) => `${mmdd(w.date)}那週${w.holdingPercent.toFixed(2)}%`).join("→")}，${pointDelta(last.holdingPercent, first.holdingPercent, `${mmdd(first.date)}那週`)}；週資料只能看到這幾週，更早沒有`
+      );
+    } else {
+      lines.push(`- 大戶持股（集保週資料）：本站只累積了1週（${mmdd(major.date)}那週），沒有週趨勢可比`);
+    }
   }
   return lines;
 }
@@ -340,12 +363,16 @@ export async function buildHistoryContext(input: HistoryContextInput): Promise<s
   const chipsExchange = twExchange === "TWSE" ? "TWSE" : twExchange === "TPEx" ? "TPEX" : undefined;
   const tradingDates = candles.map((c) => c.time);
 
-  const [indexChart, chipsDays, fundamentals] = await Promise.all([
+  const [indexChart, chipsDays, fundamentals, majorWeeks] = await Promise.all([
     withBudget(getChart(indexSymbol, "3m", "US"), null),
     chipsExchange && quote.board !== "emerging" && tradingDates.length > 0
       ? withBudget(getTwChipsHistory(quote.symbol, chipsExchange, tradingDates, CHIPS_PARTIAL_DEADLINE_MS), [] as TwChipsDay[])
       : Promise.resolve([] as TwChipsDay[]),
     withBudget(isTw ? getTwFundamentalsHistory(quote.symbol, twExchange) : getUsFundamentalsHistory(quote.symbol), null),
+    // 大戶持股近 MAJOR_WEEKS_SHOWN 週走勢；compact 版本不列大戶，不用查。
+    isTw && !compact && chipsRatios?.majorHolders
+      ? withBudget(getMajorHoldingHistory(quote.symbol, MAJOR_WEEKS_SHOWN), [] as MajorHoldingWeek[], 3000)
+      : Promise.resolve([] as MajorHoldingWeek[]),
   ]);
 
   const lines: string[] = [];
@@ -355,7 +382,7 @@ export async function buildHistoryContext(input: HistoryContextInput): Promise<s
     index: indexChart?.candles.length ? { name: indexName, candles: indexChart.candles } : undefined,
   });
   if (price) lines.push(price);
-  if (isTw) lines.push(...describeChipsHistory(chipsDays, chipsRatios, compact));
+  if (isTw) lines.push(...describeChipsHistory(chipsDays, chipsRatios, compact, majorWeeks));
   lines.push(...describeFundamentalsHistory(fundamentals, isTw, compact));
   if (period) {
     const detail = describePeriodDetail(period, candles, chipsDays, isTw);
