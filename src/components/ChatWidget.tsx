@@ -6,6 +6,7 @@ import { getWatchlist, WATCHLIST_CHANGED_EVENT } from "@/lib/watchlist";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import MarkdownLite from "./MarkdownLite";
 import AnswerFeedback from "./AnswerFeedback";
+import SiteFeedbackForm from "./SiteFeedbackForm";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -38,6 +39,8 @@ const CHAT_TEXTAREA_MAX_HEIGHT_PX = 112;
 export default function ChatWidget() {
   const watchlist = useSyncExternalStore(subscribeToWatchlist, getWatchlist, () => EMPTY_WATCHLIST);
   const [open, setOpen] = useState(false);
+  // 「🛠 回報網站」表單（整站問題／建議，跟每則回答下方的📝回報不同）
+  const [showSiteFeedback, setShowSiteFeedback] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -183,6 +186,13 @@ export default function ChatWidget() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowSiteFeedback((v) => !v)}
+                className="text-xs text-(--text-muted) hover:text-(--text-primary)"
+                title="回報整個網站的問題或建議（可打字或語音）"
+              >
+                🛠 回報網站
+              </button>
               {messages.length > 0 && (
                 <button
                   onClick={() => {
@@ -200,6 +210,8 @@ export default function ChatWidget() {
               </button>
             </div>
           </div>
+
+          {showSiteFeedback && <SiteFeedbackForm onClose={() => setShowSiteFeedback(false)} />}
 
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {messages.length === 0 && (

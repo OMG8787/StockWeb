@@ -1,4 +1,4 @@
-"""列出正式站 AI 回答回饋（👍／👎／📝回報）中「比上次檢查更新」的項目。
+"""列出正式站使用者回饋：AI 回答的 👍／👎／📝回報（up/down/report），以及 AI 面板「🛠 回報網站」的整站問題／建議（site）中「比上次檢查更新」的項目。
 
 用法：py scripts/check-feedback.py [上次檢查的 ISO 時間，例如 2026-10-04T14:00:00Z]
 不給時間就列最近 50 筆。時間一律另外換算成台北時間，方便對照當時的盤勢
@@ -27,7 +27,7 @@ for i in items:
         local = "?"
     sys.stdout.reconfigure(encoding="utf-8")
     print("-" * 60)
-    print(f"[{i.get('rating')}] 台北 {local}（UTC {at}） 股票={i.get('symbol', '-')}")
+    print(f"[{i.get('rating')}] 台北 {local}（UTC {at}） 股票={i.get('symbol', '-')} 頁面={i.get('page', '-')}")
     print(f"問：{i.get('question', '')[:200]}")
     print(f"答：{i.get('answer', '')[:300]}")
     if i.get("reason"):

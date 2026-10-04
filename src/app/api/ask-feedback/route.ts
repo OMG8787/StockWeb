@@ -6,7 +6,7 @@ import { kvEnabled, redis } from "@/lib/data/kv";
  *
  * - POST：使用者真的按了 👍／👎 才會呼叫，一次最多 2 個 Redis 指令（LPUSH + LTRIM，
  *   用 pipeline 合成一次 HTTP 請求）。問答本身（/api/ask）完全不寫任何東西。
- * - GET：`/api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report），新到舊回傳最近的回饋（1 個 LRANGE）。
+ * - GET：`/api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report／site），新到舊回傳最近的回饋（1 個 LRANGE）。
  * - 沒有 Redis 時安靜失敗：POST 仍回 ok（前端照常顯示已送出），GET 回空陣列。
  */
 const FEEDBACK_KEY = "ask-feedback:v1";
@@ -15,7 +15,8 @@ const MAX_TEXT = 2000;
 const MAX_REASON = 200;
 /** 「回報問題／建議」是使用者自由描述（可用語音），比 👎 的一句原因長。 */
 const MAX_REPORT = 1000;
-const RATINGS = ["up", "down", "report"] as const;
+// site＝AI 面板「🛠 回報網站」的整站問題／建議（不屬於某一則回答，所以 answer 可空、帶 page）
+const RATINGS = ["up", "down", "report", "site"] as const;
 type Rating = (typeof RATINGS)[number];
 function isRating(v: unknown): v is Rating {
   return typeof v === "string" && (RATINGS as readonly string[]).includes(v);
@@ -28,6 +29,8 @@ interface FeedbackEntry {
   answer: string;
   reason?: string;
   symbol?: string;
+  /** rating＝site 時：回報當下所在頁面（路徑＋查詢字串） */
+  page?: string;
   at: string;
 }
 
@@ -54,17 +57,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "格式錯誤" }, { status: 400 });
   }
   if (!isRating(body.rating)) {
-    return NextResponse.json({ error: "rating 必須是 up、down 或 report" }, { status: 400 });
+    return NextResponse.json({ error: "rating 必須是 up、down、report 或 site" }, { status: 400 });
   }
   const answer = clip(body.answer, MAX_TEXT);
-  if (!answer) {
+  if (!answer && body.rating !== "site") {
     return NextResponse.json({ error: "缺少 answer" }, { status: 400 });
   }
-  const reason = clip(body.reason, body.rating === "report" ? MAX_REPORT : MAX_REASON).trim();
-  if (body.rating === "report" && !reason) {
+  const isFreeText = body.rating === "report" || body.rating === "site";
+  const reason = clip(body.reason, isFreeText ? MAX_REPORT : MAX_REASON).trim();
+  if (isFreeText && !reason) {
     return NextResponse.json({ error: "回報內容不可空白" }, { status: 400 });
   }
   const symbol = clip(body.symbol, 20).trim();
+  const page = clip(body.page, 200).trim();
   // at 以伺服器時間為準（客戶端時鐘不可信），客戶端傳的 at 不採用。
   const entry: FeedbackEntry = {
     rating: body.rating,
@@ -72,6 +77,7 @@ export async function POST(req: NextRequest) {
     answer,
     ...(reason ? { reason } : {}),
     ...(symbol ? { symbol } : {}),
+    ...(page ? { page } : {}),
     at: new Date().toISOString(),
   };
 
@@ -90,7 +96,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? Math.floor(limitParam) : 50, 1), MAX_ENTRIES);
   const rating = req.nextUrl.searchParams.get("rating");
   if (rating !== null && !isRating(rating)) {
-    return NextResponse.json({ error: "rating 必須是 up、down 或 report" }, { status: 400 });
+    return NextResponse.json({ error: "rating 必須是 up、down、report 或 site" }, { status: 400 });
   }
   if (!redis) {
     return NextResponse.json({ enabled: false, count: 0, items: [] });
