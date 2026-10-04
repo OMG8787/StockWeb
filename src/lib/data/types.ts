@@ -43,6 +43,28 @@ export interface Quote {
    * 一部分，不是可有可無的註解。
    */
   priceNote?: string;
+  /**
+   * 這筆報價所屬的交易日（YYYY-MM-DD，台北日期），只有台股帶值（MIS 的 `d`／興櫃的
+   * TradeDay／日K的日期）。非交易時段用它判斷上游資料是不是「重置/測試」狀態，
+   * 見 pollingSchedule.ts 的 classifyTwQuoteTradeDate()。
+   */
+  tradeDate?: string;
+}
+
+/**
+ * 全市場「最近一個交易日」盤後日行情的一筆（TWSE STOCK_DAY_ALL／TPEx
+ * tpex_mainboard_quotes）。非交易時段 MIS 資料不可信時用它組報價，
+ * 見 twOffHoursQuote.ts。volume 單位是股。
+ */
+export interface TwDailyBar {
+  date: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  /** close − 官方漲跌價差（除權息日即為參考價，跟官方漲跌一致） */
+  prevClose: number;
+  volume: number;
 }
 
 /** twse.ts/tpex.ts 共用：今天累積成交量為0時，rowToQuote()算出來的價格/漲跌其實是

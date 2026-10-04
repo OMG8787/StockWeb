@@ -55,6 +55,8 @@ export const EMERGING_LIVE_START_MINUTES = 9 * 60;
 export const EMERGING_CLOSE_MINUTES = 15 * 60;
 /** 15:10 台北時間——輪詢多留 10 分鐘，讓最後一輪抓到結算後的最終數字。 */
 export const EMERGING_LIVE_END_MINUTES = 15 * 60 + 10;
+/** 13:30 台北時間——上市櫃一般交易收盤。 */
+export const TW_CLOSE_MINUTES = 13 * 60 + 30;
 /** 14:30 台北時間——盤後定價交易結束，之後當日數字不會再變動。 */
 export const TW_LIVE_END_MINUTES = 14 * 60 + 30;
 /** 14:40 台北時間——收盤後補抓一次最終數字的時間點。 */
@@ -158,6 +160,43 @@ export function isEmergingQuoteWindow(now: Date = new Date()): boolean {
   const clock = taipeiClock(now);
   if (!isTwWeekday(clock)) return false;
   return clock.minutes >= EMERGING_LIVE_START_MINUTES && clock.minutes < EMERGING_LIVE_END_MINUTES;
+}
+
+/**
+ * 台股報價「所屬交易日」相對於現在的狀態——非交易時段判斷上游即時報價（MIS）還能不能信。
+ *
+ * 2026-10-04（週日）正式站實測：MIS 在休市期間某些時段回傳的不是最近交易日的行情，而是
+ * 「下一個交易日重置後／測試」狀態（2330 開高 2750＝漲停價、量 903 張且一直在跳；6488
+ * 價格每次載入都不同），原樣顯示成當日報價。同一天晚上 MIS 又回到正確的 10/02 資料，
+ * 所以不能只看時間、也不能只看欄位，要看資料自己的交易日（MIS `d`／興櫃 TradeDay）：
+ *  - "live"：在該板別的輪詢窗內（上市櫃 08:30~14:30、興櫃 09:00~15:10）——盤中邏輯
+ *    完全不變，這個函式直接回 live，不看日期。
+ *  - "settled-today"：交易日＝今天（平日）且已過收盤（上市櫃 13:30、興櫃 15:00）——
+ *    就是今天的最終收盤資料，可信。
+ *  - "earlier-session"：交易日早於今天的平日——多半正確，但無法排除測試資料，
+ *    上市櫃改用盤後日行情（見 twOffHoursQuote.ts）。
+ *  - "pre-open"：交易日＝今天但還沒開盤（08:30 前）——典型的「重置後初始狀態」。
+ *  - "invalid-date"：沒有日期、日期在未來、或日期落在週末——不可能是真實交易日。
+ * 不處理國定假日（沒有免費假日行事曆，見 isTwQuoteWindow 說明）：假日 MIS 的交易日
+ * 會是前一個交易日 → earlier-session → 改用盤後日行情，結果一樣正確。
+ */
+export type TwQuoteDateState = "live" | "settled-today" | "earlier-session" | "pre-open" | "invalid-date";
+
+export function classifyTwQuoteTradeDate(
+  tradeDate: string | undefined,
+  scope: "TW" | "TW-EMERGING" = "TW",
+  now: Date = new Date()
+): TwQuoteDateState {
+  if (scope === "TW" ? isTwQuoteWindow(now) : isEmergingQuoteWindow(now)) return "live";
+  const m = tradeDate?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "invalid-date";
+  const tradeWeekday = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+  if (tradeWeekday === 0 || tradeWeekday === 6) return "invalid-date";
+  const clock = taipeiClock(now);
+  if (tradeDate! > clock.dayKey) return "invalid-date";
+  if (tradeDate! < clock.dayKey) return "earlier-session";
+  const closeMinutes = scope === "TW" ? TW_CLOSE_MINUTES : EMERGING_CLOSE_MINUTES;
+  return clock.minutes >= closeMinutes ? "settled-today" : "pre-open";
 }
 
 export interface PollDecision {

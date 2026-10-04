@@ -4,9 +4,9 @@ import tls from "node:tls";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
-import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
+import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
-import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES } from "./twse";
+import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso } from "./twse";
 
 // TPEx (Taipei Exchange / 證券櫃檯買賣中心) public data endpoints for 上櫃
 // (OTC mainboard) stocks. Confirmed live during this module's construction —
@@ -318,6 +318,7 @@ interface MisRow {
   // 最近一筆實際成交（時間+價格），漲跌停鎖住時最可靠的「目前價格」來源——
   // 見下方 rowToOtcQuote 內的說明。
   trade?: { z?: string };
+  d?: string; // 交易日 YYYYMMDD（見 twse.ts 的同名欄位）
 }
 
 function bestDepthPrice(depth: string | undefined): number | undefined {
@@ -372,6 +373,7 @@ function rowToOtcQuote(row: MisRow): Quote | null {
     currency: "TWD",
     updatedAt: new Date().toISOString(),
     priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
+    tradeDate: misDateToIso(row.d),
   };
 }
 
@@ -414,6 +416,46 @@ export async function fetchTpexQuotesBatch(stockNos: string[]): Promise<Map<stri
   for (const row of results.flat()) {
     const quote = rowToOtcQuote(row);
     if (quote) map.set(row.c, quote);
+  }
+  return map;
+}
+
+interface TpexMainboardQuoteRow {
+  Date: string; // ROC compact, e.g. "1151002"
+  SecuritiesCompanyCode: string;
+  Close: string;
+  Change: string;
+  Open: string;
+  High: string;
+  Low: string;
+  TradingShares: string; // 股
+}
+
+/**
+ * 上櫃全市場「最近一個交易日」盤後日行情（openapi tpex_mainboard_quotes）。上面
+ * ROOT CAUSE 說明過它是盤後資料、盤中會停在前一天——正因如此，它正好是非交易時段
+ * 的可靠來源（見 twOffHoursQuote.ts），盤中絕不拿來當即時報價。沒有成交的列
+ * （Close 為 "----"）略過。
+ */
+export async function fetchTpexDailyBarsAll(): Promise<Map<string, TwDailyBar>> {
+  const rows = await fetchTpexJson<TpexMainboardQuoteRow[]>("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes");
+  const map = new Map<string, TwDailyBar>();
+  for (const row of rows) {
+    const close = parseTpexNumber(row.Close);
+    const open = parseTpexNumber(row.Open);
+    const high = parseTpexNumber(row.High);
+    const low = parseTpexNumber(row.Low);
+    const change = parseTpexNumber(row.Change);
+    if (!row.SecuritiesCompanyCode || !row.Date || close == null || close <= 0 || open == null || high == null || low == null || change == null) continue;
+    map.set(row.SecuritiesCompanyCode.trim(), {
+      date: rocCompactToIso(row.Date),
+      open,
+      high,
+      low,
+      close,
+      prevClose: round2(close - change),
+      volume: parseInt((row.TradingShares ?? "").replace(/,/g, ""), 10) || 0,
+    });
   }
   return map;
 }

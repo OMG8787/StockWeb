@@ -6,7 +6,8 @@ import { fetchTpexQuote } from "./tpex";
 import { fetchEmergingQuote } from "./emerging";
 import { fetchUsQuote } from "./us";
 import { fetchYahooTwMarketDepth, type MarketDepth } from "./yahooTwMarketDepth";
-import { isTwQuoteWindow, LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
+import { classifyTwQuoteTradeDate, isTwQuoteWindow, LIVE_CACHE_TTL_MS } from "@/lib/pollingSchedule";
+import { reconcileTwListedQuote, type TwListedExchange } from "./twOffHoursQuote";
 import { detectMarket, normalizeSymbol, resolveTwExchange } from "./symbols";
 import { ensureTwUniverseWarm } from "./universe";
 import { liveSwrOptions } from "./swrPolicy";
@@ -33,22 +34,41 @@ export function quoteTtlMs(market: Market): number {
  */
 async function fetchTwQuote(symbol: string): Promise<Quote> {
   const exchange = resolveTwExchange(symbol);
-  if (exchange === "TPEx") return fetchTpexQuote(symbol);
-  if (exchange === "Emerging") return fetchEmergingQuote(symbol);
-  if (exchange === "TWSE") return fetchTwseQuote(symbol);
+  if (exchange === "TPEx") return fetchListed(symbol, "TPEx");
+  if (exchange === "Emerging") return fetchEmergingQuoteChecked(symbol);
+  if (exchange === "TWSE") return fetchListed(symbol, "TWSE");
   try {
-    return await fetchTwseQuote(symbol);
+    return await fetchListed(symbol, "TWSE");
   } catch (err) {
     try {
-      return await fetchTpexQuote(symbol);
+      return await fetchListed(symbol, "TPEx");
     } catch {
       try {
-        return await fetchEmergingQuote(symbol);
+        return await fetchEmergingQuoteChecked(symbol);
       } catch {
         throw err;
       }
     }
   }
+}
+
+/** 上市／上櫃 MIS 報價＋非交易時段可信度校正（盤中原樣回傳，見 twOffHoursQuote.ts）。 */
+async function fetchListed(symbol: string, exchange: TwListedExchange): Promise<Quote> {
+  const quote = exchange === "TPEx" ? await fetchTpexQuote(symbol) : await fetchTwseQuote(symbol);
+  return reconcileTwListedQuote(quote, exchange);
+}
+
+/**
+ * 興櫃報價（mis.tpex.org.tw，跟上市櫃 MIS 是不同系統）：興櫃沒有可靠的盤後開高低收
+ * 可替換（見 emerging.ts 標頭），所以只擋「交易日根本不可能是真的」（週末／未來／
+ * 缺日期）的資料，當成抓不到（null＝資料暫缺），絕不把測試資料當行情。
+ */
+async function fetchEmergingQuoteChecked(symbol: string): Promise<Quote> {
+  const quote = await fetchEmergingQuote(symbol);
+  if (classifyTwQuoteTradeDate(quote.tradeDate, "TW-EMERGING") === "invalid-date") {
+    throw new Error(`Emerging quote for ${symbol} has an implausible trade date ${quote.tradeDate}`);
+  }
+  return quote;
 }
 
 /**

@@ -208,6 +208,8 @@ interface EmergingQuoteParts {
   /** 當日成交總股數（股，不是張——已與 TPEx 歷史行情表的「成交股數」欄位核對一致）。 */
   totalVolume?: number;
   updatedAt: string;
+  /** 資料源自己的交易日（"2026/10/02"）；非交易時段可信度判斷用。 */
+  tradeDay?: string;
 }
 
 /**
@@ -261,6 +263,7 @@ function buildEmergingQuote(rawParts: EmergingQuoteParts): Quote | null {
     volume: parts.totalVolume ?? 0,
     currency: "TWD",
     updatedAt: parts.updatedAt,
+    tradeDate: parts.tradeDay?.match(/^\d{4}\/\d{2}\/\d{2}$/) ? parts.tradeDay.replace(/\//g, "-") : undefined,
     board: "emerging",
     prevCloseLabel: PREV_CLOSE_LABEL,
     priceNote: traded ? undefined : NO_TRADE_NOTE,
@@ -297,6 +300,7 @@ export async function fetchEmergingQuote(stockNo: string): Promise<Quote> {
     low: emergingNumber(xmlTag(xml, "TradeStatisticLow")),
     totalVolume: emergingNumber(xmlTag(xml, "TradeStatisticTtlVol")),
     updatedAt: tradeTime ? taipeiStampToIso(xmlTag(xml, "TradeDay"), tradeTime) : new Date().toISOString(),
+    tradeDay: xmlTag(xml, "TradeDay"),
   });
   if (!quote) throw new Error(`No emerging quote for ${stockNo}`);
   return quote;

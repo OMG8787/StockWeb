@@ -8,6 +8,7 @@ import { isTwQuoteWindow } from "@/lib/pollingSchedule";
 import { maybeRecordDailyVolumeSnapshot } from "./volumeHistory";
 import { universeFor } from "./symbols";
 import { liveSwrOptions } from "./swrPolicy";
+import { reconcileTwListedQuoteMap } from "./twOffHoursQuote";
 
 /**
  * All of a market's universe quotes in one batched network call (plus a
@@ -93,6 +94,14 @@ async function fetchMarketQuoteMap(market: Market): Promise<Map<string, Quote>> 
   // it internally no-ops except once per real trading day. Never awaited so
   // it can't add latency to (or, via its own try/catch, ever fail) this
   // already-expensive batch quote fetch.
+  // 非交易時段 MIS 可能回「重置／測試」狀態——上市櫃統一在這裡改用盤後日行情校正
+  // （盤中原樣回傳、不發額外請求），見 twOffHoursQuote.ts。放在 volume 快照之前，
+  // 避免把測試資料的成交量記成當日量。
+  if (market === "TW") {
+    const tpexSymbols = new Set(pool.filter((e) => e.exchange === "TPEx").map((e) => e.symbol));
+    await reconcileTwListedQuoteMap(map, (symbol) => (tpexSymbols.has(symbol) ? "TPEx" : "TWSE"));
+  }
+
   void maybeRecordDailyVolumeSnapshot(market, map);
 
   return map;

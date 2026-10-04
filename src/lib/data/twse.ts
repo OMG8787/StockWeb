@@ -2,7 +2,7 @@ import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
-import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote } from "./types";
+import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
 
 // TWSE (Taiwan Stock Exchange) public data endpoints. No API key required.
@@ -27,6 +27,14 @@ interface MisRow {
   // 最近一筆實際成交（時間+價格），漲跌停鎖住時最可靠的「目前價格」來源——
   // 見下方 rowToQuote 內的說明。
   trade?: { z?: string };
+  // 這筆資料所屬的交易日（YYYYMMDD）。非交易時段判斷 MIS 資料可不可信靠它，
+  // 見 pollingSchedule.ts 的 classifyTwQuoteTradeDate()。
+  d?: string;
+}
+
+/** MIS 的 `d`（YYYYMMDD）→ ISO 日期；格式不對就 undefined。twse.ts/tpex.ts 共用。 */
+export function misDateToIso(d: string | undefined): string | undefined {
+  return d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : undefined;
 }
 
 /** First (best) price out of MIS's "_"-separated bid/ask depth string. */
@@ -99,6 +107,7 @@ function rowToQuote(row: MisRow): Quote | null {
     // 估算，不是真的成交價變動——沒有這個註記，畫面/AI會把估算值講成好像
     // 真的漲跌過。見 NO_TRADE_MID_ESTIMATE_NOTE 定義處的說明。
     priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
+    tradeDate: misDateToIso(row.d),
   };
 }
 
@@ -177,6 +186,47 @@ export async function fetchTwseQuotesBatch(stockNos: string[]): Promise<Map<stri
   for (const row of results.flat()) {
     const quote = rowToQuote(row);
     if (quote) map.set(row.c, quote);
+  }
+  return map;
+}
+
+interface StockDayAllRow {
+  Date: string; // ROC compact, e.g. "1151002"
+  Code: string;
+  TradeVolume: string; // 股
+  OpeningPrice: string;
+  HighestPrice: string;
+  LowestPrice: string;
+  ClosingPrice: string;
+  Change: string;
+}
+
+/**
+ * 上市全市場「最近一個交易日」盤後日行情（openapi STOCK_DAY_ALL，一次約 1,400 檔、
+ * 約 320KB）。數字跟 STOCK_DAY 日K逐值相同（2026-10-04 實測 2330：開 2505／高 2515／
+ * 低 2495／收 2500／量 15,792,206 股）。只在非交易時段 MIS 資料不可信時才會用到，
+ * 見 twOffHoursQuote.ts。沒有成交（收盤價空白）的列略過。
+ */
+export async function fetchTwseDailyBarsAll(): Promise<Map<string, TwDailyBar>> {
+  const res = await fetchWithTimeout("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", 8000);
+  const rows = (await res.json()) as StockDayAllRow[];
+  const map = new Map<string, TwDailyBar>();
+  for (const row of rows) {
+    const close = parseTwseNumber(row.ClosingPrice);
+    const open = parseTwseNumber(row.OpeningPrice);
+    const high = parseTwseNumber(row.HighestPrice);
+    const low = parseTwseNumber(row.LowestPrice);
+    const change = parseTwseNumber(row.Change);
+    if (!row.Code || !row.Date || close == null || close <= 0 || open == null || high == null || low == null || change == null) continue;
+    map.set(row.Code.trim(), {
+      date: rocCompactToIso(row.Date),
+      open,
+      high,
+      low,
+      close,
+      prevClose: round2(close - change),
+      volume: parseInt(row.TradeVolume.replace(/,/g, ""), 10) || 0,
+    });
   }
   return map;
 }
