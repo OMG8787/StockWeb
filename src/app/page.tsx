@@ -11,17 +11,45 @@ import { getIndices, getTaifexNightFutures, isMacroConfigured, searchStocks } fr
 
 export const revalidate = 0;
 
-export default async function HomePage() {
-  const [indices, taifexFutures, twMovers, usMovers] = await Promise.all([
-    getIndices(),
-    getTaifexNightFutures(),
+// 2026-10-04「各頁 5 秒內完整顯示」：原本整頁 await 指數＋台指期＋台美兩份全市場
+// 排行四項全部到齊才送出任何內容（期間只看到 loading.tsx 的骨架），最慢那一項
+// （全市場報價表冷快取時）拖住整頁，連不需要資料的標題區、快報、關注清單都出不來。
+// 改成大盤指數、焦點排行各自用 Suspense 串流：首屏先出，兩塊資料各自到齊就各自補上。
+async function HomeIndices() {
+  const [indices, taifexFutures] = await Promise.all([getIndices(), getTaifexNightFutures()]);
+  const twIndices = indices.filter((i) => i.market === "TW");
+  const usIndices = indices.filter((i) => i.market === "US");
+  return (
+    <MarketTabs
+      tw={
+        <div className="space-y-3">
+          <LiveIndices market="TW" initialIndices={twIndices} />
+          <TaifexFuturesCard initialQuote={taifexFutures} />
+        </div>
+      }
+      us={<LiveIndices market="US" initialIndices={usIndices} />}
+    />
+  );
+}
+
+async function HomeMovers() {
+  const [twMovers, usMovers] = await Promise.all([
     searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" }),
     searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" }),
   ]);
+  return (
+    <MarketTabs
+      tw={<LiveMoversBoard market="TW" initialItems={twMovers.slice(0, 8)} />}
+      us={<LiveMoversBoard market="US" initialItems={usMovers.slice(0, 8)} />}
+    />
+  );
+}
 
-  const twIndices = indices.filter((i) => i.market === "TW");
-  const usIndices = indices.filter((i) => i.market === "US");
+function BlockSkeleton({ height }: { height: string }) {
+  return <div className={`${height} animate-pulse rounded-lg border border-(--gridline) bg-(--surface-1)`} aria-hidden />;
+}
 
+export default function HomePage() {
   return (
     <div className="space-y-10">
       <section className="rounded-xl border border-(--gridline) bg-(--surface-1) p-6 sm:p-10">
@@ -65,15 +93,9 @@ export default async function HomePage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">大盤指數</h2>
-        <MarketTabs
-          tw={
-            <div className="space-y-3">
-              <LiveIndices market="TW" initialIndices={twIndices} />
-              <TaifexFuturesCard initialQuote={taifexFutures} />
-            </div>
-          }
-          us={<LiveIndices market="US" initialIndices={usIndices} />}
-        />
+        <Suspense fallback={<BlockSkeleton height="h-44" />}>
+          <HomeIndices />
+        </Suspense>
         {/* 總經卡片放在分頁外面（台股/美股分頁都看得到），用 Suspense 串流、不擋首屏；
             沒設定 FRED_API_KEY 時整塊不渲染，首頁跟以前一樣。 */}
         {isMacroConfigured() && (
@@ -93,10 +115,9 @@ export default async function HomePage() {
               查看完整排行 →
             </Link>
           </div>
-          <MarketTabs
-            tw={<LiveMoversBoard market="TW" initialItems={twMovers.slice(0, 8)} />}
-            us={<LiveMoversBoard market="US" initialItems={usMovers.slice(0, 8)} />}
-          />
+          <Suspense fallback={<BlockSkeleton height="h-72" />}>
+            <HomeMovers />
+          </Suspense>
         </div>
       </section>
 
