@@ -31,5 +31,19 @@ jobs:
   warm:
     runs-on: ubuntu-latest
     steps:
+      # 2026-10-04：原本只用 `curl -sf` 看 HTTP 狀態——路由刻意讓每一項獨立降級、
+      # 整體仍回 200，所以某一項預熱失敗時 Actions 紀錄完全看不出來。改成把回應
+      # 的 outcomes 印出來：整體失敗（非 200 或 ok 不是 true）讓 job 失敗；個別項目
+      # 失敗只標成 ::warning::（顯示在該次執行的摘要裡），不讓 job 變紅、不每 5 分鐘
+      # 寄一次失敗通知信。
       - name: Ping warm-cache endpoint
-        run: curl -sf --max-time 60 "https://stock-web-blond.vercel.app/api/cron/warm-cache"
+        run: |
+          body=$(mktemp)
+          code=$(curl -sS --max-time 90 -o "$body" -w '%{http_code}' "https://stock-web-blond.vercel.app/api/cron/warm-cache" || echo "000")
+          echo "HTTP $code"
+          jq -r '.outcomes // {} | to_entries[] | "\(.key): \(.value)"' "$body" 2>/dev/null || cat "$body"
+          jq -r '.outcomes // {} | to_entries[] | select(.value | startswith("失敗")) | "::warning title=預熱失敗::\(.key) — \(.value)"' "$body" 2>/dev/null || true
+          if [ "$code" != "200" ] || [ "$(jq -r '.ok' "$body" 2>/dev/null)" != "true" ]; then
+            echo "::error title=預熱整體失敗::HTTP $code"
+            exit 1
+          fi

@@ -1,5 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChips, getEarnings, getFundamentals, getIndices, getLastTechScreenRun, getMaterialAnnouncements, getMultiSignalStocks, getTechnicalScreen, searchStocks } from "@/lib/data";
+import {
+  getChips,
+  getChipsRatiosBatch,
+  getEarnings,
+  getFundamentals,
+  getIndices,
+  getLastTechScreenRun,
+  getMaterialAnnouncements,
+  getMultiSignalStocks,
+  getTaifexNightFutures,
+  getTechnicalScreen,
+  searchStocks,
+} from "@/lib/data";
+import { getMarketHistory } from "@/lib/data/marketHistory";
 import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
@@ -80,6 +93,15 @@ export async function GET(req: NextRequest) {
       warm("technical screen TW", getTechnicalScreen("TW")),
       warm("technical screen US", getTechnicalScreen("US")),
       warm("indices", getIndices()),
+      // 2026-10-04 補上：首頁大盤區塊的台指期夜盤、AI 快報／建議／問答共用的市場
+      // 歷史包、列表籌碼比例欄位用的三份全市場整包（融資融券／外資持股／集保大戶，
+      // 用一檔代表股就會整包預熱）。台股／美股全市場報價表已由上面的 search TW/US
+      // 預熱（searchStocks 底下就是 getMarketQuoteMap）。這些資料都已開「過期先回
+      // 舊資料、背景更新」（lib/data/swrPolicy.ts）：讀到過期值時這支路由會先拿到舊值，
+      // 重算在 after() 裡跑完（maxDuration 涵蓋），所以一樣有預熱效果。
+      warm("taifex night", getTaifexNightFutures()),
+      warm("market history", getMarketHistory()),
+      warm("chips ratios packs", getChipsRatiosBatch([WARM_PROBE_SYMBOL]).then((m) => m.get(WARM_PROBE_SYMBOL))),
       warm("daily brief", getDailyBrief()),
       warm("action brief", getActionBrief()),
       warm("news feed", getNewsFeed()),
