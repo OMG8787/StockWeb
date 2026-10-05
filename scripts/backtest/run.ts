@@ -5,7 +5,7 @@
  *   npx tsx scripts/backtest/run.ts --wide  # 擴大樣本（200 檔、約 2 年；先跑 wideFetch.ts），見 wide.ts
  *
  * 做法：對 config.ts 的股票池 × 訊號日，用「訊號日當天收盤為止」的日K與當日三大法人，
- * 直接呼叫正式程式的 score()／computeSiteRating()（src/lib/ai），隔一個交易日開盤進場，
+ * 直接呼叫正式評等核心 computeRatingCore()（src/lib/ai/ratingCore.ts，跟 stockRating.ts 同一個），隔一個交易日開盤進場，
  * 看 5／10 日報酬；「超額」＝減掉同一訊號日全樣本平均（扣掉大盤漲跌）。
  *
  * 限制（判讀時要記得）：

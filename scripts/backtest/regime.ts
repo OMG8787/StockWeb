@@ -3,7 +3,7 @@
  *   npx tsx scripts/backtest/regimeFetch.ts   # 樣本外資料（可續傳）
  *   npx tsx scripts/backtest/regime.ts        # 統計 → 印出結果（docs 的結果段落由此貼上）
  *
- * 每列（股票×訊號週）計算方式與 wide.ts buildRows 相同（同一套 score()／computeSiteRating()／computeChaseMetrics()），
+ * 每列（股票×訊號週）計算方式與 wide.ts buildRows 相同（同一個正式評等核心 computeRatingCore()（src/lib/ai/ratingCore.ts）），
  * 這裡重寫一份而不 import wide.ts，是因為 wide.ts 的期間與快取目錄在模組載入時就寫死，且不能改動它（另一個 agent 在用）。
  */
 import type { Candle } from "@/lib/data/types";

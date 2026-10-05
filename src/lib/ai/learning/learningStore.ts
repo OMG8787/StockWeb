@@ -108,7 +108,8 @@ async function dailyCandles(symbol: string): Promise<Candle[]> {
   return [];
 }
 
-function toEval(e: RatingLogEntry, prev: EvalRecord | undefined): EvalRecord {
+/** 評等紀錄 → 學習用紀錄的唯一欄位對應（跨入口整合測試會拿正式評等跑一次，確保紀錄欄位與學習／看板讀得到）。 */
+export function ratingLogToEval(e: RatingLogEntry, prev: EvalRecord | undefined): EvalRecord {
   return {
     at: e.at,
     day: e.day,
@@ -182,7 +183,7 @@ export async function runLearningUpdate(opts: { force?: boolean; now?: Date } = 
         const stock = candleMap.get(e.symbol);
         if (!stock || stock.length === 0) continue;
         const field = ratingLogField(e.symbol, e.code);
-        const rec = toEval(e, existing.get(e.day)?.[field]);
+        const rec = ratingLogToEval(e, existing.get(e.day)?.[field]);
         let changed = false;
         for (const h of REWARD_HORIZONS) {
           const k = String(h) as "1" | "5" | "20";
