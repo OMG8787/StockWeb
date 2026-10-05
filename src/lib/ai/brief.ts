@@ -49,7 +49,8 @@ const BRIEF_TTL_MS = 10 * 60_000;
 // v2: dropped the per-date key when this moved to a rolling TTL；v3：參考資料新增大戶／外資／融資比例區塊
 // v4：2026-10-04 輸出改成精簡格式（一句總結＋台美分開條列＋一句風險），作廢舊的長篇快取
 // v5：持股結構資訊行加上券資比；v6：第四項改成融券使用率（融券÷融券限額）
-const BRIEF_CACHE_KEY = "daily-brief:v6";
+// v7：2026-10-05 補「同一個數字只寫一次」規則（BRIEF_RULE_NO_REPEAT_NUMBER），作廢舊快取
+const BRIEF_CACHE_KEY = "daily-brief:v7";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -132,6 +133,11 @@ const BRIEF_RULE_HONESTY =
 const BRIEF_RULE_NUMBERS =
   "數字照參考資料原樣寫：指數點位寫完整點數（例如『48,417點』），漲跌寫點數加百分比（例如『跌58點（-0.12%）』），不可改寫成『萬點』或自行換算單位。法人『近N日合計』與『連買／連賣M日』方向不同時，要寫成『近N日合計賣超X億，但最近M日已轉為買超』，不可並列成看似矛盾的一句。";
 
+// 2026-10-05 正式站：快報寫出「外資近5日雖賣超401.3億、近5日外資-401.3億」——參考資料【市場歷史】只列一次
+// （marketHistoryText.ts describeInstitutional），是模型自己換句話重複，所以從規則端禁止。
+const BRIEF_RULE_NO_REPEAT_NUMBER =
+  "同一個數字（同一項目、同一期間）全文只寫一次，不可在同一句或不同點換句話重複（例如不可寫『外資近5日賣超401.3億、近5日外資-401.3億』）。";
+
 // 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
 const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資／融券比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_UTILIZATION_MEANING}`;
 
@@ -143,6 +149,7 @@ const BRIEF_SYSTEM_PROMPT = [
   BRIEF_RULE_NO_ADVICE,
   BRIEF_RULE_HONESTY,
   BRIEF_RULE_NUMBERS,
+  BRIEF_RULE_NO_REPEAT_NUMBER,
   RULE_COPY_NUMBERS_EXACTLY,
   RULE_ZH_TW_ONLY,
   RULE_CLOSED_DAY_WORDING,
