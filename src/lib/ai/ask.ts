@@ -6,7 +6,8 @@ import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
-import { SITE_RATING_TITLE, stripRatingTags } from "./siteRating";
+import { describeSiteRating, isRecommendable, stripRatingTags } from "./siteRating";
+import { getStockRatings, type StockRatingResult } from "./stockRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
@@ -37,6 +38,7 @@ import { buildThemeGrounding, detectTheme, THEME_QUESTION_PATTERN } from "./grou
 import { buildCannedAnswer, sanitizeLeakedMarkers } from "./askFallback";
 import { composeAskSystemPrompt } from "./askSystemCompose";
 import { getMarketStatus } from "@/lib/marketStatus";
+import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { guardAnswerNumbers } from "./numberGuard";
 import { guardAvoidPriceAdvice } from "./ratingConsistencyGuard";
 import { modelInfo } from "./modelName";
@@ -46,15 +48,10 @@ import { modelInfo } from "./modelName";
 // 不用改。
 export type { AskResult, HoldingInput };
 
-/** Same pattern as twse.ts's own taipeiToday() — each module keeps a small
- *  local copy rather than sharing one, consistent with how us.ts/tpex.ts
- *  already each own their own small date helpers in this codebase. */
+/** 台北今天（年月日數字）——一律由 pollingSchedule.ts 的 taipeiDayKey 推得（全站唯一的台北日期來源）。 */
 function taipeiTodayForAsk(): { year: number; month: number; day: number } {
-  const [y, m, d] = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" })
-    .format(new Date())
-    .split("-")
-    .map((n) => parseInt(n, 10));
-  return { year: y, month: m, day: d };
+  const [year, month, day] = taipeiDayKey().split("-").map((n) => parseInt(n, 10));
+  return { year, month, day };
 }
 
 export async function answerQuestion(
@@ -210,15 +207,22 @@ export async function answerQuestion(
 
   const actionBrief = await actionBriefPromise;
   const actionBriefText = actionBrief?.usedAi ? actionBrief.text : "";
-  // 名單與結論是程式依本站綜合評等算好的（跟個股頁問AI同一份），AI 掛掉時也照樣附。
-  // 2026-10-05：評等改果斷二分，名單只有「建議買進」（現價可分批買）。
-  const ratingLine = (p: { name: string; symbol: string; label: string; holdingLabel: string; reason: string }) =>
-    `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有：「${p.label}」／已持有：「${p.holdingLabel}」。理由：${p.reason}。`;
-  const ratingGroup = (title: string, list: NonNullable<typeof actionBrief>["picks"]) =>
-    `${title}\n${list.length > 0 ? list.map(ratingLine).join("\n") : "（無）"}`;
+  // 名單（哪幾檔）跟今日建議同一份；每檔的評等行一律用 describeSiteRating 讀「現在」的 stockRating（10 分鐘快取命中），
+  // 跟個股頁「問AI關於」逐字相同（2026-10-06 整合稽核：原本這裡自己拼一份少了價位與改判條件的格式，且用今日建議快取裡的舊字樣）。
+  const listRatings = actionBrief
+    ? await getStockRatings(actionBrief.picks.map((p) => ({ symbol: p.symbol, market: "TW" as const })), undefined, "ai-ask").catch(
+        () => new Map<string, StockRatingResult>()
+      )
+    : new Map<string, StockRatingResult>();
+  const listLines = actionBrief
+    ? actionBrief.picks
+        .map((p) => listRatings.get(p.symbol.toUpperCase()))
+        .filter((r): r is StockRatingResult => !!r && isRecommendable(r.rating))
+        .map((r) => describeSiteRating(r.name, r.symbol, r.rating))
+    : [];
   const ratingListText = actionBrief
-    ? actionBrief.picks.length > 0
-      ? ratingGroup("【建議買進（現價可分批買）】", actionBrief.picks.filter((p) => p.code !== "avoid"))
+    ? listLines.length > 0
+      ? `【建議買進（現價可分批買）】\n${listLines.join("\n")}`
       : "（本站綜合評等目前沒有任何一檔是「建議買進」）"
     : "";
 
