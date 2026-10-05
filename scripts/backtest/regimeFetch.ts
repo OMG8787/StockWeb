@@ -19,7 +19,8 @@ async function fetchWithBackoff(url: string, label: string): Promise<Response> {
   for (let attempt = 0; attempt < 4; attempt++) {
     try {
       const res = await fetch(url, { headers: UA });
-      if (res.ok || res.status === 404) return res;
+      // Yahoo 對「該期間沒有資料」回 400（Bad Request: Data doesn't exist），當成查無資料，不退避
+      if (res.ok || res.status === 404 || (res.status === 400 && label.startsWith("Yahoo"))) return res;
       console.warn(`${label} HTTP ${res.status}，退避 ${60 * (attempt + 1)}s`);
     } catch (e) {
       console.warn(`${label} 連線錯誤 ${(e as Error).message}，退避 ${60 * (attempt + 1)}s`);
