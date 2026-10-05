@@ -4,10 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import StockTable from "@/components/StockTable";
 import MarketTabs from "@/components/MarketTabs";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
-import { getMarketStatus } from "@/lib/marketStatus";
+import { getMarketStatus, type MarketStatus } from "@/lib/marketStatus";
 import type { Market, SearchItem, VolumeTrend } from "@/lib/data";
 import type { ChipsRatiosBatchResponse } from "@/lib/chipsRatiosList";
 import { seedChipsRatios } from "@/lib/useChipsRatios";
+import { getPollDecision } from "@/lib/pollingSchedule";
+import { useLivePolling } from "@/lib/useLivePolling";
 
 // 一頁筆數：排序／篩選仍在伺服器對全市場完成，前端一次只渲染這麼多列，往下捲或按
 // 「顯示更多」再取下一批（2026-10-05：一次渲染約 2,000 列＋375KB 回應，最後一個區塊
@@ -150,6 +152,10 @@ function MarketSection({
   const loadingMoreRef = useRef(false);
   const loadMoreCtrlRef = useRef<AbortController | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // 盤中輪詢：與「顯示更多」「換篩選」的競態保護（見 refreshLoaded）。
+  const pollCtrlRef = useRef<AbortController | null>(null);
+  const searchPendingRef = useRef(true);
+  const [status, setStatus] = useState<MarketStatus>(() => getMarketStatus(market));
   // Tracks whether the search effect below has ever run — see its own
   // comment for why the very first run skips the debounce delay.
   const isFirstRunRef = useRef(true);
@@ -196,6 +202,8 @@ function MarketSection({
     const base = params.toString();
     baseQueryRef.current = base;
     loadMoreCtrlRef.current?.abort();
+    pollCtrlRef.current?.abort();
+    searchPendingRef.current = true;
     // 台股一併把這一頁的籌碼比例帶回來（withChips），列一掛載就直接命中，不必再等
     // 列進到畫面後發第二次請求；美股沒有籌碼資料。
     const firstPageQuery = `${base}&limit=${PAGE_SIZE}${market === "TW" ? "&withChips=1" : ""}`;
@@ -209,6 +217,7 @@ function MarketSection({
           loadMoreCtrlRef.current?.abort();
           loadingMoreRef.current = false;
           setLoadingMore(false);
+          searchPendingRef.current = false;
           applyPage(data, false);
         })
         .catch(() => {});
@@ -243,6 +252,7 @@ function MarketSection({
     if (loadingMoreRef.current) return;
     const loaded = itemsRef.current.length;
     if (loaded === 0 || loaded >= total) return;
+    pollCtrlRef.current?.abort(); // 使用者剛按的「顯示更多」優先，進行中的輪詢作廢
     const base = baseQueryRef.current;
     const chipsParam = market === "TW" ? "&withChips=1" : "";
     loadingMoreRef.current = true;
@@ -275,6 +285,40 @@ function MarketSection({
       }
     }
   }
+  /**
+   * 盤中輪詢：以最新資料重抓第一頁起、長度＝目前已載入列數（不帶快照 id，伺服器 10 秒內
+   * 共用同一份、過期就整份重排），整段取代並重新排序，不只更新數字。列以代號為 key、
+   * 列數不變，瀏覽器捲動位置不會跳動。競態規則（以最後一次使用者操作為準）：
+   * 換篩選尚未回來／「顯示更多」進行中 → 這輪略過；輪詢進行中使用者按顯示更多或換篩選 → 輪詢作廢。
+   */
+  async function refreshLoaded() {
+    const loaded = itemsRef.current.length;
+    if (loaded === 0 || searchPendingRef.current || loadingMoreRef.current) return;
+    const base = baseQueryRef.current;
+    pollCtrlRef.current?.abort();
+    const controller = new AbortController();
+    pollCtrlRef.current = controller;
+    const chipsParam = market === "TW" ? "&withChips=1" : "";
+    const res = await fetch(`/api/search?${base}&limit=${Math.min(loaded, 5000)}${chipsParam}`, { signal: controller.signal });
+    if (!res.ok) return;
+    const data: SearchPage = await res.json();
+    if (controller.signal.aborted || baseQueryRef.current !== base || loadingMoreRef.current) return;
+    if (!Array.isArray(data.items) || data.items.length === 0) return; // 保留最後一次成功的資料
+    applyPage(data, false);
+  }
+  const refreshLoadedRef = useRef(refreshLoaded);
+  refreshLoadedRef.current = refreshLoaded;
+
+  // 與首頁 LiveMoversBoard 同一套節奏：台股／美股各依自己的交易時段，盤後不輪詢，背景分頁暫停。
+  useLivePolling({
+    restartKey: market,
+    decide: (now, settledDayKey) => {
+      setStatus(getMarketStatus(market, now));
+      return getPollDecision(market, now, settledDayKey);
+    },
+    onFetch: () => refreshLoadedRef.current(),
+  });
+
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
 
@@ -407,7 +451,7 @@ function MarketSection({
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2 text-xs text-(--text-muted)">
-            <MarketStatusBadge status={getMarketStatus(market)} />
+            <MarketStatusBadge status={status} />
             <span>
               共 {total} 筆{items.length < total ? `，已顯示 ${items.length}` : ""}
               {total === 0 ? "（可能是篩選條件過嚴，或即時資料暫時無法取得）" : ""}
