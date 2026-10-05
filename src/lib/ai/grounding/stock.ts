@@ -34,7 +34,8 @@ import { buildHistoryContext } from "./history";
 import { describeSectorFactors } from "./sectorFactors";
 import { findInUniverse } from "@/lib/data";
 import { getStockRating } from "../stockRating";
-import { describeSiteRating } from "../siteRating";
+import type { RatingSource } from "../ratingLog";
+import { applyHoldingCost, checkTakeProfit, describeSiteRating } from "../siteRating";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -43,7 +44,7 @@ import type { HistoryPeriod } from "../intent";
  */
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined },
-  opts: { period?: HistoryPeriod; compact?: boolean } = {}
+  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
   const [quote, chart, chartYear, stockRating] = await Promise.all([
@@ -51,7 +52,7 @@ export async function buildStockGrounding(
     getChart(target.symbol, "3m", target.market),
     getChart(target.symbol, "1y", target.market).catch(() => null),
     // 本站綜合評等（跟今日建議／全市場推薦同一份快取，見 stockRating.ts）。
-    getStockRating(target.symbol, target.market).catch(() => null),
+    getStockRating(target.symbol, target.market, opts.source ?? "ai-ask").catch(() => null),
   ]);
   if (!quote) return undefined;
 
@@ -104,7 +105,14 @@ export async function buildStockGrounding(
   ];
   if (stockRating) {
     lines.push(
-      `${describeSiteRating(stockRating.name, stockRating.symbol, stockRating.rating)}（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
+      `${describeSiteRating(
+        stockRating.name,
+        stockRating.symbol,
+        // 關注清單有購買價格時套持有中停利提示（個人成本不進全站共用的評等快取）。
+        opts.costBasis != null && chart
+          ? applyHoldingCost(stockRating.rating, checkTakeProfit(opts.costBasis, chart.candles, stockRating.price))
+          : stockRating.rating
+      )}（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
   }
   if (quote.board === "emerging") {

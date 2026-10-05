@@ -263,12 +263,16 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
   // 2026-10-05：今日建議、AI 問答、個股問答三個入口的結論要一致——名單只列本站綜合評等為
   // 「建議買進／建議等回檔再買」的（跟個股頁問AI讀同一份 10 分鐘快取），評等字樣照用。
   const ratings = await getStockRatings(
-    qualified.slice(0, RATED_PICK_LIMIT).map((c) => ({ symbol: c.symbol, market: "TW" as const }))
+    qualified.slice(0, RATED_PICK_LIMIT).map((c) => ({ symbol: c.symbol, market: "TW" as const })),
+    undefined,
+    "today-brief"
   ).catch(() => new Map<string, StockRatingResult>());
   const picks: RatedPick[] = qualified
     .slice(0, RATED_PICK_LIMIT)
     .map((c) => ({ candidate: c, rating: ratings.get(c.symbol.toUpperCase()) }))
     .filter((p): p is RatedPick => !!p.rating && isRecommendable(p.rating.rating));
+  const buyPicks = picks.filter((p) => p.rating.rating.code === "buy");
+  const pullbackPicks = picks.filter((p) => p.rating.rating.code === "buy-on-pullback");
   const notRecommended = qualified
     .slice(0, RATED_PICK_LIMIT)
     .map((c) => ratings.get(c.symbol.toUpperCase()))
@@ -292,7 +296,11 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       qualified.length > 0 ? qualified.map((c) => `${c.name}(${c.symbol})`).join("、") : "無"
     }`,
     `【建議名單＝本站綜合評等為「建議買進」或「建議等回檔再買」的，共 ${picks.length} 檔（只能從這裡挑，結論字樣照抄，跟個股頁「問AI關於」同一份評等）】`,
-    picks.length > 0 ? picks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
+    // 2026-10-05 檢討：使用者看到名單就直接買，但「等回檔」那幾檔現價其實不該買——兩組分開列。
+    `【A組：建議買進（現價可分批買），共 ${buyPicks.length} 檔】`,
+    buyPicks.length > 0 ? buyPicks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
+    `【B組：等回檔（現價不買，等回到區間才買），共 ${pullbackPicks.length} 檔】`,
+    pullbackPicks.length > 0 ? pullbackPicks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
     notRecommended.length > 0
       ? `【體質過門檻、但本站綜合評等為「建議先不要買」的（不可列進建議）】\n${notRecommended.map((r) => describeSiteRating(r.name, r.symbol, r.rating)).join("\n")}`
       : "",

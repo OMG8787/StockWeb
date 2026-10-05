@@ -3,7 +3,9 @@ import type { Market } from "@/lib/data";
 import { cachedWithDegradedNullTtl } from "@/lib/data/degradedCache";
 import { computeSignals } from "@/lib/signals";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
-import { score } from "./actionScoring";
+import { score, type Facet } from "./actionScoring";
+import { computeChaseMetrics } from "./chaseGuards";
+import { logRating, type RatingSource } from "./ratingLog";
 import { computePriceFramework, type PriceFramework } from "./grounding/priceLevels";
 import { computeSiteRating, type SiteRating } from "./siteRating";
 
@@ -27,6 +29,8 @@ export interface StockRatingResult {
   name: string;
   price: number;
   rating: SiteRating;
+  /** 五面向評分（評等紀錄用） */
+  facets: Facet[];
   framework: PriceFramework | null;
   computedAt: string;
 }
@@ -63,12 +67,15 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
   const levelCandles = chart?.candles;
   const framework =
     levelCandles && quote.board !== "emerging" ? computePriceFramework(levelCandles, quote.price, quote.market) : null;
+  // 追高防護（2026-10-05 檢討回測，見 chaseGuards.ts）：用同一份 3 個月日K＋現價＋當日外資買賣超。
+  const chase = chart ? computeChaseMetrics(chart.candles, quote.price, taipeiDayKey(), chips?.foreignNetShares) : null;
   const rating = computeSiteRating({
     facets: scored.facets,
     supportCount: scored.supportCount,
     againstCount: scored.againstCount,
     signals,
     framework,
+    chase,
   });
   return {
     symbol: quote.symbol,
@@ -76,17 +83,29 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     name: quote.name,
     price: quote.price,
     rating,
+    facets: scored.facets,
     framework,
     computedAt: new Date().toISOString(),
   };
 }
 
-export function getStockRating(symbol: string, market?: Market): Promise<StockRatingResult | null> {
+/**
+ * `source`：從哪個入口來（評等紀錄用，見 ratingLog.ts）；有給就在回應送出後記一筆
+ * （同一檔同一天同一結論只記第一次，fail open、不拖慢回應）。
+ */
+export async function getStockRating(symbol: string, market?: Market, source?: RatingSource): Promise<StockRatingResult | null> {
+  const result = await getStockRatingCached(symbol, market);
+  if (result && source) logRating(result, source);
+  return result;
+}
+
+function getStockRatingCached(symbol: string, market?: Market): Promise<StockRatingResult | null> {
   const sym = symbol.trim().toUpperCase();
   // key 刻意不含 market：同一檔從不同入口進來時有的知道市場、有的不知道（問AI關於只帶代號），
   // key 不同就會各算各的、結論可能不一致；台股代號是數字、美股是英文，不會撞。帶台北日期：跨日不沿用。
   return cachedWithDegradedNullTtl<StockRatingResult>(
-    `stock-rating:v1:${sym}:${taipeiDayKey()}`,
+    // v2：2026-10-05 加追高防護（chaseGuards.ts）、等回檔字樣改「現價不買，等回到 A～B」。
+    `stock-rating:v2:${sym}:${taipeiDayKey()}`,
     STOCK_RATING_TTL_MS,
     STOCK_RATING_DEGRADED_TTL_MS,
     () => loadStockRating(sym, market)
@@ -96,14 +115,15 @@ export function getStockRating(symbol: string, market?: Market): Promise<StockRa
 /** 一批股票的評等，限制併發（每檔可能要抓日K，避免對 TWSE 一次打太多）。 */
 export async function getStockRatings(
   targets: Array<{ symbol: string; market?: Market }>,
-  concurrency = 2
+  concurrency = 2,
+  source?: RatingSource
 ): Promise<Map<string, StockRatingResult>> {
   const out = new Map<string, StockRatingResult>();
   let i = 0;
   const worker = async () => {
     while (i < targets.length) {
       const t = targets[i++];
-      const r = await getStockRating(t.symbol, t.market).catch(() => null);
+      const r = await getStockRating(t.symbol, t.market, source).catch(() => null);
       if (r) out.set(t.symbol.toUpperCase(), r);
     }
   };

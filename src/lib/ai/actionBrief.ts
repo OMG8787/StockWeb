@@ -3,6 +3,7 @@ import { AI_SWR_MS } from "@/lib/data/swrPolicy";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { getTradingStance, type BriefMode, type TradingStance } from "./tradingStance";
+import type { RatingCode } from "./siteRating";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import {
   HOLDING_STRUCTURE_FACET_NAME,
@@ -23,8 +24,10 @@ import {
 export interface ActionBriefPick {
   symbol: string;
   name: string;
-  /** 本站綜合評等字樣（未持有），例如「建議等回檔再買（區間 120～125）」 */
+  /** 本站綜合評等字樣（未持有），例如「建議等回檔再買（現價不買，等回到 120～125）」 */
   label: string;
+  /** buy＝建議買進（A組）；buy-on-pullback＝等回檔（B組，現價不買） */
+  code: RatingCode;
   holdingLabel: string;
   reason: string;
 }
@@ -66,12 +69,13 @@ function actionRoleNextOpen(stance: TradingStance): string {
 // 「技術面也要支持」把合格標的全部排除、寫成觀望）兩個方向都實測發生過，兩邊都要講。
 const ACTION_RULE_THRESHOLD = [
   "【門檻（硬性，不可放寬也不可加嚴）】",
-  `- 只能從【建議名單】挑 1~3 檔（已先過面向支持數 ≥${QUALIFY_MIN_SUPPORT}、明確不支持 ≤${QUALIFY_MAX_AGAINST}（${SCORED_FACET_LABEL}），再經本站綜合評等為「建議買進」或「建議等回檔再買」）。每檔結論一律照抄該檔【本站綜合評等】「未持有：」後面引號裡的字樣（含區間），不可改寫成別的結論——個股頁「問AI關於」讀的是同一份評等，兩邊必須一致。`,
+  `- 只能從【建議名單】挑（已先過面向支持數 ≥${QUALIFY_MIN_SUPPORT}、明確不支持 ≤${QUALIFY_MAX_AGAINST}（${SCORED_FACET_LABEL}），再經本站綜合評等為「建議買進」或「建議等回檔再買」）。每檔結論一律照抄該檔【本站綜合評等】「未持有：」後面引號裡的字樣（含區間），不可改寫成別的結論——個股頁「問AI關於」讀的是同一份評等，兩邊必須一致。`,
   "- 【體質過門檻、但本站綜合評等為「建議先不要買」】的股票不可列進建議。",
+  "- 【A組：建議買進】與【B組：等回檔】必須分成兩塊寫，不可混在同一個清單：B組每檔都要明講「現價不買，等回到 A～B 再分批」，不可寫成可以買、也不可放進建議買進那塊（2026-10-05 檢討：使用者看到名單就直接買，等回檔的股票被追在高點）。各組最多 3 檔。",
   "- 籌碼面【不支持】（法人賣超）一律不可列入；不可只因漲停／漲最多／技術線漂亮就推薦。",
   "- RSI超買、觸及布林通道上緣是『漲多警訊』，不可當買進理由。",
   "- 名單不是空的就一定要列建議；不可自己追加「技術面也要支持」「全部面向都要支持」等條件，技術面沒訊號但其他面向支持的照樣列，理由裡誠實說技術面今天沒有夠強的訊號。",
-  "- 【建議名單】是 0 檔才寫觀望，一句白話講原因（例如法人普遍在賣、體質過關的都已漲離買進區間、或台股資料今天查不到）；不可硬湊、不可編造股票或數字。",
+  "- A組 0 檔但 B組有時，建議買進那塊寫一句「目前沒有現價可直接買的」＋原因，B組照列；【建議名單】兩組都是 0 檔才寫觀望，一句白話講原因（例如法人普遍在賣、體質過關的都已漲離買進區間、或台股資料今天查不到）；不可硬湊、不可編造股票或數字。",
 ].join("\n");
 
 function actionFormat(stance: TradingStance): string {
@@ -81,11 +85,13 @@ function actionFormat(stance: TradingStance): string {
   nextOpen
     ? "**大盤**：一句白話講最近一個交易日收盤後的氣氛與下個交易日開盤要留意的方向（≤30字，不要堆指數數字；大盤概況沒有台股加權指數報價時，不可說台股漲跌或創新高）。"
     : "**大盤**：一句白話講今天氣氛（≤30字，不要堆指數數字；大盤概況沒有台股加權指數當日報價時，不可說台股漲跌或創新高）。",
-  nextOpen ? `**${stance.nextOpenLabel} 開盤建議**` : "**建議名單**",
+  nextOpen ? `**${stance.nextOpenLabel} 開盤可買（建議買進）**` : "**建議買進（現價可分批買）**",
   nextOpen
-    ? "- **名稱(代號)**：照抄評等字樣（例如「建議買進」或「建議等回檔再買（區間 A～B）」）。開盤做法：一句，用評等裡的價位（例如「開盤若跳空高於C元不追，回到A～B元再分批」）。理由：2~3個最關鍵的數字，術語第一次出現要帶括號。風險：一句，只能根據體檢表裡的數字。"
-    : "- **名稱(代號)**：照抄評等字樣（例如「建議買進」或「建議等回檔再買（區間 A～B）」）。理由：只挑2~3個最關鍵的數字，術語第一次出現要帶括號（例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）。風險：一句，只能根據體檢表裡的數字（例如技術面今天沒有夠強的訊號、融資使用率偏高）。",
-  nextOpen ? "（每檔一個條列、≤110字；0 檔時這塊改成「- 開盤先觀望：一句原因」）" : "（每檔一個條列、≤90字；0 檔時這塊改成「- 今天觀望：一句原因」）",
+    ? "- **名稱(代號)**：照抄評等字樣（「建議買進」）。開盤做法：一句，用評等裡的價位（例如「開盤若跳空高於C元不追，回到A～B元再分批」）。理由：2~3個最關鍵的數字，術語第一次出現要帶括號。風險：一句，只能根據體檢表裡的數字。"
+    : "- **名稱(代號)**：照抄評等字樣（「建議買進」）。理由：只挑2~3個最關鍵的數字，術語第一次出現要帶括號（例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）。風險：一句，只能根據體檢表裡的數字（例如技術面今天沒有夠強的訊號、融資使用率偏高）。",
+  nextOpen ? "（只列A組，每檔一個條列、≤110字；A組 0 檔時這塊寫「- 開盤沒有可直接買的：一句原因」）" : "（只列A組，每檔一個條列、≤90字；A組 0 檔時這塊寫「- 目前沒有現價可直接買的：一句原因」）",
+  `**${PULLBACK_GROUP_TITLE}**`,
+  "- **名稱(代號)**：照抄評等字樣（例如「建議等回檔再買（現價不買，等回到 A～B）」）。一句理由（為什麼現價不買：漲多警訊／急漲／高於區間的數字）。（只列B組，每檔≤70字；B組 0 檔就整塊省略）",
   "**不建議追**：一句。從【今日台股漲幅榜前10】挑1檔體檢表裡也有、面向支持數0~1的，講它漲多少＋1~2個沒跟上的面向；漲幅榜前段體質都還可以就寫「漲幅榜前段體質大多說得過去」，不要硬挑；漲幅榜標示無資料就寫「今日漲幅榜無資料」。",
   "**留意**：一句要注意的風險（不是利多）。取材只能來自【近期重大消息】或上面的體檢結果，參考資料沒提到的總經事件一律不可寫。",
   "全文不超過400字。不要開場白、客套、結尾延伸提問或免責聲明（網站會自動附上）；同一個數字不要重複講。",
@@ -126,6 +132,31 @@ function buildActionSystemPrompt(stance: TradingStance): string {
   ].join("\n");
 }
 
+/** 等回檔那組的小標（AI 版與 fallback 共用，畫面上要明講現價不買）。 */
+export const PULLBACK_GROUP_TITLE = "等回檔名單（現價不買，等回到區間再分批）";
+
+/** 程式組的分組名單（AI 掛掉時的 fallback；兩組分開，等回檔那組明講現價不買）。 */
+export function groupedPickLines(picks: ActionBriefPick[], stance: Pick<TradingStance, "briefMode" | "nextOpenLabel">): string[] {
+  const nextOpen = stance.briefMode === "next-open";
+  const buy = picks.filter((p) => p.code === "buy").slice(0, 3);
+  const pullback = picks.filter((p) => p.code === "buy-on-pullback").slice(0, 3);
+  const line = (p: ActionBriefPick) => `- **${p.name}(${p.symbol})**：${p.label}。理由：${p.reason}。`;
+  const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 開盤可買（建議買進）**` : "**建議買進（現價可分批買）**";
+  if (buy.length === 0 && pullback.length === 0) {
+    return [
+      buyTitle,
+      `- ${nextOpen ? "開盤先觀望" : "今天觀望"}：沒有個股同時通過${SCORED_FACET_LABEL}的體質門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）且本站綜合評等為買進或等回檔。`,
+    ];
+  }
+  return [
+    buyTitle,
+    ...(buy.length > 0
+      ? buy.map(line)
+      : [`- ${nextOpen ? "開盤沒有可直接買的" : "目前沒有現價可直接買的"}：體質過關的都已漲離買進區間或短線急漲，見下方等回檔名單。`]),
+    ...(pullback.length > 0 ? [`**${PULLBACK_GROUP_TITLE}**`, ...pullback.map(line)] : []),
+  ];
+}
+
 export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {
   const stance = getTradingStance();
   return cached(
@@ -136,7 +167,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
     // v5：體檢表持股結構面加上券資比；v6：第四項改成融券使用率（融券÷融券限額），作廢舊快取。
     // v7：2026-10-05 名單改由本站綜合評等決定（siteRating.ts），並依時段分「今日建議／明日開盤建議」——
     //     key 帶台北日期＋模式，盤中版本不會在 14:30 後（含 SWR 寬限期）被沿用成明日開盤建議。
-    `action-brief:v7:${taipeiDayKey()}:${stance.briefMode}`,
+    // v8：2026-10-05 名單分「建議買進／等回檔（現價不買）」兩組，picks 多了 code。
+    `action-brief:v8:${taipeiDayKey()}:${stance.briefMode}`,
     ACTION_BRIEF_TTL_MS,
     async () => {
       const { text: grounding, picks: ratedPicks, indexSummary } = await buildActionGrounding();
@@ -144,6 +176,7 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
         symbol: p.rating.symbol,
         name: p.rating.name,
         label: p.rating.rating.label,
+        code: p.rating.rating.code,
         holdingLabel: p.rating.rating.holdingLabel,
         reason: p.rating.rating.reason,
       }));
@@ -166,16 +199,9 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
 
       // AI 掛掉時：名單與結論本來就是程式依本站綜合評等算好的（不是 AI 判斷），可以照列；
       // 只是少了 AI 的白話理由，改列程式組好的一句理由摘要。
-      const pickLines =
-        picks.length > 0
-          ? picks.slice(0, 3).map((p) => `- **${p.name}(${p.symbol})**：${p.label}。理由：${p.reason}。`)
-          : [
-              `- ${stance.briefMode === "next-open" ? "開盤先觀望" : "今天觀望"}：沒有個股同時通過${SCORED_FACET_LABEL}的體質門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）且本站綜合評等為買進或等回檔。`,
-            ];
       const fallback = [
         `**大盤**：${indexSummary.replace(/^大盤：/, "")}`,
-        stance.briefMode === "next-open" ? `**${stance.nextOpenLabel} 開盤建議（本站綜合評等）**` : `**建議名單（本站綜合評等）**`,
-        ...pickLines,
+        ...groupedPickLines(picks, stance),
         `**留意**：AI 白話說明暫時無法產生（${(result.failureReason ?? "未知原因").replace(/。$/, "")}），以上為程式依各面向評分與價位算出的評等。`,
       ].join("\n");
 

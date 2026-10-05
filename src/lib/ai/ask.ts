@@ -159,7 +159,13 @@ export async function answerQuestion(
       // 問到過去某天/某段期間時，個股【歷史脈絡】多附該期間逐日明細；多檔比較時每檔歷史脈絡精簡版。
       Promise.all(
         targets.map((t) =>
-          buildStockGrounding(t, { period: detectHistoryPeriod(question, taipeiTodayForAsk()), compact: targets.length > 1 })
+          buildStockGrounding(t, {
+            period: detectHistoryPeriod(question, taipeiTodayForAsk()),
+            compact: targets.length > 1,
+            // 評等紀錄的來源入口：個股頁「問AI關於」會帶 contextSymbol。
+            source: contextSymbol && contextSymbol.toUpperCase() === t.symbol.toUpperCase() ? "stock-button" : "ai-ask",
+            costBasis: holdings.find((h) => h.symbol.toUpperCase() === t.symbol.toUpperCase() && (h.shares ?? 0) > 0)?.costBasis,
+          })
         )
       ),
       Promise.all([getIndices(), getTaifexNightFutures().catch(() => null), getMacroSnapshot()])
@@ -184,11 +190,17 @@ export async function answerQuestion(
   const actionBrief = await actionBriefPromise;
   const actionBriefText = actionBrief?.usedAi ? actionBrief.text : "";
   // 名單與結論是程式依本站綜合評等算好的（跟個股頁問AI同一份），AI 掛掉時也照樣附。
+  // 2026-10-05：分「建議買進」與「等回檔（現價不買）」兩組，避免使用者把等回檔的當成現在可買。
+  const ratingLine = (p: { name: string; symbol: string; label: string; holdingLabel: string; reason: string }) =>
+    `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有：「${p.label}」／已持有：「${p.holdingLabel}」。理由：${p.reason}。`;
+  const ratingGroup = (title: string, list: NonNullable<typeof actionBrief>["picks"]) =>
+    `${title}\n${list.length > 0 ? list.map(ratingLine).join("\n") : "（無）"}`;
   const ratingListText = actionBrief
     ? actionBrief.picks.length > 0
-      ? actionBrief.picks
-          .map((p) => `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有：「${p.label}」／已持有：「${p.holdingLabel}」。理由：${p.reason}。`)
-          .join("\n")
+      ? [
+          ratingGroup("【A組：建議買進（現價可分批買）】", actionBrief.picks.filter((p) => p.code === "buy")),
+          ratingGroup("【B組：等回檔（現價不買，等回到區間才買）】", actionBrief.picks.filter((p) => p.code === "buy-on-pullback")),
+        ].join("\n")
       : "（本站綜合評等目前沒有任何一檔是「建議買進」或「建議等回檔再買」）"
     : "";
 

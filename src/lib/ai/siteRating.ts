@@ -1,6 +1,7 @@
 import type { Signal } from "@/lib/signals";
 import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_COUNT, type Facet } from "./actionScoring";
 import { NEAR_ZONE_PCT, type PriceFramework } from "./grounding/priceLevels";
+import { ACTIVE_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardHit, type ChaseGuardId, type ChaseMetrics } from "./chaseGuards";
 
 /**
  * 本站綜合評等（純邏輯、無 I/O，有測試）。
@@ -44,11 +45,15 @@ export interface RatingInput {
   /** 技術訊號（用來判斷漲多警訊） */
   signals: Signal[];
   framework: PriceFramework | null;
+  /** 追高指標（chaseGuards.ts）；沒給就不套追高防護（例如回測工具算「舊版基準」時） */
+  chase?: ChaseMetrics | null;
+  /** 要套用哪些追高防護，預設 ACTIVE_CHASE_GUARDS（回測工具逐條比較時才會指定） */
+  guards?: readonly ChaseGuardId[];
 }
 
 export interface SiteRating {
   code: RatingCode;
-  /** 未持有的結論，例如「建議等回檔再買（區間 120～125）」——三個入口一律照抄這串 */
+  /** 未持有的結論，例如「建議等回檔再買（現價不買，等回到 120～125）」——三個入口一律照抄這串 */
   label: string;
   holdingCode: HoldingCode;
   /** 持有中的結論，例如「續抱」 */
@@ -60,6 +65,8 @@ export interface SiteRating {
   zone: { low: number; high: number } | null;
   noChase: number | null;
   exit: number | null;
+  /** 觸發的追高防護（沒觸發是空陣列） */
+  chaseHits: ChaseGuardHit[];
 }
 
 function fmt(n: number): string {
@@ -68,10 +75,13 @@ function fmt(n: number): string {
 
 export function computeSiteRating(input: RatingInput): SiteRating {
   const { facets, supportCount, againstCount, signals, framework } = input;
+  const chaseHits = input.chase ? evaluateChaseGuards(input.chase, input.guards ?? ACTIVE_CHASE_GUARDS) : [];
+  const foreignSell = chaseHits.find((h) => h.id === "foreignSell");
+  const heatHits = chaseHits.filter((h) => h.id !== "foreignSell");
   const chipsAgainst = facets.some((f) => f.name === "籌碼面" && f.verdict === "不支持");
   const against = facets.filter((f) => f.verdict === "不支持").map((f) => f.name.replace(/（.*$/, ""));
   const support = facets.filter((f) => f.verdict === "支持").map((f) => f.name.replace(/（.*$/, ""));
-  const qualified = supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST && !chipsAgainst;
+  const qualified = supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST && !chipsAgainst && !foreignSell;
   const overheat = signals.filter((s) => s.tone === "up" && OVERHEAT_SIGNAL_PATTERNS.some((p) => s.label.includes(p)));
   const zone = framework?.zone ? { low: framework.zone.low, high: framework.zone.high } : null;
   const noChase = framework?.noChase.price ?? null;
@@ -85,21 +95,29 @@ export function computeSiteRating(input: RatingInput): SiteRating {
     code = "avoid";
     reason = chipsAgainst
       ? `${score}；三大法人賣超（籌碼面不支持），本站不列為買進`
-      : `${score}，未達本站買進門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）`;
+      : foreignSell && supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST
+        ? `${score}；但${foreignSell.message}，本站不列為買進`
+        : `${score}，未達本站買進門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）`;
     if (brokeDown) reason += "；且現價已跌破所有均線與近期低點";
   } else if (brokeDown) {
     code = "avoid";
     const trigger = framework!.resistances[0]?.price ?? framework!.noChase.price;
     reason = `${score}，但現價已跌破所有均線與近期低點（破底），要等重新站回 ${fmt(trigger)} 以上再考慮`;
-  } else if (zone && framework && (overheat.length > 0 || (framework.price - zone.high) / zone.high >= NEAR_ZONE_PCT)) {
+  } else if (
+    heatHits.length > 0 ||
+    (zone && framework && (overheat.length > 0 || (framework.price - zone.high) / zone.high >= NEAR_ZONE_PCT))
+  ) {
     code = "buy-on-pullback";
     const why = [
+      heatHits.length > 0 ? `已經急漲／過熱（${heatHits.map((h) => h.message).join("、")}）` : "",
       overheat.length > 0 ? `技術面出現漲多警訊（${overheat.map((s) => s.label).join("、")}）` : "",
-      `現價 ${fmt(framework.price)} 高於買進區間上緣 ${fmt(zone.high)}`,
+      zone && framework && framework.price > zone.high ? `現價 ${fmt(framework.price)} 高於買進區間上緣 ${fmt(zone.high)}` : "",
     ]
       .filter(Boolean)
       .join("、");
-    reason = `${score}，體質達買進門檻；但${why}，不追價，等回檔到 ${fmt(zone.low)}～${fmt(zone.high)} 再分批買`;
+    reason = zone
+      ? `${score}，體質達買進門檻；但${why}，現價不買，等回檔到 ${fmt(zone.low)}～${fmt(zone.high)} 再分批買`
+      : `${score}，體質達買進門檻；但${why}，現價不買，等回檔整理後再評估`;
   } else {
     code = "buy";
     reason = zone
@@ -108,12 +126,64 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   }
 
   const label =
-    code === "buy-on-pullback" && zone ? `${RATING_LABEL[code]}（區間 ${fmt(zone.low)}～${fmt(zone.high)}）` : RATING_LABEL[code];
+    code === "buy-on-pullback"
+      ? zone
+        ? `${RATING_LABEL[code]}（現價不買，等回到 ${fmt(zone.low)}～${fmt(zone.high)}）`
+        : `${RATING_LABEL[code]}（現價不買）`
+      : RATING_LABEL[code];
   const holdingCode: HoldingCode =
     code === "buy" ? "add" : code === "buy-on-pullback" ? "hold" : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
   const holdingLabel = holdingCode === "hold" && code === "avoid" ? "續抱觀察、不加碼" : HOLDING_LABEL[holdingCode];
 
-  return { code, label, holdingCode, holdingLabel, reason, supportCount, againstCount, zone, noChase, exit };
+  return { code, label, holdingCode, holdingLabel, reason, supportCount, againstCount, zone, noChase, exit, chaseHits };
+}
+
+// ── 持有中停利提示（2026-10-05 檢討：使用者持股曾經獲利、沒有停利紀律又跌回成本） ──
+// 沒回測（需要真實買進日與成本，歷史樣本做不出來），先當紀律提示；之後用評等紀錄（ratingLog）追蹤效果。
+
+/** 持有期間曾經獲利達到這個百分比… */
+export const TAKE_PROFIT_PEAK_GAIN_PCT = 8;
+/** …之後現價跌回「成本 ×（1 + 這個百分比）」以下，就提示減碼或出場（0＝跌回成本）。 */
+export const TAKE_PROFIT_GIVEBACK_FLOOR_PCT = 0;
+
+export interface TakeProfitCheck {
+  /** 買進後（近似）最高價相對成本的最大獲利（%） */
+  peakGainPct: number;
+  peakPrice: number;
+  /** 一句話提示（含「近似」說明） */
+  message: string;
+}
+
+/**
+ * 持有中是否觸發「曾獲利 ≥8% 後跌回成本」。買進日不知道（關注清單只有購買價格），
+ * 近似做法：日K中「第一根成交區間涵蓋購買價格」的那天當買進日，取那天之後（含今天現價）的最高價；
+ * 日K裡從沒成交到購買價格（買在更早以前）就從日K第一根開始算。
+ */
+export function checkTakeProfit(
+  costBasis: number,
+  candles: Array<{ high: number; low: number }>,
+  price: number
+): TakeProfitCheck | null {
+  if (!(costBasis > 0) || candles.length === 0) return null;
+  const start = Math.max(0, candles.findIndex((c) => c.low <= costBasis && costBasis <= c.high));
+  const peakPrice = Math.max(price, ...candles.slice(start).map((c) => c.high));
+  const peakGainPct = (peakPrice / costBasis - 1) * 100;
+  const floor = costBasis * (1 + TAKE_PROFIT_GIVEBACK_FLOOR_PCT / 100);
+  if (peakGainPct < TAKE_PROFIT_PEAK_GAIN_PCT || price > floor) return null;
+  return {
+    peakGainPct,
+    peakPrice,
+    message: `買進後曾漲到約 ${fmt(peakPrice)}（獲利約 ${Math.round(peakGainPct * 10) / 10}%），現價 ${fmt(price)} 已跌回成本 ${fmt(costBasis)} 以下，獲利全部吐回，建議減碼或出場（停利紀律；買進日未知，最高價以日K中第一次成交到購買價格之後的最高價近似）`,
+  };
+}
+
+/**
+ * 依使用者的購買價格調整「已持有」結論（評等本身是全站共用快取、不含個人成本，所以另外套）。
+ * 觸發停利提示時：原本是「出場」維持出場，其他一律改成「建議減碼或出場」。
+ */
+export function applyHoldingCost(r: SiteRating, check: TakeProfitCheck | null): SiteRating {
+  if (!check || r.holdingCode === "exit") return r;
+  return { ...r, holdingCode: "reduce", holdingLabel: "建議減碼或出場（獲利已吐回）", reason: `${r.reason}；持有中：${check.message}` };
 }
 
 /** 是否應列進今日建議／全市場推薦名單（買進或等回檔）。 */

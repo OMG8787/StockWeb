@@ -56,7 +56,7 @@ async function describeBothGoldenRatings(items: TechScreenItem[]): Promise<strin
     .slice(0, TECH_SCREEN_RATING_LIMIT);
   if (targets.length === 0) return "";
   const ratings = await Promise.race([
-    getStockRatings(targets.map((t) => ({ symbol: t.symbol }))),
+    getStockRatings(targets.map((t) => ({ symbol: t.symbol })), undefined, "tech-screen"),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), TECH_SCREEN_RATING_WAIT_MS)),
   ]).catch(() => null);
   if (!ratings || ratings.size === 0) return "";

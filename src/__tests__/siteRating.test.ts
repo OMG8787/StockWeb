@@ -42,7 +42,7 @@ describe("computeSiteRating", () => {
   it("體質過門檻但現價高於區間上緣 ≥1% → 建議等回檔再買（附區間）、持有續抱", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100]) });
     expect(r.code).toBe("buy-on-pullback");
-    expect(r.label).toBe("建議等回檔再買（區間 95～100）");
+    expect(r.label).toBe("建議等回檔再買（現價不買，等回到 95～100）");
     expect(r.holdingLabel).toBe("續抱");
     expect(r.reason).toContain("高於買進區間上緣 100");
     expect(isRecommendable(r)).toBe(true);
@@ -106,7 +106,7 @@ describe("computeSiteRating", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100], 90, 113.5) });
     const text = describeSiteRating("健鼎", "3044", r);
     expect(text.startsWith(SITE_RATING_TITLE)).toBe(true);
-    expect(text).toContain("未持有：「建議等回檔再買（區間 95～100）」");
+    expect(text).toContain("未持有：「建議等回檔再買（現價不買，等回到 95～100）」");
     expect(text).toContain("已持有：「續抱」");
     expect(text).toContain("高於 113.5 不追價");
     expect(text).toContain("買進後跌破 90 出場");

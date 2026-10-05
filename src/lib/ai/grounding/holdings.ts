@@ -74,9 +74,13 @@ export async function buildHoldingsAnalysisGrounding(holdings: HoldingInput[]): 
   const overflow = holdings.slice(HOLDINGS_ANALYSIS_LIMIT);
 
   const richBlocks = await mapWithConcurrency(rich, HOLDINGS_ANALYSIS_CONCURRENCY, async (h) => {
-    const grounding = await buildStockGrounding({ symbol: h.symbol, market: h.market }).catch(() => undefined);
-    if (!grounding) return `${h.name}(${h.symbol})：目前查不到完整資料，暫時無法分析`;
     const isHeld = h.costBasis != null && h.shares != null && h.shares > 0;
+    // 持有中帶購買價格：評等的「已持有」結論會套停利提示（siteRating.ts checkTakeProfit）。
+    const grounding = await buildStockGrounding(
+      { symbol: h.symbol, market: h.market },
+      { costBasis: isHeld ? h.costBasis : undefined }
+    ).catch(() => undefined);
+    if (!grounding) return `${h.name}(${h.symbol})：目前查不到完整資料，暫時無法分析`;
     let holdingLine = "狀態：僅關注，尚未持有";
     if (isHeld) {
       // getQuote() is the same 20s-TTL cache buildStockGrounding() itself
