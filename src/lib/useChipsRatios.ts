@@ -69,6 +69,21 @@ function updateMeta(body: ChipsRatiosBatchResponse) {
   }
 }
 
+/**
+ * 把「別的 API 已經順便帶回來的」籌碼比例直接放進 store（/api/search?withChips=1 用）：
+ * 列表一掛載每一列就直接命中，不必等 IntersectionObserver 再發第二次請求。
+ * 只寫入回應裡有的代號，語意與 flush() 成功寫入相同（null＝查無這四項）。
+ * 該檔正在請求中（inFlight）就略過，讓進行中的請求照常寫入，避免兩邊互蓋。
+ */
+export function seedChipsRatios(body: ChipsRatiosBatchResponse): void {
+  updateMeta(body);
+  for (const [symbol, data] of Object.entries(body.items)) {
+    if (inFlight.has(symbol)) continue;
+    setEntry(symbol, { status: "ok", data });
+    pending.delete(symbol);
+  }
+}
+
 async function fetchBatch(symbols: string[], web: boolean): Promise<ChipsRatiosBatchResponse> {
   const res = await fetch(`/api/chips-ratios?symbols=${symbols.join(",")}${web ? "&majorPrev=web" : ""}`);
   if (!res.ok) throw new Error(`chips-ratios ${res.status}`);

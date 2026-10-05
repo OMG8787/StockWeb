@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchStocks } from "@/lib/data";
-import type { Market, VolumeTrend } from "@/lib/data";
+import { getChipsRatiosBatch, searchStocks } from "@/lib/data";
+import type { Market, SearchFilters, VolumeTrend } from "@/lib/data";
+import { getSearchSnapshot } from "@/lib/searchSnapshot";
+import { toChipsBatchResponse, type ChipsRatiosBatchResponse } from "@/lib/chipsRatiosList";
+
+/** 附籌碼比例時最多等這麼久；籌碼資料快取冷的時候寧可先回列表，前端會退回逐列漸進載入。 */
+const CHIPS_ATTACH_TIMEOUT_MS = 1500;
+/** 單次最多回傳筆數（分頁／重載已顯示範圍用），避免被拿來一次拉走整個市場以外的怪值。 */
+const MAX_LIMIT = 5000;
 
 const SORT_FIELDS = ["changePercent", "volume", "price", "turnover", "major", "foreign", "margin", "short"] as const;
 type SortField = (typeof SORT_FIELDS)[number];
@@ -46,8 +53,13 @@ export async function GET(req: NextRequest) {
   const limitParam = numberParam(sp.get("limit"));
   const limit = limitParam !== undefined && limitParam > 0 ? Math.floor(limitParam) : undefined;
 
+  const offsetParam = numberParam(sp.get("offset"));
+  const offset = offsetParam !== undefined && offsetParam > 0 ? Math.floor(offsetParam) : 0;
+  const withChips = sp.get("withChips") === "1";
+  const snapshotParam = sp.get("snapshot");
+
   try {
-    const items = await searchStocks({
+    const filters: SearchFilters = {
       market,
       sectors,
       query: query ?? undefined,
@@ -62,8 +74,23 @@ export async function GET(req: NextRequest) {
       volumeTrends,
       sortBy,
       sortDir,
-    });
-    return NextResponse.json({ items: limit !== undefined ? items.slice(0, limit) : items });
+    };
+    // 快照 key＝所有篩選＋排序參數（JSON 會略過 undefined）；分頁參數不在內。
+    const { id: snapshot, items: all } = await getSearchSnapshot(JSON.stringify(filters), () => searchStocks(filters), snapshotParam);
+    const end = limit !== undefined ? offset + Math.min(limit, MAX_LIMIT) : undefined;
+    const items = offset > 0 || end !== undefined ? all.slice(offset, end) : all;
+
+    let chips: ChipsRatiosBatchResponse | undefined;
+    if (withChips) {
+      const twSymbols = items.filter((i) => i.market === "TW").map((i) => i.symbol);
+      if (twSymbols.length > 0) {
+        chips = await Promise.race([
+          getChipsRatiosBatch(twSymbols).then(toChipsBatchResponse),
+          new Promise<undefined>((resolve) => setTimeout(resolve, CHIPS_ATTACH_TIMEOUT_MS)),
+        ]).catch(() => undefined);
+      }
+    }
+    return NextResponse.json({ items, total: all.length, offset, snapshot, ...(chips ? { chips } : {}) });
   } catch (err) {
     console.error("[search] searchStocks failed:", err);
     return NextResponse.json({ error: "搜尋時發生錯誤" }, { status: 500 });

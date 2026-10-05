@@ -3,8 +3,7 @@ import { getChipsRatiosBatch, MAJOR_WEB_FALLBACK_MAX_SYMBOLS } from "@/lib/data"
 import {
   CHIPS_BATCH_MAX_SYMBOLS,
   TW_SYMBOL_PATTERN,
-  toListRatios,
-  type ChipsRatiosBatchResponse,
+  toChipsBatchResponse,
 } from "@/lib/chipsRatiosList";
 
 /**
@@ -39,13 +38,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const map = await getChipsRatiosBatch(symbols, { majorPrevFromWeb });
-    const body: ChipsRatiosBatchResponse = { items: {} };
-    for (const [symbol, ratios] of map) {
-      body.items[symbol] = toListRatios(ratios);
-      const major = ratios?.majorHolders;
-      if (major && !body.majorDate) body.majorDate = major.date;
-      if (major?.prevDate && !body.majorPrevDate) body.majorPrevDate = major.prevDate;
-    }
+    const body = toChipsBatchResponse(map);
     return NextResponse.json(body, { headers: { "Cache-Control": "private, max-age=300" } });
   } catch (err) {
     console.error("[chips-ratios batch] failed:", err);

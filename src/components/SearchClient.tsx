@@ -6,6 +6,21 @@ import MarketTabs from "@/components/MarketTabs";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
 import { getMarketStatus } from "@/lib/marketStatus";
 import type { Market, SearchItem, VolumeTrend } from "@/lib/data";
+import type { ChipsRatiosBatchResponse } from "@/lib/chipsRatiosList";
+import { seedChipsRatios } from "@/lib/useChipsRatios";
+
+// 一頁筆數：排序／篩選仍在伺服器對全市場完成，前端一次只渲染這麼多列，往下捲或按
+// 「顯示更多」再取下一批（2026-10-05：一次渲染約 2,000 列＋375KB 回應，最後一個區塊
+// 要 5.2 秒才出現）。
+const PAGE_SIZE = 100;
+
+interface SearchPage {
+  items: SearchItem[];
+  total?: number;
+  snapshot?: string;
+  /** 只有 withChips=1 且伺服器在時限內查到時才有；沒有就由各列自己漸進載入。 */
+  chips?: ChipsRatiosBatchResponse;
+}
 
 // Short enough that a filter toggle still feels instant, long enough that
 // typing a keyword or a price doesn't fire a search per character.
@@ -124,6 +139,17 @@ function MarketSection({
   const [sortBy, setSortBy] = useState<SortBy>("changePercent");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [items, setItems] = useState<SearchItem[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // 分頁用：目前這組篩選的查詢字串（不含分頁參數）、伺服器回的排序快照 id、已載入的列。
+  // 「顯示更多」帶同一個快照 id，伺服器切同一份已排序結果，盤中價格變動不會讓下一頁
+  // 和前一頁重複或漏股票；快照過期時回傳不同 id，改重載目前已顯示的整段範圍。
+  const baseQueryRef = useRef("");
+  const snapshotRef = useRef<string | undefined>(undefined);
+  const itemsRef = useRef<SearchItem[]>([]);
+  const loadingMoreRef = useRef(false);
+  const loadMoreCtrlRef = useRef<AbortController | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   // Tracks whether the search effect below has ever run — see its own
   // comment for why the very first run skips the debounce delay.
   const isFirstRunRef = useRef(true);
@@ -167,13 +193,24 @@ function MarketSection({
     // waiting before a first-time visitor ever saw a single result. Skipped
     // here; every subsequent run (an actual filter change) still debounces
     // as before.
+    const base = params.toString();
+    baseQueryRef.current = base;
+    loadMoreCtrlRef.current?.abort();
+    // 台股一併把這一頁的籌碼比例帶回來（withChips），列一掛載就直接命中，不必再等
+    // 列進到畫面後發第二次請求；美股沒有籌碼資料。
+    const firstPageQuery = `${base}&limit=${PAGE_SIZE}${market === "TW" ? "&withChips=1" : ""}`;
     const controller = new AbortController();
     const isFirstRun = isFirstRunRef.current;
     isFirstRunRef.current = false;
     const runSearch = () => {
-      fetch(`/api/search?${params.toString()}`, { signal: controller.signal })
+      fetch(`/api/search?${firstPageQuery}`, { signal: controller.signal })
         .then((res) => res.json())
-        .then((data) => setItems(data.items ?? []))
+        .then((data: SearchPage) => {
+          loadMoreCtrlRef.current?.abort();
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+          applyPage(data, false);
+        })
         .catch(() => {});
     };
     if (isFirstRun) {
@@ -186,6 +223,75 @@ function MarketSection({
       controller.abort();
     };
   }, [market, sectors, query, minChangePercent, maxChangePercent, minPrice, maxPrice, minVolume, maxVolume, minTurnover, maxTurnover, volumeTrends, sortBy, sortDir]);
+
+  /** 套用一頁結果：append＝接在目前列後面（以代號去重），否則整份取代。 */
+  function applyPage(data: SearchPage, append: boolean) {
+    const incoming = data.items ?? [];
+    if (data.chips) seedChipsRatios(data.chips);
+    let next = incoming;
+    if (append) {
+      const seen = new Set(itemsRef.current.map((i) => `${i.market}:${i.symbol}`));
+      next = [...itemsRef.current, ...incoming.filter((i) => !seen.has(`${i.market}:${i.symbol}`))];
+    }
+    itemsRef.current = next;
+    snapshotRef.current = data.snapshot;
+    setItems(next);
+    setTotal(data.total ?? next.length);
+  }
+
+  async function loadMore() {
+    if (loadingMoreRef.current) return;
+    const loaded = itemsRef.current.length;
+    if (loaded === 0 || loaded >= total) return;
+    const base = baseQueryRef.current;
+    const chipsParam = market === "TW" ? "&withChips=1" : "";
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const controller = new AbortController();
+    loadMoreCtrlRef.current = controller;
+    const get = async (query: string): Promise<SearchPage> => {
+      const res = await fetch(`/api/search?${base}&${query}`, { signal: controller.signal });
+      return res.json();
+    };
+    try {
+      const sent = snapshotRef.current;
+      let data = await get(`offset=${loaded}&limit=${PAGE_SIZE}${sent ? `&snapshot=${sent}` : ""}${chipsParam}`);
+      if (controller.signal.aborted || baseQueryRef.current !== base) return;
+      if (sent && data.snapshot !== sent) {
+        // 原本那份排序快照已過期：用新資料把已顯示的整段範圍（加一頁）重新載入，
+        // 避免新舊兩份排序拼在一起造成重複或漏股票。
+        data = await get(`offset=0&limit=${loaded + PAGE_SIZE}${chipsParam}`);
+        if (controller.signal.aborted || baseQueryRef.current !== base) return;
+        applyPage(data, false);
+      } else {
+        applyPage(data, true);
+      }
+    } catch {
+      // 網路錯誤／被取消：保留目前已顯示的列，使用者可再按「顯示更多」。
+    } finally {
+      if (loadMoreCtrlRef.current === controller) {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+
+  // 往下捲接近表格底部（預留 400px）就自動載入下一批；按鈕保留作為後備。
+  // items.length 變動就重新觀察，才能在新增一批後（哨兵仍在視窗內時）接著判斷。
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMoreRef.current();
+      },
+      { rootMargin: "400px 0px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [items?.length, total, loadingMore]);
 
   function toggleSector(s: string) {
     setSectors((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
@@ -303,10 +409,22 @@ function MarketSection({
           <div className="flex flex-wrap items-center gap-2 text-xs text-(--text-muted)">
             <MarketStatusBadge status={getMarketStatus(market)} />
             <span>
-              共 {items.length} 筆{items.length === 0 ? "（可能是篩選條件過嚴，或即時資料暫時無法取得）" : ""}
+              共 {total} 筆{items.length < total ? `，已顯示 ${items.length}` : ""}
+              {total === 0 ? "（可能是篩選條件過嚴，或即時資料暫時無法取得）" : ""}
             </span>
           </div>
           <StockTable items={items} />
+          {items.length < total && (
+            <div ref={sentinelRef} className="flex justify-center pt-2">
+              <button
+                onClick={() => void loadMore()}
+                disabled={loadingMore}
+                className="rounded-md border border-(--gridline) bg-(--surface-2) px-4 py-2 text-sm hover:bg-(--page-plane) disabled:opacity-60"
+              >
+                {loadingMore ? "載入中…" : `顯示更多（還有 ${total - items.length} 筆）`}
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

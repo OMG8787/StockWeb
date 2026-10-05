@@ -50,3 +50,18 @@ export function toListRatios(r: ChipsRatios | null): ListChipsRatios | null {
 export function ratioValue(r: ChipsRatios | null | undefined, pick: ChipsRatioPick): number | null {
   return toListRatios(r ?? null)?.[pick]?.[0] ?? null;
 }
+
+/**
+ * 一批 ChipsRatios（getChipsRatiosBatch 的結果）→ 批次回應格式：/api/chips-ratios 與
+ * /api/search?withChips=1 共用這一份，確保兩條路徑給前端的數字與日期完全相同。
+ */
+export function toChipsBatchResponse(map: Map<string, ChipsRatios | null>): ChipsRatiosBatchResponse {
+  const body: ChipsRatiosBatchResponse = { items: {} };
+  for (const [symbol, ratios] of map) {
+    body.items[symbol] = toListRatios(ratios);
+    const major = ratios?.majorHolders;
+    if (major && !body.majorDate) body.majorDate = major.date;
+    if (major?.prevDate && !body.majorPrevDate) body.majorPrevDate = major.prevDate;
+  }
+  return body;
+}
