@@ -47,7 +47,7 @@ function isTwStockCode(input: string): boolean {
 const SUGGEST_DEBOUNCE_MS = 200;
 
 export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
-  // 「今日建議」在 14:30 後到隔天開盤前改叫「明日開盤建議」（跟 /action 頁首、卡片同一個判斷，見 tradingStance.ts）。
+  // 「今日建議」在 14:30 後到隔天開盤前改叫「明日操作建議」（跟 /action 頁首、卡片同一個判斷，見 tradingStance.ts）。
   const briefTitle = useBriefStance().briefTitle;
   const navItems = NAV_ITEMS.map((item) => (item.href === "/action" ? { ...item, label: briefTitle } : item));
   const router = useRouter();

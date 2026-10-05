@@ -35,26 +35,28 @@ describe("getTwTradingPhase／getTradingStance（假時鐘）", () => {
     expect(getTwTradingPhase(tpe("2026-10-05T13:29:00"))).toBe("intraday");
   });
 
-  it("週一 14:30 → 明日開盤建議，立場是明天 10/6（週二）開盤", () => {
+  it("週一 14:30 → 明日操作建議，立場是明天 10/6（週二）整個交易時段（開盤與盤中）", () => {
     const s = getTradingStance(tpe("2026-10-05T14:30:00"));
     expect(s.phase).toBe("after-close");
     expect(s.briefMode).toBe("next-open");
-    expect(s.briefTitle).toBe("明日開盤建議");
+    expect(s.briefTitle).toBe("明日操作建議");
     expect(s.nextOpenLabel).toBe("10/6（週二）");
-    expect(s.stanceLine).toContain("明天開盤要不要買");
+    expect(s.stanceLine).toContain("明天交易時段（開盤與盤中）要不要買");
+    expect(s.stanceLine).toContain("明天盤中回到 A～B 可分批買");
+    expect(s.stanceLine).toContain("不可寫成「開盤沒有可直接買的」");
   });
 
-  it("週五 15:00 → 下個交易日開盤建議（10/12 週一）", () => {
+  it("週五 15:00 → 下個交易日操作建議（10/12 週一）", () => {
     const s = getTradingStance(tpe("2026-10-09T15:00:00"));
-    expect(s.briefTitle).toBe("下個交易日開盤建議");
+    expect(s.briefTitle).toBe("下個交易日操作建議");
     expect(s.nextOpenLabel).toBe("10/12（週一）");
   });
 
-  it("週六 → 週末、下個交易日開盤建議", () => {
+  it("週六 → 週末、下個交易日操作建議", () => {
     const s = getTradingStance(tpe("2026-10-10T11:00:00"));
     expect(s.phase).toBe("weekend");
     expect(s.briefMode).toBe("next-open");
-    expect(s.briefTitle).toBe("下個交易日開盤建議");
+    expect(s.briefTitle).toBe("下個交易日操作建議");
     expect(s.nextOpenLabel).toBe("10/12（週一）");
   });
 

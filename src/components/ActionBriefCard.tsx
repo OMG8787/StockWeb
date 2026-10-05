@@ -15,7 +15,7 @@ import MarkdownLite from "./MarkdownLite";
 export default function ActionBriefCard() {
   const { data, failed } = useFetchOnce<{ actionBrief: ActionBrief }>("/api/action-brief");
   const brief = data?.actionBrief ?? null;
-  // 標題跟著內容走（14:30 後是「明日開盤建議」，見 tradingStance.ts）；還沒載入時依現在時段先顯示。
+  // 標題跟著內容走（14:30 後是「明日操作建議」，見 tradingStance.ts）；還沒載入時依現在時段先顯示。
   const stance = useBriefStance();
   const title = brief?.title ?? stance.briefTitle;
 

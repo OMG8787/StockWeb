@@ -175,4 +175,13 @@ describe("groupedPickLines（今日建議 fallback 分組）", () => {
   it("兩組都沒有 → 觀望", () => {
     expect(groupedPickLines([], stance)[1]).toContain("今天觀望");
   });
+
+  it("14:30 後（明日操作建議）：等回檔寫成盤中回到區間可分批買，不寫「開盤沒有可直接買的」", () => {
+    const next = { briefMode: "next-open" as const, nextOpenLabel: "10/6（週二）" };
+    const lines = groupedPickLines([pick("1111", "buy-on-pullback", "建議等回檔再買（現價不買，等回到 95～100）")], next);
+    expect(lines[0]).toBe("**10/6（週二） 可買（建議買進）**");
+    expect(lines.join("\n")).not.toContain("開盤沒有可直接買的");
+    expect(lines[1]).toContain("盤中回到區間可分批買");
+    expect(groupedPickLines([], next)[1]).toContain("10/6（週二） 先觀望");
+  });
 });
