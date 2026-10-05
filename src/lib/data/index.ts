@@ -36,6 +36,7 @@ export {
   findAllSymbolsByName,
   findInUniverse,
   searchUniverseByQuery,
+  twCompaniesByPopularity,
 } from "./universe";
 export type { UniverseEntry } from "./universe";
 export { describeTaifexNightFutures } from "./taifex";

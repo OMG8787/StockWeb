@@ -1,4 +1,6 @@
-import { findAllSymbolsByName, ensureTwUniverseWarm, findInUniverse } from "@/lib/data";
+import { findAllSymbolsByName, ensureTwUniverseWarm, findInUniverse, twCompaniesByPopularity } from "@/lib/data";
+import type { UniverseEntry } from "@/lib/data";
+import { guessByFuzzyName, type FuzzyNameGuess } from "./fuzzyName";
 import type { Market } from "@/lib/data";
 
 // The negative lookahead keeps a plain year mention ("2025年台股展望") from
@@ -136,4 +138,13 @@ export async function guessSymbolsFromText(
     .sort((a, b) => a.index - b.index)
     .slice(0, max)
     .map(({ symbol, market }) => ({ symbol, market }));
+}
+
+/**
+ * 完全比對不到任何股票時，用問句開頭的主詞做台股名稱近似比對（錯字，例如「建鼎」→ 健鼎 3044）。
+ * 見 fuzzyName.ts 的誤判防線；呼叫端（ask.ts）只在沒有任何其他目標／篩選意圖時才呼叫。
+ */
+export async function guessSymbolByFuzzyName(question: string): Promise<FuzzyNameGuess<UniverseEntry> | null> {
+  await ensureTwUniverseWarm();
+  return guessByFuzzyName(question, twCompaniesByPopularity());
 }

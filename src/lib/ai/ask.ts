@@ -10,7 +10,8 @@ import { SITE_RATING_TITLE, stripRatingTags } from "./siteRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
-import { guessSymbolsFromText } from "./symbolResolve";
+import { guessSymbolByFuzzyName, guessSymbolsFromText } from "./symbolResolve";
+import { describeFuzzyGuess } from "./fuzzyName";
 import {
   conversationWantsMovers,
   conversationWantsTechScreen,
@@ -101,6 +102,16 @@ export async function answerQuestion(
   // 問題永遠優先，不會被誤解成在問某一檔。
   if (targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && history.length > 0) {
     targets = await resolveFollowupTargets(question, history);
+  }
+  // 錯字（「建鼎呢?」→ 健鼎）：完全比對不到、也不是篩選／主題／追問時，猜最可能的一檔直接分析，
+  // 並要求 AI 開頭先確認（2026-10-05 使用者回報直接回「資料庫中沒有建鼎」）。見 fuzzyName.ts。
+  let fuzzyNote = "";
+  if (!contextSymbol && targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen) {
+    const guess = await guessSymbolByFuzzyName(question).catch(() => null);
+    if (guess) {
+      targets = [{ symbol: guess.best.symbol, market: guess.best.market }];
+      fuzzyNote = describeFuzzyGuess(guess);
+    }
   }
   const wantsHoldingsAnalysis = holdings.length > 0 && HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question);
   // 開放式「建議買什麼」→ 範圍是全市場，見 intent.ts wantsMarketWideBuyIdea 的說明。
@@ -338,6 +349,7 @@ export async function answerQuestion(
     // 目前時段與回答立場（盤中／盤後定價／收盤後／週末），見 tradingStance.ts。
     { text: stance.stanceLine, userSafe: false },
     { text: stockGroundingText, userSafe: true },
+    { text: fuzzyNote, userSafe: false },
     { text: notFoundNote, userSafe: false },
     { text: partialNotFoundNote, userSafe: false },
     { text: specialDateNote ? `【台股特殊日期】\n${specialDateNote}` : "", userSafe: false },

@@ -623,6 +623,15 @@ export async function ensureTwUniverseWarm(): Promise<void> {
   await getTwUniverse().catch(() => undefined);
 }
 
+/**
+ * 名稱近似比對用（ai/fuzzyName.ts）：台股全部公司，熱門的（上限內的精選＋大型股）排前面。
+ * 呼叫前必須先 `await ensureTwUniverseWarm()`。
+ */
+export function twCompaniesByPopularity(): UniverseEntry[] {
+  const seen = new Set(twUniverseSnapshot.map((e) => e.symbol));
+  return [...twUniverseSnapshot, ...twFullCompanySnapshot.filter((e) => !seen.has(e.symbol))];
+}
+
 /** 呼叫前必須先 `await ensureTwUniverseWarm()`（見上方說明），否則市場為 "TW"
  *  時查到的可能只是SEED清單、漏掉大量非超大型權值股。 */
 export function findInUniverse(symbol: string, market?: Market): UniverseEntry | undefined {
