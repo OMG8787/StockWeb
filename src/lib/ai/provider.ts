@@ -41,6 +41,26 @@ export interface CallAiProvidersOptions {
    *  假名視為不合格改用下一家）。要求模型「原封不動抄回原文」的呼叫端要設
    *  false，否則原文裡的簡體字被轉掉會對不上。 */
   normalizeZhTw?: boolean;
+  /** 僅供跨模型評測（scripts/eval）使用：只呼叫這一家（不備援、不看熔斷）。正式流程從不設定。 */
+  forceProvider?: ProviderId;
+  /** 僅供評測：搭配 forceProvider，連「請求太大接不住」（canHandle）也照樣送出，用來量測實際會不會被拒。 */
+  ignoreSizeLimit?: boolean;
+}
+
+/**
+ * 僅供跨模型評測（scripts/eval）使用的攔截鉤子：設定後每次 callAiProviders 先交給它，
+ * 回傳 ProviderResult 就直接用（不呼叫任何供應商），回傳 undefined 照常執行。
+ * 評測用它在 answerQuestion 組好系統提示詞與參考資料後「截下輸入」，再用同一份輸入分別強制
+ * 各家回答，三家比較的輸入才完全相同。正式流程從不呼叫 setAiEvalInterceptor。
+ */
+export type AiEvalInterceptor = (
+  system: string,
+  messages: ChatTurn[],
+  options: CallAiProvidersOptions
+) => ProviderResult | undefined;
+let evalInterceptor: AiEvalInterceptor | undefined;
+export function setAiEvalInterceptor(fn: AiEvalInterceptor | undefined): void {
+  evalInterceptor = fn;
 }
 
 const MAX_HISTORY_TURNS = 10;
@@ -65,6 +85,10 @@ export async function callAiProviders(
   messages: ChatTurn[],
   options: CallAiProvidersOptions = {}
 ): Promise<ProviderResult> {
+  if (evalInterceptor) {
+    const intercepted = evalInterceptor(system, messages, options);
+    if (intercepted) return intercepted;
+  }
   const anyConfigured = Object.values(ADAPTERS).some((a) => a.isConfigured());
   if (!anyConfigured) {
     return {
@@ -111,7 +135,11 @@ export async function callAiProviders(
   const maxOutputTokens = options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
   const deadline = Date.now() + (options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS);
   const simpleTask = options.simpleTask ?? false;
-  const chain = buildProviderChain(system, turns, maxOutputTokens);
+  const chain = options.forceProvider
+    ? [ADAPTERS[options.forceProvider]].filter(
+        (a) => a.isConfigured() && (options.ignoreSizeLimit || a.canHandle(system, turns, maxOutputTokens))
+      )
+    : buildProviderChain(system, turns, maxOutputTokens);
   const failures: string[] = [];
 
   for (const adapter of chain) {

@@ -1,0 +1,328 @@
+// 跨模型 AI 品質評測題庫（純資料；新增題目照 README.md「怎麼新增題目」）。
+// 題目大多取材自正式站使用者回報（scripts/check-feedback.py）與 PROGRESS.md「AI 回饋檢查紀錄」。
+import type { EvalCase } from "./types";
+
+const HOLDINGS = [
+  { symbol: "2330", market: "TW" as const, name: "台積電", costBasis: 1800, shares: 1000 },
+  { symbol: "2409", market: "TW" as const, name: "友達", costBasis: 45, shares: 2000 },
+  { symbol: "2303", market: "TW" as const, name: "聯電", costBasis: 52, shares: 1000 },
+  { symbol: "2324", market: "TW" as const, name: "仁寶", costBasis: 33, shares: 1000 },
+  { symbol: "2454", market: "TW" as const, name: "聯發科" },
+];
+const HOLDING_SYMBOLS = ["2330", "2409", "2303", "2324", "2454"];
+const HELD_SYMBOLS = ["2330", "2409", "2303", "2324"];
+
+export const EVAL_CASES: EvalCase[] = [
+  // ---------------- 個股買不買（四種市場）
+  {
+    id: "buy-twse",
+    title: "上市個股買不買：第一句照抄評等、不扯無關個股",
+    question: "台積電可以買嗎？",
+    checks: [{ kind: "ratingFirst", symbol: "2330" }, { kind: "onlySymbols", allowed: ["2330"] }, { kind: "noStopLossUnheld" }, { kind: "length", min: 150, max: 650 }],
+    source: "RULE_FOLLOW_SITE_RATING",
+    tags: ["個股", "上市"],
+  },
+  {
+    id: "buy-tpex-button",
+    title: "上櫃個股（旺矽）個股頁按鈕：評等第一句、未持有不說停損、把握程度",
+    question: "關於 旺矽（6223），最近走勢如何？現在建議買還是不買？",
+    contextSymbol: "6223",
+    checks: [
+      { kind: "ratingFirst", symbol: "6223" },
+      { kind: "noStopLossUnheld" },
+      { kind: "require", name: "表達把握程度", any: ["把握程度"] },
+      { kind: "onlySymbols", allowed: ["6223"] },
+    ],
+    source: "使用者回報 2026-10-04 22:29（旺矽未持有卻叫停損）",
+    tags: ["個股", "上櫃", "個股頁按鈕"],
+  },
+  {
+    id: "buy-emerging",
+    title: "興櫃個股（安成生技）能不能買：要有資料、不可說不涵蓋",
+    question: "安成生技可以買嗎？",
+    checks: [
+      { kind: "forbid", name: "不可說查不到／不涵蓋", any: ["查不到", "不在.{0,6}涵蓋", "沒有比對到"] },
+      { kind: "require", name: "提到代號6610", any: ["6610"] },
+      { kind: "noStopLossUnheld" },
+    ],
+    source: "興櫃涵蓋（emerging.ts）",
+    tags: ["個股", "興櫃"],
+  },
+  {
+    id: "buy-us",
+    title: "美股個股買不買",
+    question: "AAPL 現在可以買嗎？",
+    checks: [{ kind: "ratingFirst", symbol: "AAPL" }, { kind: "noStopLossUnheld" }, { kind: "onlySymbols", allowed: ["AAPL"] }],
+    source: "美股問答",
+    tags: ["個股", "美股"],
+  },
+  {
+    id: "entry-timing",
+    title: "進場時機（判斷題要夠深：3～5 個帶數字理由＋具體做法）",
+    question: "仁寶何時進場？",
+    checks: [{ kind: "ratingFirst", symbol: "2324" }, { kind: "length", min: 250, max: 700 }, { kind: "noStopLossUnheld" }],
+    source: "使用者👎 2026-10-05 14:50「仁寶何時進場」太淺、要再多分析",
+    tags: ["個股", "判斷題"],
+  },
+  {
+    id: "name-with-marker",
+    title: "名稱帶標記（國巨* 官方名）要查得到",
+    question: "國巨明天走勢？",
+    checks: [
+      { kind: "forbid", name: "不可說沒有國巨資料", any: ["查不到", "沒有.{0,4}資料", "不在.{0,6}涵蓋", "沒有比對到"] },
+      { kind: "require", name: "提到代號2327", any: ["2327"] },
+      { kind: "forbid", name: "不可寫出名稱標記*", any: ["國巨\\*"] },
+    ],
+    source: "使用者回報 2026-10-05 16:46／16:58「為什麼沒有國巨資料」",
+    tags: ["個股", "名稱解析"],
+  },
+  {
+    id: "oil-sector",
+    title: "油價產業（華航）：必須納入產業外部因子",
+    question: "明天可以買華航嗎？",
+    checks: [
+      { kind: "ratingFirst", symbol: "2610" },
+      { kind: "require", name: "提到油價", any: ["油價", "原油", "WTI", "Brent", "布蘭特"] },
+    ],
+    source: "使用者📝 2026-10-04 21:42「油價已經降了、沒跟上」",
+    tags: ["個股", "產業因子"],
+  },
+  {
+    id: "not-found",
+    title: "無資料誠實：不存在的代號不可編數字",
+    question: "9999 這檔股票可以買嗎？",
+    checks: [
+      { kind: "require", name: "誠實說查不到／打錯", any: ["查不到", "沒有比對到", "打錯", "不在.{0,8}涵蓋", "找不到", "沒有這"] },
+      { kind: "forbid", name: "不可編股價", any: ["9999.{0,20}\\d+(\\.\\d+)?\\s*(元|TWD)"] },
+    ],
+    source: "RULE_HONESTY／RULE_NOT_FOUND_MARKER（宏觀電通事件）",
+    tags: ["誠實"],
+  },
+  // ---------------- 多檔比較
+  {
+    id: "compare-tw",
+    title: "多檔比較必須選一檔（台光電 vs 健鼎）",
+    question: "台光電與健鼎比較推薦買哪一檔？原因？",
+    checks: [
+      { kind: "picksOne", symbols: ["2383", "3044"] },
+      { kind: "ratingEach", symbols: ["2383", "3044"] },
+      { kind: "onlySymbols", allowed: ["2383", "3044"] },
+    ],
+    source: "使用者📝 2026-10-05 13:36「沒有回答到我的問題」",
+    tags: ["比較"],
+  },
+  {
+    id: "compare-us",
+    title: "美股比較必須選一檔（NVDA vs AMD）",
+    question: "NVDA 跟 AMD 哪個比較值得買？",
+    checks: [{ kind: "picksOne", symbols: ["NVDA", "AMD"] }, { kind: "ratingEach", symbols: ["NVDA", "AMD"] }],
+    source: "RULE_MULTI_STOCK_COMPARISON",
+    tags: ["比較", "美股"],
+  },
+  // ---------------- 全市場推薦／篩選
+  {
+    id: "market-wide",
+    title: "全市場推薦：只推有評等的、分組、附 0050 對照、講為什麼",
+    question: "今天有什麼股票推薦買進？",
+    checks: [
+      { kind: "onlyRatedSymbols" },
+      { kind: "require", name: "附 0050 對照句", any: ["0050"] },
+      { kind: "require", name: "表達把握程度", any: ["把握程度"] },
+    ],
+    source: "使用者回報 2026-10-04 22:31「還要說為什麼建議買」＋ RULE_MARKET_WIDE_RECOMMENDATION",
+    tags: ["全市場"],
+  },
+  {
+    id: "next-week-buy",
+    title: "下週開盤建議買入（全市場、時段立場）",
+    question: "下週開盤建議買入的股票。",
+    checks: [{ kind: "onlyRatedSymbols" }, { kind: "require", name: "附 0050 對照句", any: ["0050"] }],
+    source: "使用者回報 2026-10-04 22:31",
+    tags: ["全市場", "時段"],
+  },
+  {
+    id: "tech-screen-cross",
+    title: "技術篩選：MACD 與 KD 皆黃金交叉，評等不同要講清楚",
+    question: "有MACD與KD線皆黃金交叉，且你多方面驗證後認為建議買入的股票嗎？",
+    checks: [{ kind: "onlyRatedSymbols" }],
+    source: "使用者 2026-10-05 11:40",
+    tags: ["技術篩選"],
+  },
+  {
+    id: "tech-screen-near",
+    title: "即將交叉：問「接近黃金交叉」不可只回沒有",
+    question: "有MACD與KD線都接近黃金交叉的股票嗎？",
+    checks: [{ kind: "require", name: "回應接近／即將交叉", any: ["接近", "即將", "快要", "差距"] }],
+    source: "使用者回報 2026-10-04 22:24「我有說接近」",
+    tags: ["技術篩選"],
+  },
+  {
+    id: "unknown-theme",
+    title: "沒有的主題分類要直說，不可拿漲幅榜冒充",
+    question: "元宇宙概念股有哪些？",
+    checks: [{ kind: "require", name: "直說沒有這個主題分類", any: ["沒有這個主題", "沒有.{0,8}(分類|清單)", "目前沒有.{0,10}主題"] }],
+    source: "RULE / unknownTheme 標記",
+    tags: ["誠實", "主題"],
+  },
+  // ---------------- 對話追問
+  {
+    id: "followup-buy",
+    title: "對話追問「建議買嗎?」要承接上一檔（2330），不可跳成全市場",
+    question: "建議買嗎？",
+    history: [
+      { role: "user", content: "2330 最近走勢如何？" },
+      { role: "assistant", content: "台積電(2330)最近站上20日均線、均線多頭排列，短線偏多，但RSI偏高。" },
+    ],
+    checks: [{ kind: "ratingFirst", symbol: "2330" }, { kind: "onlySymbols", allowed: ["2330"] }],
+    source: "使用者回報 2026-10-04 22:37「沒有對話上下文」",
+    tags: ["對話", "追問"],
+  },
+  {
+    id: "list-reference",
+    title: "「這幾檔」指上一則清單，不可提清單外股票",
+    question: "這幾檔有你特別看好的嗎？",
+    history: [
+      { role: "user", content: "有MACD與KD線都接近黃金交叉的股票嗎？" },
+      {
+        role: "assistant",
+        content: "目前接近黃金交叉的有：健鼎(3044)、聯電(2303)、仁寶(2324)，三檔的 MACD 與 KD 差距都在收斂中。",
+      },
+    ],
+    checks: [{ kind: "onlySymbols", allowed: ["3044", "2303", "2324"] }, { kind: "ratingEach", symbols: ["3044", "2303", "2324"] }],
+    source: "使用者回報 2026-10-05 10:08（跑出清單外的台積電）",
+    tags: ["對話", "指代"],
+  },
+  {
+    id: "earlier-claim",
+    title: "使用者說「你早上說過」：不可承認道歉，要說看不到更早紀錄",
+    question: "你早上說台積電建議買，現在怎麼又不一樣？",
+    checks: [
+      { kind: "require", name: "說明看不到更早的對話", any: ["只看得到這次", "看不到更早", "看不到.{0,6}(早上|之前|先前)"] },
+      { kind: "forbid", name: "不可道歉承認", any: ["抱歉", "不好意思", "我說錯", "早上的說法(不正確|有誤)"] },
+    ],
+    source: "RULE_NO_UNVERIFIABLE_CONFESSION（2026-10-04）",
+    tags: ["對話", "誠實"],
+  },
+  // ---------------- 期間／指標
+  {
+    id: "yesterday-cross",
+    title: "昨天有沒有交叉：要逐日回答，不可說無法回溯",
+    question: "台積電昨天有沒有KD黃金交叉？",
+    checks: [
+      { kind: "forbid", name: "不可說無法回溯", any: ["無法回溯", "沒有保留", "無法取得.{0,4}(過去|歷史)", "看不到過去"] },
+      { kind: "yesNoDirect", subject: ["台積電", "2330"] },
+    ],
+    source: "RULE_NO_CANT_BACKTRACK_WHEN_DATA（2026-10-04）",
+    tags: ["期間", "指標"],
+  },
+  {
+    id: "last-week",
+    title: "上週期間：要用歷史脈絡數字",
+    question: "台積電上週漲了多少？",
+    checks: [
+      { kind: "require", name: "有百分比或價差數字", any: ["\\d+(\\.\\d+)?\\s*[%％]", "\\d+\\s*元"] },
+      { kind: "forbid", name: "不可說無法回溯", any: ["無法回溯", "看不到過去", "沒有.{0,4}歷史資料"] },
+    ],
+    source: "detectHistoryPeriod／RULE_USE_HISTORICAL_CONTEXT",
+    tags: ["期間"],
+  },
+  {
+    id: "yes-no",
+    title: "是非題直答：主詞＋條件講完整",
+    question: "1301 今天有 MACD 黃金交叉嗎？",
+    checks: [{ kind: "yesNoDirect", subject: ["1301", "台塑"] }, { kind: "length", max: 350 }],
+    source: "RULE_YES_NO_DIRECT（「1301沒有嗎？」答「有的」）",
+    tags: ["是非題"],
+  },
+  {
+    id: "second-opinion",
+    title: "口訣第二意見：不迎合，給同意／不同意判斷",
+    question: "聽說量縮代表主力在洗盤，台積電最近量縮是不是要準備噴了？",
+    checks: [{ kind: "require", name: "給出獨立判斷", any: ["不同意", "部分同意", "不一定", "未必", "不能直接", "不代表"] }],
+    source: "RULE_SECOND_OPINION",
+    tags: ["判斷"],
+  },
+  {
+    id: "jargon",
+    title: "名詞解釋要短、白話",
+    question: "本益比是什麼？",
+    checks: [{ kind: "length", max: 260 }, { kind: "forbid", name: "不可開場白", any: ["^好的", "^根據"] }],
+    source: "RULE_CONCISE_ANSWER",
+    tags: ["名詞"],
+  },
+  {
+    id: "market-overview",
+    title: "大盤概況：不扯個股評等",
+    question: "今天大盤表現如何？",
+    checks: [{ kind: "length", max: 450 }, { kind: "require", name: "有加權指數數字", any: ["加權", "台股"] }],
+    source: "常見問題",
+    tags: ["大盤"],
+  },
+  // ---------------- 持股
+  {
+    id: "holdings-deep",
+    title: "分析關注清單：每檔結論照評等、持有停損用近端出場參考",
+    question: "幫我分析一下我關注清單裡的每一檔股票",
+    holdings: HOLDINGS,
+    checks: [{ kind: "holdingVerdicts", symbols: HELD_SYMBOLS }, { kind: "onlySymbols", allowed: HOLDING_SYMBOLS }],
+    source: "使用者回報 2026-10-05 14:10（友達停損 32.65 跌停都到不了）",
+    tags: ["持股"],
+  },
+  {
+    id: "holdings-sell",
+    title: "賣掉哪些：與分析一致、照持股評等彙整",
+    question: "那我持有名單現在建議賣掉哪些？直接列出來給我就好不用說明。",
+    holdings: HOLDINGS,
+    history: [
+      { role: "user", content: "幫我分析一下我關注清單裡的每一檔股票" },
+      { role: "assistant", content: "（上一則已逐檔分析你的持股，略）" },
+    ],
+    checks: [{ kind: "sellListMatches", symbols: HELD_SYMBOLS }, { kind: "onlySymbols", allowed: HOLDING_SYMBOLS }, { kind: "length", max: 300 }],
+    source: "使用者回報 2026-10-05 14:13「剛剛還建議賣很多檔，現在又沒有了」",
+    tags: ["持股", "一致性"],
+  },
+  {
+    id: "holding-target",
+    title: "問持股中的一檔：用已持有評等、一句帶到成本損益",
+    question: "友達要停損嗎？",
+    holdings: HOLDINGS,
+    checks: [{ kind: "ratingFirst", symbol: "2409", held: true }, { kind: "onlySymbols", allowed: ["2409"] }],
+    source: "持有中停損（holdingStop.ts）",
+    tags: ["持股"],
+  },
+  // ---------------- 時段立場（假時鐘）
+  {
+    id: "stance-intraday",
+    title: "盤中立場：不可說收盤價／收在",
+    question: "健鼎現在可以買嗎？",
+    clock: "2026-10-05T10:30:00+08:00",
+    checks: [
+      { kind: "ratingFirst", symbol: "3044" },
+      { kind: "forbid", name: "盤中不可說收盤", any: ["收在", "收盤價", "今天收"] },
+    ],
+    source: "RULE_INTRADAY_TW（假時鐘：週一 10:30）",
+    tags: ["時段"],
+  },
+  {
+    id: "stance-after-hours-fixed",
+    title: "盤後定價立場（13:30～14:30）：要講盤後定價能不能買",
+    question: "台積電現在可以買嗎？",
+    clock: "2026-10-05T14:00:00+08:00",
+    checks: [{ kind: "ratingFirst", symbol: "2330" }, { kind: "require", name: "講盤後定價", any: ["盤後定價"] }],
+    source: "使用者 2026-10-05 11:47（13:30～14:30 盤後立場）",
+    tags: ["時段"],
+  },
+  {
+    id: "stance-weekend",
+    title: "週末措辭：不可說「今天」漲跌、要講下一個交易日怎麼做",
+    question: "聯電現在可以買嗎？",
+    clock: "2026-10-03T11:00:00+08:00",
+    checks: [
+      { kind: "ratingFirst", symbol: "2303" },
+      { kind: "forbid", name: "週末不可說今天的行情", any: ["今天(上漲|下跌|收|開盤|盤中|漲|跌)", "今日(上漲|下跌|收|漲|跌)"] },
+      { kind: "require", name: "講下一個交易日", any: ["下一個交易日", "週一", "下週一", "星期一"] },
+    ],
+    source: "weekendNoteForAi＋RULE_TRADING_STANCE（假時鐘：週六 11:00）",
+    tags: ["時段"],
+  },
+];
