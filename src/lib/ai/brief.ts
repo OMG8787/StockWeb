@@ -15,6 +15,9 @@ import {
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
+import { archiveBrief } from "./briefArchive";
+import { getMarketRegime } from "./learning/regimeData";
+import { REGIME_LABEL } from "./learning/regime";
 import { modelInfo, type ModelInfo } from "./modelName";
 import { getMarketStatus, marketStatusLabel, weekendNoteForAi } from "@/lib/marketStatus";
 
@@ -53,7 +56,8 @@ const BRIEF_TTL_MS = 10 * 60_000;
 // v4：2026-10-04 輸出改成精簡格式（一句總結＋台美分開條列＋一句風險），作廢舊的長篇快取
 // v5：持股結構資訊行加上券資比；v6：第四項改成融券使用率（融券÷融券限額）
 // v7：2026-10-05 補「同一個數字只寫一次」規則（BRIEF_RULE_NO_REPEAT_NUMBER），作廢舊快取
-const BRIEF_CACHE_KEY = "daily-brief:v7";
+// v8：2026-10-05 快報改成「今日重點＋現象→原因→後續＋明天要留意」600~900字（使用者嫌太簡短、沒因果）
+const BRIEF_CACHE_KEY = "daily-brief:v8";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -107,20 +111,25 @@ async function buildTwHoldingStructureSummary(
 
 const BRIEF_ROLE = "你是股票研究網站的「今日市場快報」撰稿人，用台灣繁體中文寫給忙碌的讀者，讓他30秒看完就掌握今天台股、美股發生什麼事。";
 
+// 2026-10-05 使用者回報「快報太簡短、抓不到重點，要分析前因後果，也作為 AI 學習資料」：
+// 字數從 ≤500 放寬到 600~900，結構改成「今日重點＋台股／美股各自『現象→原因→後續』＋明天要留意」。
+// 這次問題不在字數本身，而是只列資訊沒有重點與因果；所以規則重點是每點固定三段式。
 const BRIEF_FORMAT = [
   "【輸出格式，嚴格照這個骨架，不要多加段落】",
-  "**總結**：一句話講今天台美股整體狀況（≤40字）。",
-  "**台股**",
-  "- 2~3點（指數無資料時改用漲跌榜、法人、新聞補足），每點1~2句、必帶關鍵數字（指數或個股漲跌幅、法人買賣超張數等）。",
-  "**美股**",
-  "- 1~2點，同上。",
-  "**留意**：一句話講接下來要注意的風險，取材只能來自參考資料的新聞或數據，不可寫資料沒提到的事件。",
-  "台股＋美股合計3~5點，超過5點就刪到5點；全文（含數字）不超過500字。",
+  "**今日重點**：1~2句，講今天市場最重要的一件事，以及它對下一個交易日的意義。",
+  "**台股：發生了什麼、為什麼**",
+  "- 2~3點。每點固定三段：先寫現象（帶關鍵數字，例如指數或個股漲跌幅、法人買賣超），再接『原因：』（只能用參考資料能支撐的：美股／費半前一晚、法人買賣、產業或公司新聞、總經、油價、匯率；因果用『可能／通常』），最後接『後續：』（這個現象的影響，或接下來要看什麼）。",
+  "**美股：發生了什麼、為什麼**",
+  "- 1~2點，同樣三段式（現象帶數字 → 原因： → 後續：）。",
+  "**明天要留意**",
+  "- 1~2點，寫具體要看的指標或價位，例如『加權若守住48,000點』『留意外資是否續買』；價位與數字只能來自參考資料，不可自己編支撐壓力。",
+  "每一點用 - 開頭、單獨一行，三段在同一點內以句號分開；全文（含數字）約600~900字，不要超過1000字。",
+  "資料裡找不到原因時，原因欄寫『原因不明』或整點略過，不可為了湊結構硬編理由。",
   "不要開場白、不要結尾總結或客套、不要免責聲明（網站會自動附上），不要用 # 標題。",
 ].join("\n");
 
 const BRIEF_RULE_CONTENT =
-  "每點挑當天最重要的事（大盤走勢、最大漲跌族群或個股、明確的原因），不要逐檔列清單。原因只在新聞、籌碼或總經資料能支撐時才寫，因果用『可能／通常』，沒有明顯關聯就不寫、不要牽拖；台美連動有資料支撐才提。";
+  "每點挑當天最重要的事（大盤走勢、最大漲跌族群或個股），不要逐檔列清單，要讓讀者讀完知道『發生什麼、為什麼、接下來看什麼』。原因只在新聞、籌碼、總經或前一晚美股資料能支撐時才寫，因果用『可能／通常』，不可寫成肯定句；沒有明顯關聯就寫『原因不明』、不要牽拖；台美連動（前一晚美股／費半對台股、台股收盤對美股）有資料支撐才提。『今日重點』必須與下面條列的數字一致，且不可只是把條列再抄一遍。";
 
 const BRIEF_RULE_MARKET_STATUS =
   "依【市場狀態】描述數字：已收盤才可用『收在／終場／收盤』；盤中絕對不可用這些字，改用『目前／盤中來到』。台股、美股各依自己的狀態，不互相套用。";
@@ -224,20 +233,24 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
 
 
     // Not on a path a user stares at a spinner for (cron / client-fetched),
-    // so a longer timeout is fine. maxOutputTokens stays well above the <=500
+    // so a longer timeout is fine. maxOutputTokens stays well above the ~600-900
     // character target: CJK costs more tokens per character than a naive
     // estimate (an old 550-800 char prompt got cut mid-sentence at 1600), and
     // a truncated answer makes the provider layer fail over to the next one.
     const result = await callAiProviders(BRIEF_SYSTEM_PROMPT, [{ role: "user", content: `參考資料：\n${grounding}` }], {
-      timeoutMs: 25000,
-      maxOutputTokens: 1800,
+      timeoutMs: 40000,
+      maxOutputTokens: 3200,
     });
 
     if (result.usedAi) {
-      return { text: result.answer, usedAi: true, generatedAt: new Date().toISOString(), model: modelInfo(result.model) };
+      const generatedAt = new Date().toISOString();
+      // 存檔作為 AI 學習資料（不等待、失敗不影響快報；一天最多寫 2 次，見 briefArchive.ts）
+      const regime = await getMarketRegime().catch(() => null);
+      archiveBrief({ text: result.answer, generatedAt, model: result.model ?? null, regime: regime ? REGIME_LABEL[regime] : null, grounding });
+      return { text: result.answer, usedAi: true, generatedAt, model: modelInfo(result.model) };
     }
 
-    // AI 掛掉時的資料整理，跟 AI 版同一種骨架（總結／台股／美股／留意），只放客觀數字。
+    // AI 掛掉時的資料整理，跟 AI 版同一種骨架（今日重點／台股／美股／明天要留意），只放客觀數字。
     const pctText = (n: number) => `${n >= 0 ? "+" : ""}${n}%`;
     const fallbackMarket = (
       label: string,
@@ -255,10 +268,10 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       ];
     };
     const fallback = [
-      `**總結**：AI 快報暫時無法產生（${(result.failureReason ?? "未知原因").replace(/。$/, "")}），以下為原始數字整理。`,
+      `**今日重點**：AI 快報暫時無法產生（${(result.failureReason ?? "未知原因").replace(/。$/, "")}），以下為原始數字整理。`,
       ...fallbackMarket("台股", "TW", twGainers[0], twLosers[0]),
       ...fallbackMarket("美股", "US", usGainers[0], usLosers[0]),
-      "**留意**：以上未經綜合分析，僅供參考。",
+      "**明天要留意**：以上未經綜合分析，僅供參考。",
     ].join("\n");
 
     return { text: fallback, usedAi: false, generatedAt: new Date().toISOString() };

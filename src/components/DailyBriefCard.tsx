@@ -23,7 +23,8 @@ import MarkdownLite from "./MarkdownLite";
 // stated target).
 // 2026-10-04：快報改成精簡格式（總結＋台美條列＋留意，約300-450字）後，正常長度在
 // 320px 內就能完整顯示；收合改成「真的超過才出現」，避免短內容也蓋一層漸層＋展開按鈕。
-const COLLAPSED_HEIGHT_PX = 320;
+// 2026-10-05：快報加長到 600~900 字（今日重點＋現象→原因→後續），預設收合高度拉到 420，先看到今日重點與台股第一點。
+const COLLAPSED_HEIGHT_PX = 420;
 
 export default function DailyBriefCard() {
   const { data, failed } = useFetchOnce<{ brief: DailyBrief }>("/api/daily-brief");
