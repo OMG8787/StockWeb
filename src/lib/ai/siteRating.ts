@@ -130,7 +130,7 @@ export function describeSiteRating(name: string, symbol: string, r: SiteRating):
     r.noChase != null ? `高於 ${fmt(r.noChase)} 不追價` : "",
     r.exit != null ? `買進後跌破 ${fmt(r.exit)} 出場` : "",
   ].filter(Boolean);
-  return `${SITE_RATING_TITLE}${name}(${symbol})：未持有→「${r.label}」；已持有→「${r.holdingLabel}」。理由：${r.reason}。${
+  return `${SITE_RATING_TITLE}${name}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${
     levels.length > 0 ? `價位：${levels.join("；")}。` : ""
   }`;
 }

@@ -106,8 +106,8 @@ describe("computeSiteRating", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100], 90, 113.5) });
     const text = describeSiteRating("健鼎", "3044", r);
     expect(text.startsWith(SITE_RATING_TITLE)).toBe(true);
-    expect(text).toContain("未持有→「建議等回檔再買（區間 95～100）」");
-    expect(text).toContain("已持有→「續抱」");
+    expect(text).toContain("未持有：「建議等回檔再買（區間 95～100）」");
+    expect(text).toContain("已持有：「續抱」");
     expect(text).toContain("高於 113.5 不追價");
     expect(text).toContain("買進後跌破 90 出場");
   });

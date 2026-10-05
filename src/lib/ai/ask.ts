@@ -187,7 +187,7 @@ export async function answerQuestion(
   const ratingListText = actionBrief
     ? actionBrief.picks.length > 0
       ? actionBrief.picks
-          .map((p) => `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有→「${p.label}」；已持有→「${p.holdingLabel}」。理由：${p.reason}。`)
+          .map((p) => `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有：「${p.label}」／已持有：「${p.holdingLabel}」。理由：${p.reason}。`)
           .join("\n")
       : "（本站綜合評等目前沒有任何一檔是「建議買進」或「建議等回檔再買」）"
     : "";
