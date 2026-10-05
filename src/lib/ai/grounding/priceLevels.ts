@@ -149,7 +149,7 @@ function pctFrom(a: number, b: number): string {
 }
 
 /** 給 AI 的文字區塊。 */
-export function describePriceFramework(f: PriceFramework | null): string {
+export function describePriceFramework(f: PriceFramework | null, opts: { avoid?: boolean } = {}): string {
   if (!f) return "";
   const list = (ls: PriceLevel[]) => (ls.length ? ls.slice(0, 4).map((l) => `${fmt(l.price)}（${l.labels.join("、")}）`).join("、") : "無");
   const lines = [
@@ -158,7 +158,14 @@ export function describePriceFramework(f: PriceFramework | null): string {
     `- 下方支撐（由近到遠）：${list(f.supports)}`,
     `- 上方壓力（由近到遠）：${list(f.resistances)}`,
   ];
-  if (f.zone && f.exit) {
+  if (opts.avoid && f.zone) {
+    // 2026-10-05 正式站：聯電評等「建議先不要買」，AI 仍照這裡的『分批買進區間』寫「等回到 A～B 再分批買」＋操作計畫。
+    // 評等為先不要買時這個區塊不再出現「買進區間／買進後出場」，只給觀察用支撐與轉為可考慮買進的條件。
+    lines.push(
+      `- 本站綜合評等為「建議先不要買」：不給買進區間、也不給買進後出場價。下方支撐 ${fmt(f.zone.low)}～${fmt(f.zone.high)} 只是觀察用支撐（不是買進區間）；` +
+        `轉為可考慮買進的條件＝評等改變（例如籌碼轉為法人買超、技術面不再轉弱），或重新站回 ${fmt(f.noChase.price)}（${f.noChase.label}）以上。`
+    );
+  } else if (f.zone && f.exit) {
     const gap = pctFrom(f.price, f.zone.high);
     lines.push(
       `- 建議框架：分批買進區間 ${fmt(f.zone.low)}～${fmt(f.zone.high)}（上緣＝${f.zone.highLabel}、下緣＝${f.zone.lowLabel}）；` +

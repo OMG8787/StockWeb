@@ -97,3 +97,22 @@ describe("computePriceFramework", () => {
     expect(tickSize(420, "US")).toBe(0.01);
   });
 });
+
+describe("describePriceFramework 先不要買", () => {
+  it("評等為先不要買時不出現買進區間與買進後出場", async () => {
+    const { describePriceFramework } = await import("@/lib/ai/grounding/priceLevels");
+    const f = {
+      price: 152.5,
+      supports: [],
+      resistances: [],
+      zone: { low: 134.5, high: 148.5, lowLabel: "a", highLabel: "b" },
+      exit: { price: 126.5, label: "c" },
+      noChase: { price: 157, label: "MA5" },
+    } as unknown as Parameters<typeof describePriceFramework>[0];
+    const t = describePriceFramework(f, { avoid: true });
+    expect(t).not.toContain("分批買進區間");
+    expect(t).not.toContain("買進後跌破");
+    expect(t).toContain("觀察用支撐");
+    expect(describePriceFramework(f)).toContain("分批買進區間 134.5～148.5");
+  });
+});

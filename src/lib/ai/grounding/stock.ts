@@ -168,7 +168,7 @@ export async function buildStockGrounding(
   const levelCandles = chartYear?.candles ?? chart?.candles;
   if (stockRating) {
     // 直接用評等那份框架，買進區間的數字才會跟評等逐字相同。
-    const levelsText = describePriceFramework(stockRating.framework);
+    const levelsText = describePriceFramework(stockRating.framework, { avoid: stockRating.rating.code === "avoid" });
     if (levelsText) lines.push(levelsText);
   } else if (levelCandles && quote.board !== "emerging") {
     const levelsText = describePriceFramework(computePriceFramework(levelCandles, quote.price, quote.market));
