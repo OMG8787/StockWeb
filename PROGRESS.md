@@ -410,6 +410,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-05（續6）：學習循環第二階段＋模型標示＋市況研究結論
+
+- 第二階段與結構修正（`4b695fe`、`8509afe`、`006c420`、`94d7fa1`、`b19f417`）：numberGuard.ts 回答後價位檢查（小數點位移／差>30% 自動更正）；actionPicks.ts 今日建議名單程式決定（每組≤3、去重、互斥），AI 只回 JSON 解說；aiJudge.ts AI 判斷層（每檔每天一次、寫評等紀錄 ai 欄位、`AI_ADJUST_AFFECTS_CONCLUSION=false`）；championChallenger.ts 冠軍／挑戰者＋放寬判準（≥60筆、AI實際調整≥20筆、平均獎勵高≥0.3pp、配對t≥2）；教訓＋證據不可分割；每則回答標示模型、回饋與判斷層記 model、/scoreboard 各模型區塊。發現正式站 Gemini 實際用 gemini-flash-lite-latest（交果斷化 agent 修偏好）。
+- 研究 C（`82c78bd`、docs/backtest/2026-10-regime.md）：2022～2024 樣本外，弱市況硬開關未達可靠標準、V 型反彈會錯過→**不上線硬開關**；技術支持組在弱市況可靠為負（20日 −0.98%，t −3.92）→改加「弱市況提示」不改結論（交果斷化 agent）。
+
 ### 2026-10-05（續5）：AI 學習循環第一階段上線＋A/B/D＋持股修正
 
 - **學習循環第一階段**（`50d1293`→`02cd8e1`）：評等紀錄加 `feat`（原始特徵）與 `rg`（市況，learning/regime.ts）、預留 `ai` 欄位；learning/reward.ts（成本0.585%、回撤懲罰0.5、不買卻大漲3%）；每日學習工作接 warm-cache 收盤後一次（`/api/cron/learning?force=1` 可手動）；learning/weights.ts（收縮、半衰期60日、≥30筆、分市況，改用「相對同市況平均」獎勵；`LEARNED_WEIGHTS_ENABLED=false`，擴大資料前學後驗未通過）；learning/similar.ts 相似案例（<10筆標樣本不足）＋ RULE_EXPERIENCE（在 learning/experienceRule.ts）；lessons.ts 6 條教訓＋ scripts/update-lessons.py；/scoreboard 看板、/api/learning。第一批 1 日成績最早 10/6 收盤後。已知：AI 引用教訓時有時沒帶證據數字。
