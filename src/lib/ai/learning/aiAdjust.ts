@@ -13,6 +13,13 @@ import { RATING_LABEL, type RatingCode } from "../siteRating";
 export const AI_ADJUST_AFFECTS_CONCLUSION = false;
 
 /**
+ * AI 判斷層的看法要不要顯示給使用者（個股問答、今日建議）。2026-10-06 使用者回報：主結論「建議買進：南亞」下一行
+ * 卻是「AI 看法：調降一級（建議先不要買）……把握：高」，問「那到底要以哪個為主」。在冠軍／挑戰者證明 AI 調整
+ * 有效（AI_ADJUST_PROMOTION）之前一律不顯示，只寫進評等紀錄 `ai` 欄位累積成績；使用者只看到一個結論。
+ */
+export const AI_VIEW_VISIBLE_TO_USERS = false;
+
+/**
  * 何時可以放寬 AI 調整空間（把 AI_ADJUST_AFFECTS_CONCLUSION 改 true）的判準，三項都要成立：
  * 1. 有 AI 判斷、且已滿 5 個交易日的紀錄 ≥ minSamples 筆（其中 AI 實際調整 delta≠0 的 ≥ minAdjusted 筆，
  *    delta=0 時兩邊結論相同、比不出差別）；

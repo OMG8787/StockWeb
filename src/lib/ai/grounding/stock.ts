@@ -39,7 +39,7 @@ import { describeExperience } from "../learning/experienceText";
 import type { RatingSource } from "../ratingLog";
 import { describeRatingForHolding } from "../holdingRating";
 import { getAiJudgment } from "../aiJudge";
-import { AI_VIEW_TITLE, describeAiView } from "../learning/aiAdjust";
+import { AI_VIEW_TITLE, AI_VIEW_VISIBLE_TO_USERS, describeAiView } from "../learning/aiAdjust";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -123,7 +123,9 @@ export async function buildStockGrounding(
         ).text
       }（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
-    const aiView = describeAiView(await aiJudgePromise, stockRating.rating.code);
+    // AI 判斷層照樣跑（寫進評等紀錄供冠軍／挑戰者比較），但證明有效前不顯示給使用者（AI_VIEW_VISIBLE_TO_USERS）。
+    const judgment = await aiJudgePromise;
+    const aiView = AI_VIEW_VISIBLE_TO_USERS ? describeAiView(judgment, stockRating.rating.code) : null;
     if (aiView) lines.push(`${AI_VIEW_TITLE}${aiView}`);
     // AI 經驗層：相似案例統計＋相關教訓（learning/experienceText.ts；只有台股）。
     lines.push(...(await describeExperience(stockRating).catch(() => [] as string[])));
