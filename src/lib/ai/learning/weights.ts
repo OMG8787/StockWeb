@@ -4,8 +4,11 @@ import type { EvalRecord } from "./types";
 /**
  * 判斷依據權重（獎勵機制核心；純邏輯、無 I/O，有測試）。
  *
- * 每個「判斷依據鍵（features.ts featureBases）× 市況」維護累積統計，權重＝收縮後的平均「若買進」獎勵（%）：
- *   weight = Σ(dᵢ·brwᵢ) / (Σdᵢ + WEIGHT_PRIOR_STRENGTH)
+ * 每個「判斷依據鍵（features.ts featureBases）× 市況」維護累積統計，權重＝收縮後的「相對獎勵」（%）：
+ *   weight = Σ dᵢ·(brwᵢ − 同市況基準) / (Σdᵢ + WEIGHT_PRIOR_STRENGTH)
+ * 同市況基準＝該市況所有紀錄的衰減加權平均「若買進」獎勵。用相對值的原因（2026-10-05 擴大回測實測）：
+ * 若買進獎勵扣了成本與回撤，幾乎所有依據的絕對平均都是負的，用絕對值時每檔權重加總一律觸底、沒有鑑別力；
+ * 「中性」應該是「跟同市況平均一樣」，權重只表達這個依據讓結果比平均好或差多少。
  * 6 項保險的對應：
  *  ① 最少樣本：筆數 < WEIGHT_MIN_SAMPLES 時 active＝false（權重視為 0＝中性，只展示不使用）。
  *  ② 貝氏收縮：分母加 WEIGHT_PRIOR_STRENGTH 筆「獎勵 0」的虛擬樣本，樣本少時自然趨近 0（中性）。
@@ -66,18 +69,34 @@ export function decayFactor(recordDay: string, asOfDay: string): number {
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 export function computeBasisStats(records: EvalRecord[], asOfDay: string): BasisStat[] {
-  type Acc = { n: number; sd: number; sdx: number; sumRw: number; sumEx: number; wins: number };
+  type Acc = { n: number; sd: number; sdx: number; sdrel: number; sumRw: number; sumEx: number; wins: number };
   const acc = new Map<string, Acc>();
-  for (const r of records) {
+  const usable = records.filter((r) => {
     const o = r.o[WEIGHT_HORIZON];
-    if (!r.rg || !o || o.brw == null || o.rw == null || o.ex == null) continue;
+    return !!r.rg && !!o && o.brw != null && o.rw != null && o.ex != null;
+  });
+  // 同市況基準：該市況所有紀錄的衰減加權平均「若買進」獎勵。
+  const base = new Map<MarketRegime, { sd: number; sdx: number }>();
+  for (const r of usable) {
     const d = decayFactor(r.day, asOfDay);
+    const b = base.get(r.rg!) ?? { sd: 0, sdx: 0 };
+    b.sd += d;
+    b.sdx += d * r.o[WEIGHT_HORIZON]!.brw!;
+    base.set(r.rg!, b);
+  }
+  for (const r of usable) {
+    const o = r.o[WEIGHT_HORIZON]!;
+    if (o.brw == null || o.rw == null || o.ex == null) continue;
+    const d = decayFactor(r.day, asOfDay);
+    const bb = base.get(r.rg!)!;
+    const baseline = bb.sdx / bb.sd;
     for (const basis of r.bases) {
       const key = `${basis}\u0000${r.rg}`;
-      const a = acc.get(key) ?? { n: 0, sd: 0, sdx: 0, sumRw: 0, sumEx: 0, wins: 0 };
+      const a = acc.get(key) ?? { n: 0, sd: 0, sdx: 0, sdrel: 0, sumRw: 0, sumEx: 0, wins: 0 };
       a.n++;
       a.sd += d;
       a.sdx += d * o.brw;
+      a.sdrel += d * (o.brw - baseline);
       a.sumRw += o.rw;
       a.sumEx += o.ex;
       if (o.brw > 0) a.wins++;
@@ -96,7 +115,7 @@ export function computeBasisStats(records: EvalRecord[], asOfDay: string): Basis
       avgReward: r2(a.sumRw / a.n),
       avgExcess: r2(a.sumEx / a.n),
       winRate: Math.round((a.wins / a.n) * 100),
-      weight: r2(a.sdx / (a.sd + WEIGHT_PRIOR_STRENGTH)),
+      weight: r2(a.sdrel / (a.sd + WEIGHT_PRIOR_STRENGTH)),
       active: a.n >= WEIGHT_MIN_SAMPLES,
     });
   }

@@ -101,26 +101,29 @@ describe("獎勵計算", () => {
 });
 
 describe("依據權重（收縮、衰減、門檻、市況分開）", () => {
-  it("樣本不足：權重仍算但 active=false，且被收縮向 0", () => {
-    const rs = Array.from({ length: 5 }, () => rec({ o5: { brw: 10, rw: 10, ex: 10 } }));
-    const [s] = computeBasisStats(rs, "2026-10-05");
-    expect(s.n).toBe(5);
-    expect(s.active).toBe(false);
-    expect(s.avgBuyReward).toBe(10);
-    expect(s.weight).toBeCloseTo((5 * 10) / (5 + WEIGHT_PRIOR_STRENGTH), 2);
-    expect(toWeightTable([s])).toEqual({});
+  // 5 筆有「hot」依據（獎勵 10）、5 筆沒有（獎勵 0）→ 同市況基準 5，hot 的相對獎勵 +5。
+  const mix = (n: number, rg: "bull" | "bear" = "bull") => [
+    ...Array.from({ length: n }, () => rec({ rg, bases: ["hot", "all"], o5: { brw: 10, rw: 10, ex: 10 } })),
+    ...Array.from({ length: n }, () => rec({ rg, bases: ["all"], o5: { brw: 0, rw: 0, ex: 0 } })),
+  ];
+  it("樣本不足：權重仍算但 active=false，且被收縮向 0（相對同市況平均）", () => {
+    const stats = computeBasisStats(mix(5), "2026-10-05");
+    const hot = stats.find((s) => s.basis === "hot")!;
+    const all = stats.find((s) => s.basis === "all")!;
+    expect(hot.n).toBe(5);
+    expect(hot.active).toBe(false);
+    expect(hot.avgBuyReward).toBe(10);
+    expect(hot.weight).toBeCloseTo((5 * 5) / (5 + WEIGHT_PRIOR_STRENGTH), 2);
+    expect(all.weight).toBe(0); // 每筆都有的依據＝基準本身，中性
+    expect(toWeightTable(stats)).toEqual({});
   });
   it("達門檻才 active，且多頭／空頭分開", () => {
-    const rs = [
-      ...Array.from({ length: WEIGHT_MIN_SAMPLES }, () => rec({ o5: { brw: 2, rw: 2, ex: 2 } })),
-      ...Array.from({ length: 3 }, () => rec({ rg: "bear", o5: { brw: -5, rw: -5, ex: -5 } })),
-    ];
-    const stats = computeBasisStats(rs, "2026-10-05");
-    const bull = stats.find((s) => s.regime === "bull")!;
-    const bear = stats.find((s) => s.regime === "bear")!;
+    const stats = computeBasisStats([...mix(WEIGHT_MIN_SAMPLES), ...mix(3, "bear")], "2026-10-05");
+    const bull = stats.find((s) => s.basis === "hot" && s.regime === "bull")!;
+    const bear = stats.find((s) => s.basis === "hot" && s.regime === "bear")!;
     expect(bull.active).toBe(true);
     expect(bear.active).toBe(false);
-    expect(bull.weight).toBeCloseTo(1, 2); // 30×2/(30+30)
+    expect(bull.weight).toBeCloseTo(2.5, 2); // 30×5/(30+30)
   });
   it("半衰期：60 個交易日（84 日曆天）後權重減半", () => {
     expect(decayFactor("2026-01-01", "2026-01-01")).toBe(1);
