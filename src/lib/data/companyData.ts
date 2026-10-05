@@ -150,9 +150,10 @@ export const CHIPS_TTL_MS = 60 * 60_000;
  * 全市場融資融券表（上市＋上櫃，整包快取 1 小時）。getChips() 與籌碼比例批次版
  * （chipsRatios.ts 的 getChipsRatiosBatch）共用同一份快取，不另打上游。
  * v2（2026-09-30）：每檔多了 marginQuota/marginDate，換 key 避免讀到舊形狀的快取。
+ * v3（2026-10-04）：每檔多了 shortQuota（融券使用率用），同理換 key。
  */
 export function getTwMarginMap(): Promise<Map<string, Chips>> {
-  return cachedMap("chips:TW:margin:v2", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll), {
+  return cachedMap("chips:TW:margin:v3", CHIPS_TTL_MS, () => mergeTwMaps(fetchTwseMarginTradingAll, fetchTpexMarginTradingAll), {
     staleWhileRevalidateMs: DAILY_DATA_SWR_MS,
   });
 }

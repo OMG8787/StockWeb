@@ -34,7 +34,7 @@ function assembleRatios(
       prevUtilizationPercent: prevBalance != null ? round2((prevBalance / margin.marginQuota) * 100) : undefined,
     };
   }
-  const short = shortMarginRatio(margin);
+  const short = shortUtilization(margin);
   if (short) result.short = short;
   if (foreign) result.foreign = foreign;
   if (major) result.majorHolders = major;
@@ -42,27 +42,25 @@ function assembleRatios(
 }
 
 /**
- * 券資比＝融券餘額 ÷ 融資餘額 × 100。前一交易日用「前日融券餘額 ÷ 前日融資餘額」——
- * 兩個前日餘額官方報表都有（本站存成今日餘額＋增減），不用多抓一份報表。
- * 融資餘額為 0（或查不到）時沒有意義 → undefined；前日融資為 0 時前期 undefined。
- * export 給單元測試用。
+ * 融券使用率＝融券餘額 ÷ 融券限額 × 100，跟融資使用率同一套算法：前一交易日用
+ * 「前日融券餘額 ÷ 同一個融券限額」——官方報表只給當日限額，限額依股本計算、只在
+ * 增減資時才會變，不另外多抓一份前一日報表。融券限額查不到或為 0 → undefined
+ * （不拿別的指標頂替）；查不到前日餘額時前期 undefined。export 給單元測試用。
  */
-export function shortMarginRatio(margin: Chips | undefined): ChipsRatios["short"] {
-  if (margin?.shortBalance == null || margin.marginBalance == null || margin.marginBalance <= 0) return undefined;
+export function shortUtilization(margin: Chips | undefined): ChipsRatios["short"] {
+  if (margin?.shortBalance == null || margin.shortQuota == null || margin.shortQuota <= 0) return undefined;
   const prevShort = margin.shortBalanceChange != null ? margin.shortBalance - margin.shortBalanceChange : undefined;
-  const prevMargin = margin.marginBalanceChange != null ? margin.marginBalance - margin.marginBalanceChange : undefined;
   return {
     date: margin.marginDate,
     balance: margin.shortBalance,
     balanceChange: margin.shortBalanceChange,
-    shortMarginRatioPercent: round2((margin.shortBalance / margin.marginBalance) * 100),
-    prevShortMarginRatioPercent:
-      prevShort != null && prevMargin != null && prevMargin > 0 ? round2((prevShort / prevMargin) * 100) : undefined,
+    utilizationPercent: round2((margin.shortBalance / margin.shortQuota) * 100),
+    prevUtilizationPercent: prevShort != null ? round2((prevShort / margin.shortQuota) * 100) : undefined,
   };
 }
 
 /**
- * TW only — 個股頁最上方「籌碼比例」摘要的資料：融資使用率、券資比、外資持股比例、
+ * TW only — 個股頁最上方「籌碼比例」摘要的資料：融資使用率、融券使用率、外資持股比例、
  * 大戶持股比例，各自附上前一期（融資/融券/外資＝前一交易日；大戶＝上一週）。
  *
  * 三項各自獨立 fail open：哪一項抓不到就只有那一項是 undefined（UI 顯示「資料

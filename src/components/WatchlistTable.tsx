@@ -79,7 +79,7 @@ const CHIPS_SORT_FIELDS: { field: ChipsRatioPick; label: string; title: string }
   { field: "major", label: "大戶持股", title: "依大戶持股比例（1000張以上大戶，集保週資料）排序" },
   { field: "foreign", label: "外資持股", title: "依外資持股比例排序" },
   { field: "margin", label: "融資使用率", title: "依融資使用率排序" },
-  { field: "short", label: "券資比", title: "依券資比（融券餘額÷融資餘額）排序" },
+  { field: "short", label: "融券使用率", title: "依融券使用率（融券餘額÷融券限額）排序" },
 ];
 
 function isChipsField(field: HeldSortField): field is ChipsRatioPick {
@@ -473,7 +473,7 @@ function DraggableGroup({
       </div>
       )}
       <div className="overflow-x-auto">
-        {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／券資比），最小寬度跟著
+        {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／融券使用率），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
           className={`w-full text-sm ${

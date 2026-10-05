@@ -207,13 +207,16 @@ export interface Chips {
   /** 融資限額（可融資上限），單位「張」——TWSE「次一營業日限額」／TPEx
    *  MarginPurchaseQuota。算「融資使用率」用，見 chipsRatios.ts。 */
   marginQuota?: number;
+  /** 融券限額（可融券上限），單位「張」——TWSE 融券區塊的「次一營業日限額」／TPEx
+   *  ShortSaleQuota。算「融券使用率」用，見 chipsRatios.ts。 */
+  shortQuota?: number;
   /** 融資融券這份資料對應的交易日（YYYY-MM-DD）；跟上面三大法人的 `date` 分開，
    *  因為兩份報表是不同端點、不保證同一時間更新到同一天。 */
   marginDate?: string;
 }
 
 /**
- * TW only — 個股頁最上方「籌碼比例」摘要（融資使用率／券資比／外資持股比例／大戶持股比例）
+ * TW only — 個股頁最上方「籌碼比例」摘要（融資使用率／融券使用率／外資持股比例／大戶持股比例）
  * 與前一期的比較，見 lib/data/chipsRatios.ts。每一項抓不到就是 undefined，UI 顯示
  * 「資料暫缺」；前一期抓不到（或大戶週資料還在累積）時 prev* 欄位是 undefined，
  * 不編數字、不當成 0 變化。所有百分比都是「0~100 的百分比數字」（13.44 代表 13.44%）。
@@ -232,9 +235,9 @@ export interface ChipsRatios {
     prevUtilizationPercent?: number;
   };
   /**
-   * 券資比＝融券餘額 ÷ 融資餘額 × 100（看盤軟體最常用的融券指標，高代表空單相對多、
-   * 可能有軋空）。跟融資使用率同一份 MI_MARGN／TPEx 融資融券報表，不另外打上游。
-   * 融資餘額為 0 時無法計算 → 整項 undefined。
+   * 融券使用率＝融券餘額 ÷ 融券限額 × 100（跟融資使用率同一套邏輯：放空額度用掉幾成）。
+   * 跟融資使用率同一份 MI_MARGN／TPEx 融資融券報表，不另外打上游。
+   * 融券限額查不到或為 0 時無法計算 → 整項 undefined。
    */
   short?: {
     /** 資料交易日（YYYY-MM-DD），同 margin.date */
@@ -243,10 +246,10 @@ export interface ChipsRatios {
     balance: number;
     /** 融券餘額較前一交易日增減（張） */
     balanceChange?: number;
-    /** 券資比 = 融券餘額 ÷ 融資餘額 × 100 */
-    shortMarginRatioPercent: number;
-    /** 前一交易日券資比（前日融券餘額 ÷ 前日融資餘額）；前日任一餘額查不到或融資為 0 時 undefined */
-    prevShortMarginRatioPercent?: number;
+    /** 融券使用率 = 融券餘額 ÷ 融券限額 × 100 */
+    utilizationPercent: number;
+    /** 前一交易日融券使用率（前日融券餘額 ÷ 同一個融券限額；限額只在股本變動時才會變）；前日餘額查不到時 undefined */
+    prevUtilizationPercent?: number;
   };
   foreign?: {
     date: string;

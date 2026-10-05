@@ -279,7 +279,7 @@ function MarketSection({
               <option value="major">大戶持股比例（週）</option>
               <option value="foreign">外資持股比例</option>
               <option value="margin">融資使用率</option>
-              <option value="short">券資比</option>
+              <option value="short">融券使用率</option>
             </>
           )}
         </select>

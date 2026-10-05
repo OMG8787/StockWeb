@@ -8,7 +8,7 @@ import {
 } from "@/lib/chipsRatiosList";
 
 /**
- * 股票列表的籌碼比例欄位（大戶持股／外資持股／融資使用率／券資比＋前一期）批次版：
+ * 股票列表的籌碼比例欄位（大戶持股／外資持股／融資使用率／融券使用率＋前一期）批次版：
  * `/api/chips-ratios?symbols=2330,2317,...`，只收台股代號、單次最多
  * CHIPS_BATCH_MAX_SYMBOLS 檔，回傳精簡格式（lib/chipsRatiosList.ts）。
  *

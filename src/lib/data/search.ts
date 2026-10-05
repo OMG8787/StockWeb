@@ -29,7 +29,7 @@ export interface SearchFilters {
    * SearchItem.volumeTrend 說明——這是價量關係推論，不是真實買賣單量能分類。
    */
   volumeTrends?: VolumeTrend[];
-  /** major／foreign／margin／short＝大戶持股／外資持股／融資使用率／券資比（僅台股有資料，缺資料的墊底）。 */
+  /** major／foreign／margin／short＝大戶持股／外資持股／融資使用率／融券使用率（僅台股有資料，缺資料的墊底）。 */
   sortBy?: "changePercent" | "volume" | "price" | "turnover" | ChipsSortField;
   sortDir?: "asc" | "desc";
 }

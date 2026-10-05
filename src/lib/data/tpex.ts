@@ -694,6 +694,8 @@ interface TpexMarginRow {
   MarginPurchaseQuota?: string;
   ShortSaleBalance: string;
   ShortSaleBalancePreviousDay: string;
+  /** 融券限額（張）——算融券使用率用；同列的 ShortSaleUtilizationRate 理由同上不直接用。 */
+  ShortSaleQuota?: string;
 }
 
 /** Confirmed 張 (lots), same unit as TWSE's MI_MARGN — magnitudes for 3293
@@ -716,6 +718,7 @@ export async function fetchTpexMarginTradingAll(): Promise<Map<string, Chips>> {
       shortBalance,
       shortBalanceChange: shortBalance != null && shortPrev != null ? shortBalance - shortPrev : undefined,
       marginQuota: parseTpexNumber(row.MarginPurchaseQuota),
+      shortQuota: parseTpexNumber(row.ShortSaleQuota),
       marginDate: row.Date && row.Date.length === 7 ? rocCompactToIso(row.Date) : undefined,
     });
   }

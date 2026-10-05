@@ -524,7 +524,7 @@ interface MarginTradingResponse {
  * 2026-09-30 從 openapi.twse.com.tw/v1/exchangeReport/MI_MARGN 改成官網 rwd 版：
  * openapi 版沒有資料日期，而且實測晚上 22:37 還停在前一個交易日（rwd 版已經是
  * 當天），跟 TPEx 那邊（當天）日期對不齊；rwd 版有 `date`、也有算「融資使用率」
- * 需要的「次一營業日限額」。rwd 表格的欄位名稱融資/融券兩組重複（前日餘額、
+ * 需要的「次一營業日限額」（融資、融券各一個，分別算融資／融券使用率）。rwd 表格的欄位名稱融資/融券兩組重複（前日餘額、
  * 今日餘額、次一營業日限額各出現兩次），所以融資取第一次出現、融券取最後一次。
  */
 export async function fetchTwseMarginTradingAll(queryDate?: string): Promise<Map<string, Chips>> {
@@ -543,6 +543,8 @@ export async function fetchTwseMarginTradingAll(queryDate?: string): Promise<Map
   const iMarginQuota = f.indexOf("次一營業日限額");
   const iShortPrev = f.lastIndexOf("前日餘額");
   const iShort = f.lastIndexOf("今日餘額");
+  // 融券限額＝第二次出現的「次一營業日限額」；只出現一次（欄位缺）時不能拿融資限額頂替。
+  const iShortQuota = f.lastIndexOf("次一營業日限額");
   if ([iMarginPrev, iMargin, iShortPrev, iShort].includes(-1) || iShort === iMargin) return map;
   const marginDate =
     payload.date && payload.date.length === 8
@@ -562,6 +564,7 @@ export async function fetchTwseMarginTradingAll(queryDate?: string): Promise<Map
       shortBalance,
       shortBalanceChange: shortBalance != null && shortPrev != null ? shortBalance - shortPrev : undefined,
       marginQuota: iMarginQuota === -1 ? undefined : parseTwseNumber(row[iMarginQuota]),
+      shortQuota: iShortQuota === -1 || iShortQuota === iMarginQuota ? undefined : parseTwseNumber(row[iShortQuota]),
       marginDate,
     });
   }

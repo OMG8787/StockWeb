@@ -15,9 +15,9 @@ import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
   GLOSS_MARGIN_UTILIZATION,
-  GLOSS_SHORT_MARGIN_RATIO,
+  GLOSS_SHORT_UTILIZATION,
   RULE_HOLDING_STRUCTURE_WORDING,
-  RULE_SHORT_MARGIN_RATIO_MEANING,
+  RULE_SHORT_UTILIZATION_MEANING,
 } from "./chipsRatiosWording";
 
 export interface ActionBrief {
@@ -71,10 +71,10 @@ const ACTION_RULE_WRITING =
 
 // 術語解釋的實測坑：(1)沒附範例就整排裸奔；(2)同一句擠「本益比、股價淨值比、殖利率」時只解釋第一個；
 // (3)在括號裡自己加過渡語寫出「本益比（股價淨值比等指標中，本益比代表…）」這種破碎句。
-const ACTION_RULE_GLOSSARY = `【術語】第一次出現時在同一句用≤15字括號白話帶過，不另開段落；同一句有多個術語要各自解釋；括號裡直接放解釋、不加「簡單來說」「XX等指標中」之類過渡語。可照抄：三大法人（外資、投信、自營商）、外資（外國機構投資人）、投信（國內基金公司）、自營商（券商自營部門）、融資（借錢買股）、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_MARGIN_RATIO}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MAJOR_HOLDERS}、買超／賣超（買進多於賣出／反之）、本益比（股價是年獲利幾倍）、股價淨值比（股價是淨資產幾倍）、殖利率（年股息占股價比例）、營收年增率（營收比去年同月成長）、每股盈餘（每股賺多少錢）、爆量（成交量暴增）、均線（過去N天平均價）、多頭／空頭排列（短均線在長均線上／下）、MACD（判斷趨勢轉強弱）、黃金交叉（短線上穿長線，轉強）、死亡交叉（短線下穿長線，轉弱）、KD（看短線過熱過冷）、RSI（0~100，越高漲越兇）、布林通道（股價正常波動區間）。交稿前逐一檢查每個術語第一次出現時有沒有括號解釋，漏了補上（這條優先於字數上限）。原始資料自帶的括號說明（例如「MACD黃金交叉（0軸上方…）」）照抄，不要把自己的解釋塞進同一個括號。`;
+const ACTION_RULE_GLOSSARY = `【術語】第一次出現時在同一句用≤15字括號白話帶過，不另開段落；同一句有多個術語要各自解釋；括號裡直接放解釋、不加「簡單來說」「XX等指標中」之類過渡語。可照抄：三大法人（外資、投信、自營商）、外資（外國機構投資人）、投信（國內基金公司）、自營商（券商自營部門）、融資（借錢買股）、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MAJOR_HOLDERS}、買超／賣超（買進多於賣出／反之）、本益比（股價是年獲利幾倍）、股價淨值比（股價是淨資產幾倍）、殖利率（年股息占股價比例）、營收年增率（營收比去年同月成長）、每股盈餘（每股賺多少錢）、爆量（成交量暴增）、均線（過去N天平均價）、多頭／空頭排列（短均線在長均線上／下）、MACD（判斷趨勢轉強弱）、黃金交叉（短線上穿長線，轉強）、死亡交叉（短線下穿長線，轉弱）、KD（看短線過熱過冷）、RSI（0~100，越高漲越兇）、布林通道（股價正常波動區間）。交稿前逐一檢查每個術語第一次出現時有沒有括號解釋，漏了補上（這條優先於字數上限）。原始資料自帶的括號說明（例如「MACD黃金交叉（0軸上方…）」）照抄，不要把自己的解釋塞進同一個括號。`;
 
 // 「持股結構面」在今日建議裡的專屬規則（措辭共通規則在 RULE_HOLDING_STRUCTURE_WORDING）。
-const ACTION_RULE_HOLDING_STRUCTURE = `籌碼面＝三大法人今天買賣超幾張（流量）；${HOLDING_STRUCTURE_FACET_NAME}＝大戶／外資持股比例、融資使用率、券資比跟前期比的變化（存量），兩者不要混為一談。引用時帶實際數字，不寫「持股結構不錯」這種空話；標【無資料】就寫查不到，不可編數字。融資使用率偏高或單日急升是散戶槓桿升溫的追高風險，不可講成利多。券資比只列資訊不計分：${RULE_SHORT_MARGIN_RATIO_MEANING}`;
+const ACTION_RULE_HOLDING_STRUCTURE = `籌碼面＝三大法人今天買賣超幾張（流量）；${HOLDING_STRUCTURE_FACET_NAME}＝大戶／外資持股比例、融資使用率、融券使用率跟前期比的變化（存量），兩者不要混為一談。引用時帶實際數字，不寫「持股結構不錯」這種空話；標【無資料】就寫查不到，不可編數字。融資使用率偏高或單日急升是散戶槓桿升溫的追高風險，不可講成利多。融券使用率只列資訊不計分：${RULE_SHORT_UTILIZATION_MEANING}`;
 
 const ACTION_RULE_DATA_HONESTY = [
   "技術面標【無資料】代表「今天沒有2個以上技術訊號同時成立」，要寫「技術面今天沒有夠強的訊號」，不可寫成「技術面無資料」。",
@@ -103,8 +103,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
     // 舊格式的快取內容跟新的頁面說明對不起來，換 key 直接作廢舊結果。
     // v3：體檢表新增「持股結構面（大戶／外資／融資）」，作廢舊快取。
     // v4：2026-10-04 輸出改成精簡格式（每檔一條：結論＋關鍵數字＋風險），作廢舊的長篇快取。
-    // v5：體檢表持股結構面加上券資比（融券），作廢舊快取。
-    "action-brief:v5",
+    // v5：體檢表持股結構面加上券資比；v6：第四項改成融券使用率（融券÷融券限額），作廢舊快取。
+    "action-brief:v6",
     ACTION_BRIEF_TTL_MS,
     async () => {
       const { text: grounding, qualified, indexSummary } = await buildActionGrounding();

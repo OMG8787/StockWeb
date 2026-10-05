@@ -36,9 +36,9 @@ import {
   GLOSS_FOREIGN_HOLDING,
   GLOSS_MAJOR_HOLDERS,
   GLOSS_MARGIN_UTILIZATION,
-  GLOSS_SHORT_MARGIN_RATIO,
+  GLOSS_SHORT_UTILIZATION,
   RULE_HOLDING_STRUCTURE_WORDING,
-  RULE_SHORT_MARGIN_RATIO_MEANING,
+  RULE_SHORT_UTILIZATION_MEANING,
 } from "./chipsRatiosWording";
 
 export const SYSTEM_ROLE =
@@ -104,7 +104,7 @@ export const RULE_INDICATORS =
 export const RULE_TW_CHIPS =
   "籌碼數字：法人資料已附『股』與換算好的『約X張』，照抄其一，不可自己換算；『三大法人合計X（外資Y、投信Z、自營商W）』中X是合計、Y才是外資，引用要講清楚是哪一個，不可把合計說成外資。第一次出現的固定白話：三大法人（外資、投信、自營商）、外資（外國機構投資人）、投信（國內基金公司）、融資（跟券商借錢買股）、融券（跟券商借股票放空）。";
 
-export const RULE_CHIPS_RATIOS = `籌碼比例第一次提到附白話：${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_MARGIN_RATIO}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MAJOR_HOLDERS}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_MARGIN_RATIO_MEANING}`;
+export const RULE_CHIPS_RATIOS = `籌碼比例第一次提到附白話：${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MAJOR_HOLDERS}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_UTILIZATION_MEANING}`;
 
 export const RULE_SOCIAL_SENTIMENT =
   "美股「社群情緒」是 Reddit／X／財經新聞的討論多空氣氛，不是事實或財報：第一次提到要這樣說明，並講來源與資料時間（不是即時）；標示『樣本很小』或樣本太少時要提醒討論太少、參考價值低，不要硬解讀；『討論熱度升溫／降溫』指討論量不是股價；只能當輔助，不可當買賣唯一理由，情緒一面倒常是過熱／過冷警訊。參考資料沒有「社群情緒」區塊時（含台股，台股沒有這項資料），就直說這次查不到社群情緒資料，不可拿新聞標題或自己的印象充當社群看法。";

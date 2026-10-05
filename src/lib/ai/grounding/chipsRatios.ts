@@ -1,7 +1,7 @@
 import type { ChipsRatios } from "@/lib/data";
 
 /**
- * 把「籌碼比例」（融資使用率／券資比／外資持股比例／大戶持股比例＋前一期）組成給 AI 的
+ * 把「籌碼比例」（融資使用率／融券使用率／外資持股比例／大戶持股比例＋前一期）組成給 AI 的
  * grounding 文字。原則同 buildStockGrounding 其他籌碼數字：每個數字都帶明確角色
  * 標籤（本期/前一期/增減），增減幅度在這裡算好寫死，不讓模型自己拿兩個百分比相減
  * 或把股數換算成張（見 RULE_SHARES_NOT_LOTS、RULE_CHIPS_RATIOS）。
@@ -40,16 +40,16 @@ export function describeChipsRatios(r: ChipsRatios | null): string | undefined {
   if (r.short) {
     const t = r.short;
     const cmp =
-      t.prevShortMarginRatioPercent != null
-        ? `，前一交易日 ${t.prevShortMarginRatioPercent.toFixed(2)}%，${pointDelta(t.shortMarginRatioPercent, t.prevShortMarginRatioPercent, "前一交易日")}`
+      t.prevUtilizationPercent != null
+        ? `，前一交易日 ${t.prevUtilizationPercent.toFixed(2)}%，${pointDelta(t.utilizationPercent, t.prevUtilizationPercent, "前一交易日")}`
         : "（前一交易日資料查不到，無法比較）";
     const bal =
       t.balanceChange != null
         ? `；融券餘額 ${t.balance.toLocaleString("en-US")} 張，較前一交易日${t.balanceChange >= 0 ? "增加" : "減少"} ${Math.abs(t.balanceChange).toLocaleString("en-US")} 張`
         : `；融券餘額 ${t.balance.toLocaleString("en-US")} 張`;
-    lines.push(`- 券資比（融券餘額÷融資餘額，${t.date ?? "最近交易日"}）：${t.shortMarginRatioPercent.toFixed(2)}%${cmp}${bal}`);
+    lines.push(`- 融券使用率（融券餘額÷融券限額，${t.date ?? "最近交易日"}）：${t.utilizationPercent.toFixed(2)}%${cmp}${bal}`);
   } else {
-    lines.push("- 券資比：資料暫缺");
+    lines.push("- 融券使用率：資料暫缺");
   }
 
   if (r.foreign) {

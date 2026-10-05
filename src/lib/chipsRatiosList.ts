@@ -1,7 +1,7 @@
 import type { ChipsRatios } from "./data/types";
 
 /**
- * 股票列表「籌碼比例」四欄（大戶持股／外資持股／融資使用率／券資比）前後端共用的精簡格式。
+ * 股票列表「籌碼比例」四欄（大戶持股／外資持股／融資使用率／融券使用率）前後端共用的精簡格式。
  * 批次 API（/api/chips-ratios?symbols=...）一次回幾十檔，只送列表真的會顯示的
  * 數字，不送個股頁那些明細（餘額張數、人數…），前端 hook 也只認這個形狀。
  * 這個檔案只放型別與純函式，client/server 都能 import。
@@ -14,7 +14,7 @@ export interface ListChipsRatios {
   margin?: RatioPair;
   foreign?: RatioPair;
   major?: RatioPair;
-  /** 券資比（融券餘額 ÷ 融資餘額）[本期, 前一交易日] */
+  /** 融券使用率（融券餘額 ÷ 融券限額）[本期, 前一交易日] */
   short?: RatioPair;
 }
 
@@ -42,7 +42,7 @@ export function toListRatios(r: ChipsRatios | null): ListChipsRatios | null {
   if (r.margin) out.margin = [r.margin.utilizationPercent, r.margin.prevUtilizationPercent ?? null];
   if (r.foreign) out.foreign = [r.foreign.holdingPercent, r.foreign.prevHoldingPercent ?? null];
   if (r.majorHolders) out.major = [r.majorHolders.holdingPercent, r.majorHolders.prevHoldingPercent ?? null];
-  if (r.short) out.short = [r.short.shortMarginRatioPercent, r.short.prevShortMarginRatioPercent ?? null];
+  if (r.short) out.short = [r.short.utilizationPercent, r.short.prevUtilizationPercent ?? null];
   return out;
 }
 

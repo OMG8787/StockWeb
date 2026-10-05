@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { getChipsRatios } from "@/lib/data";
 import type { ChipsRatios } from "@/lib/data";
 import { priceDirectionClass } from "@/lib/format";
-import { GLOSS_SHORT_MARGIN_RATIO_TITLE } from "@/lib/ai/chipsRatiosWording";
+import { GLOSS_SHORT_UTILIZATION_TITLE } from "@/lib/ai/chipsRatiosWording";
 
 /** "2026-09-30" → "09/30" */
 function shortDate(iso: string | undefined): string {
@@ -134,10 +134,10 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
           missing={emerging ? "資料暫缺（興櫃依規定不能融資）" : undefined}
         />
         <Item
-          title="券資比"
-          titleHint={GLOSS_SHORT_MARGIN_RATIO_TITLE}
-          percent={t?.shortMarginRatioPercent}
-          delta={t && <Delta current={t.shortMarginRatioPercent} prev={t.prevShortMarginRatioPercent} label="較前日" />}
+          title="融券使用率"
+          titleHint={GLOSS_SHORT_UTILIZATION_TITLE}
+          percent={t?.utilizationPercent}
+          delta={t && <Delta current={t.utilizationPercent} prev={t.prevUtilizationPercent} label="較前日" />}
           detail={
             t && (
               <>
@@ -151,8 +151,8 @@ export function ChipsRatioSummaryView({ ratios, emerging = false }: { ratios: Ch
               </>
             )
           }
-          footnote={t?.date ? `融券÷融資，${shortDate(t.date)} 收盤後資料` : undefined}
-          missing={emerging ? "資料暫缺（興櫃依規定不能融資融券）" : m ? undefined : "資料暫缺（沒有融資餘額無法計算）"}
+          footnote={t?.date ? `融券÷融券限額，${shortDate(t.date)} 收盤後資料` : undefined}
+          missing={emerging ? "資料暫缺（興櫃依規定不能融券）" : undefined}
         />
       </div>
     </div>
