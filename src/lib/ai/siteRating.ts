@@ -137,5 +137,7 @@ export function describeSiteRating(name: string, symbol: string, r: SiteRating):
 
 /** 模型偶爾把評等標籤原樣抄出（「未持有：「建議買進」」），回答送出前拿掉標籤、只留字樣。 */
 export function stripRatingTags(answer: string): string {
-  return answer.replace(/(未持有|已持有)[：:]\s*「([^」]*)」/g, "$2");
+  return answer
+    .replace(/(未持有|已持有)[：:]\s*「([^」]*)」/g, "$2")
+    .replace(/^(\s*(?:[-•]\s*)?)(未持有|已持有)[：:]\s*/gm, "$1");
 }

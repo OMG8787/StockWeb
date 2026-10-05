@@ -118,5 +118,6 @@ describe("stripRatingTags", () => {
     expect(stripRatingTags("台光電(2383)：未持有：「建議等回檔再買（區間 5,220～5,645）」")).toBe("台光電(2383)：建議等回檔再買（區間 5,220～5,645）");
     expect(stripRatingTags("已持有：「續抱」，理由…")).toBe("續抱，理由…");
     expect(stripRatingTags("沒有標籤的句子")).toBe("沒有標籤的句子");
+    expect(stripRatingTags("未持有：建議等回檔再買（區間 106.5～114.5）。\n- 走勢偏多")).toBe("建議等回檔再買（區間 106.5～114.5）。\n- 走勢偏多");
   });
 });
