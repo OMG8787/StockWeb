@@ -215,7 +215,10 @@ export async function answerQuestion(
     return parts.join("；");
   }
 
-  const [twNews, usNews] = marketNews;
+  // 問的是特定個股時不附一般大盤新聞標題：2026-10-04 使用者回報問「2330 最近走勢如何？」，
+  // 回答卻扯進標題裡順帶出現的「台灣精材(3467)與其他個股無關」。個股自己的新聞已在個股資料裡，
+  // 大盤層級的重大事件（pinnedEventsText）照常附。
+  const [twNews, usNews] = stockGroundings.length > 0 ? [[], []] : marketNews;
   const marketNewsText = [
     twNews.length > 0 ? `台股：\n${twNews.map((n) => `- ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}` : "",
     usNews.length > 0 ? `美股：\n${usNews.map((n) => `- ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}` : "",

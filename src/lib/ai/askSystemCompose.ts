@@ -42,6 +42,8 @@ import {
   RULE_HOLDING_OF_TARGET,
   RULE_HOLDINGS_DEEP_ANALYSIS,
   RULE_SINGLE_STOCK_DEEP_ANALYSIS,
+  RULE_PRICE_LEVEL_CONSISTENCY,
+  RULE_ONLY_ASKED_STOCKS,
   RULE_YES_NO_DIRECT,
   RULE_CONCISE_ANSWER,
 } from "./askSystemPrompt";
@@ -145,6 +147,8 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     holdingsRule,
     c.holdingsEmptyAsked ? RULE_HOLDINGS_EMPTY_NOT_NO_PERMISSION : "",
     c.singleStockDeep ? RULE_SINGLE_STOCK_DEEP_ANALYSIS : "",
+    hasStockLike ? RULE_PRICE_LEVEL_CONSISTENCY : "",
+    c.stockCount > 0 && !c.marketWide ? RULE_ONLY_ASKED_STOCKS : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),
     // 放最後：長度與格式規則聲明優先於前面要求多解釋的規則
