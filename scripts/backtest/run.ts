@@ -20,7 +20,7 @@ import { score } from "@/lib/ai/actionScoring";
 import { computePriceFramework } from "@/lib/ai/grounding/priceLevels";
 import { computeSiteRating, type RatingCode } from "@/lib/ai/siteRating";
 import { ACTIVE_CHASE_GUARDS, ALL_CHASE_GUARDS, computeChaseMetrics, evaluateChaseGuards, type ChaseGuardId, type ChaseMetrics } from "@/lib/ai/chaseGuards";
-import { CACHE_DIR, SIGNAL_DATES, UNIVERSE } from "./config";
+import { CACHE_DIR, REVENUE_MONTHS, SIGNAL_DATES, UNIVERSE } from "./config";
 
 interface Row {
   sym: string;
@@ -35,6 +35,12 @@ interface Row {
   r10: number | null;
   /** 等回檔：5 日內有沒有回到區間上緣，有的話從那個價位買到第 5 日收盤的報酬 */
   pullbackFill: number | null;
+  /** 替代選股邏輯用（--alt） */
+  ma20gt60: boolean | null;
+  /** 三大法人連 3 日買超（訊號日＋前 2 個交易日；缺資料是 null） */
+  inst3: boolean | null;
+  /** 訊號日當時已公布的最新月營收年增率（%） */
+  revYoy: number | null;
   x5?: number | null;
   x10?: number | null;
 }
@@ -72,8 +78,42 @@ function loadT86(date: string): Map<string, Chips> {
   return out;
 }
 
+/** 公開資訊觀測站月營收彙總表（Big5 HTML）→ 代號 → 年增率%。 */
+function loadRevenue(y: number, m: number): Map<string, number> {
+  const fn = path.join(CACHE_DIR, "revenue", `${y}_${m}.html`);
+  const out = new Map<string, number>();
+  if (!fs.existsSync(fn)) return out;
+  const html = new TextDecoder("big5").decode(fs.readFileSync(fn));
+  for (const tr of html.split(/<tr/i)) {
+    const cells = [...tr.matchAll(/<td[^>]*>([^<]*)<\/td>/gi)].map((x) => x[1].trim());
+    if (cells.length >= 7 && /^\d{4}$/.test(cells[0])) {
+      const yoy = Number(cells[6].replace(/,/g, ""));
+      if (Number.isFinite(yoy)) out.set(cells[0], yoy);
+    }
+  }
+  return out;
+}
+
+/** 訊號日當時已公布的最新月份（法定次月 10 日前公布 → 訊號日 ≥ 次月 11 日才可用）。 */
+function revenueAsOf(date: string, revs: Map<string, Map<string, number>>): Map<string, number> | null {
+  let best: Map<string, number> | null = null;
+  for (const [y, m] of REVENUE_MONTHS) {
+    const ny = m === 12 ? y + 1 : y;
+    const nm = m === 12 ? 1 : m + 1;
+    const avail = `${ny + 1911}-${String(nm).padStart(2, "0")}-11`;
+    if (date >= avail) best = revs.get(`${y}_${m}`) ?? best;
+  }
+  return best;
+}
+
 function buildRows(): Row[] {
-  const t86 = new Map(SIGNAL_DATES.map((d) => [d, loadT86(d)]));
+  const t86Cache = new Map<string, Map<string, Chips>>();
+  const t86Of = (d: string) => {
+    if (!t86Cache.has(d)) t86Cache.set(d, loadT86(d));
+    return t86Cache.get(d)!;
+  };
+  const t86 = { get: (d: string) => t86Of(d) };
+  const revs = new Map(REVENUE_MONTHS.map(([y, m]) => [`${y}_${m}`, loadRevenue(y, m)]));
   const rows: Row[] = [];
   for (const sym of UNIVERSE) {
     const fn = path.join(CACHE_DIR, "charts", `${sym}.json`);
@@ -114,8 +154,17 @@ function buildRows(): Row[] {
           }
         }
       }
+      const closes = hist.map((c) => c.close);
+      const avg = (k: number) => closes.slice(-k).reduce((a, b) => a + b, 0) / k;
+      const instDays = [cs[i], cs[i - 1], cs[i - 2]].map((c) => t86Of(c.time));
+      const inst3 = instDays.every((d) => d.size > 0)
+        ? instDays.every((d) => (d.get(sym)?.institutionalNetShares ?? 0) > 0)
+        : null;
       rows.push({
         sym, date, m, codes, zoneHigh, pullbackFill,
+        ma20gt60: closes.length >= 60 ? avg(20) > avg(60) : null,
+        inst3,
+        revYoy: revenueAsOf(date, revs)?.get(sym) ?? null,
         techSupport: scored.facets[0].verdict === "支持",
         chips: scored.facets[1].verdict,
         r5: ret(5), r10: ret(10),
@@ -200,4 +249,66 @@ function main() {
   );
 }
 
-main();
+/**
+ * 替代選股邏輯（2026-10-05 主 agent 要求探索「有沒有正超額」）：`npx tsx scripts/backtest/run.ts --alt`
+ * 每條規則的門檻都是事先定好的一組數字，不調參；另做前後兩半期間（各 8 個訊號日）的簡單樣本外檢查。
+ */
+function alternatives(rows: Row[]) {
+  const line = (name: string, sel: Row[]) => console.log(`${name.padEnd(40, "　")} ${stat(sel)}`);
+  // ② 需要「同日 20 日報酬排名前 30%」
+  const top30 = new Set<Row>();
+  for (const date of SIGNAL_DATES) {
+    const same = rows.filter((r) => r.date === date && r.m.ret20 != null).sort((a, b) => b.m.ret20! - a.m.ret20!);
+    same.slice(0, Math.ceil(same.length * 0.3)).forEach((r) => top30.add(r));
+  }
+  const ALT: Record<string, (r: Row) => boolean> = {
+    "①多頭回檔（MA20>MA60、距MA20±3%、RSI40～55）": (r) =>
+      r.ma20gt60 === true && r.m.ma20BiasPct != null && Math.abs(r.m.ma20BiasPct) <= 3 && r.m.rsi != null && r.m.rsi >= 40 && r.m.rsi <= 55,
+    "②相對強勢未過熱（20日報酬前30%、RSI<65、距MA20<8%）": (r) =>
+      top30.has(r) && r.m.rsi != null && r.m.rsi < 65 && r.m.ma20BiasPct != null && r.m.ma20BiasPct < 8,
+    "③法人連買3日且5日漲幅<5%": (r) => r.inst3 === true && r.m.ret5 != null && r.m.ret5 < 5,
+    "④月營收年增>20%且距MA20<5%": (r) => r.revYoy != null && r.revYoy > 20 && r.m.ma20BiasPct != null && r.m.ma20BiasPct < 5,
+  };
+  const half1 = new Set(SIGNAL_DATES.slice(0, 8));
+  console.log("\n【五、替代選股邏輯（門檻事先定好、不調參）：全期／前半（8/3～8/25）／後半（8/31～9/22）】");
+  console.log(`（資料覆蓋：法人連3日 ${rows.filter((r) => r.inst3 != null).length}/${rows.length} 筆、月營收 ${rows.filter((r) => r.revYoy != null).length}/${rows.length} 筆）`);
+  for (const [name, f] of Object.entries(ALT)) {
+    const sel = rows.filter(f);
+    line(`${name}｜全期`, sel);
+    line(`　前半`, sel.filter((r) => half1.has(r.date)));
+    line(`　後半`, sel.filter((r) => !half1.has(r.date)));
+  }
+
+  // ⑤ 現行「先不要買」組為什麼是正超額：拆解
+  const cur = Object.keys(VARIANTS).at(-1)!;
+  const avoid = rows.filter((r) => r.codes[cur] === "avoid" && r.x5 != null);
+  console.log("\n【六、現行「先不要買」組拆解】");
+  line("先不要買 全部", avoid);
+  line("　技術面支持（被籌碼／破底擋下）", avoid.filter((r) => r.techSupport));
+  line("　技術面非支持", avoid.filter((r) => !r.techSupport));
+  line("　籌碼面不支持（法人賣超）", avoid.filter((r) => r.chips === "不支持"));
+  line("　籌碼面支持", avoid.filter((r) => r.chips === "支持"));
+  line("　前半", avoid.filter((r) => half1.has(r.date)));
+  line("　後半", avoid.filter((r) => !half1.has(r.date)));
+  const bySym = new Map<string, { n: number; sum: number }>();
+  for (const r of avoid) {
+    const s = bySym.get(r.sym) ?? { n: 0, sum: 0 };
+    s.n++;
+    s.sum += r.x5!;
+    bySym.set(r.sym, s);
+  }
+  const total = avoid.reduce((a, r) => a + r.x5!, 0);
+  const sorted = [...bySym.entries()].sort((a, b) => b[1].sum - a[1].sum);
+  const fmt = ([s, v]: [string, { n: number; sum: number }]) => `${s}（${v.n}筆、合計${v.sum >= 0 ? "+" : ""}${v.sum.toFixed(1)}）`;
+  console.log(`超額合計 ${total.toFixed(1)}（${avoid.length} 筆）；貢獻最多：${sorted.slice(0, 8).map(fmt).join("、")}`);
+  console.log(`拖累最多：${sorted.slice(-5).reverse().map(fmt).join("、")}`);
+  const top5 = new Set(sorted.slice(0, 5).map(([s]) => s));
+  line("　扣掉貢獻前 5 檔後", avoid.filter((r) => !top5.has(r.sym)));
+}
+
+if (process.argv.includes("--alt")) {
+  const rows = buildRows();
+  alternatives(rows);
+} else {
+  main();
+}

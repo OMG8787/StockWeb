@@ -26,3 +26,16 @@ export const CACHE_DIR = process.env.BACKTEST_CACHE ?? path.join(process.cwd(), 
 
 /** 正式站（日K從這裡抓，跟網站用同一份資料源）。 */
 export const SITE = process.env.BACKTEST_SITE ?? "https://stock-web-blond.vercel.app";
+
+/** 每個訊號日往前再抓幾個交易日的三大法人（「法人連買 N 日」規則要用）。 */
+export const T86_LOOKBACK_DAYS = 2;
+
+/**
+ * 月營收（公開資訊觀測站上市彙總表，民國年＋月）。訊號日只能用「當時已公布」的月份：
+ * 法定 10 日前公布，所以訊號日 ≥ 次月 11 日才用該月（見 run.ts revenueAsOf）。
+ */
+export const REVENUE_MONTHS: Array<[number, number]> = [
+  [115, 6],
+  [115, 7],
+  [115, 8],
+];

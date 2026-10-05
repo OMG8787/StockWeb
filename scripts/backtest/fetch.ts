@@ -8,7 +8,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { CACHE_DIR, CHART_RANGE, SIGNAL_DATES, SITE, UNIVERSE } from "./config";
+import { CACHE_DIR, CHART_RANGE, REVENUE_MONTHS, SIGNAL_DATES, SITE, T86_LOOKBACK_DAYS, UNIVERSE } from "./config";
 
 const GAP_MS = 3000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -33,7 +33,14 @@ async function main() {
     console.log(`日K ${sym} OK`);
     await sleep(GAP_MS);
   }
+  // 訊號日＋往前 T86_LOOKBACK_DAYS 個交易日（交易日曆取自 2330 日K）。
+  const cal = (JSON.parse(fs.readFileSync(path.join(chartDir, "2330.json"), "utf8")) as { candles: Array<{ time: string }> }).candles.map((c) => c.time);
+  const t86Days = new Set<string>();
   for (const d of SIGNAL_DATES) {
+    const i = cal.indexOf(d);
+    for (let k = 0; k <= T86_LOOKBACK_DAYS; k++) if (i - k >= 0) t86Days.add(cal[i - k]);
+  }
+  for (const d of [...t86Days].sort()) {
     const ymd = d.replace(/-/g, "");
     const fn = path.join(t86Dir, `${ymd}.json`);
     if (fs.existsSync(fn)) continue;
@@ -43,6 +50,17 @@ async function main() {
     if (data.stat !== "OK") throw new Error(`T86 ${ymd} stat=${data.stat}`);
     fs.writeFileSync(fn, JSON.stringify(data));
     console.log(`T86 ${ymd} OK`);
+    await sleep(GAP_MS);
+  }
+  const revDir = path.join(CACHE_DIR, "revenue");
+  fs.mkdirSync(revDir, { recursive: true });
+  for (const [y, m] of REVENUE_MONTHS) {
+    const fn = path.join(revDir, `${y}_${m}.html`);
+    if (fs.existsSync(fn)) continue;
+    const res = await fetch(`https://mopsov.twse.com.tw/nas/t21/sii/t21sc03_${y}_${m}_0.html`, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) throw new Error(`月營收 ${y}_${m} ${res.status}`);
+    fs.writeFileSync(fn, Buffer.from(await res.arrayBuffer())); // 原始 Big5，run.ts 再解碼
+    console.log(`月營收 ${y}_${m} OK`);
     await sleep(GAP_MS);
   }
   console.log(`完成；快取在 ${CACHE_DIR}`);
