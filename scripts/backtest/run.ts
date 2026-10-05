@@ -16,11 +16,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Candle, Chips } from "@/lib/data/types";
-import { computeSignals } from "@/lib/signals";
-import { score } from "@/lib/ai/actionScoring";
-import { computePriceFramework } from "@/lib/ai/grounding/priceLevels";
-import { computeSiteRating, type RatingCode } from "@/lib/ai/siteRating";
-import { ACTIVE_CHASE_GUARDS, ALL_CHASE_GUARDS, computeChaseMetrics, evaluateChaseGuards, type ChaseGuardId, type ChaseMetrics } from "@/lib/ai/chaseGuards";
+import { computeRatingCore } from "@/lib/ai/ratingCore";
+import type { RatingCode } from "@/lib/ai/siteRating";
+import { ACTIVE_CHASE_GUARDS, ALL_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardId, type ChaseMetrics } from "@/lib/ai/chaseGuards";
 import { CACHE_DIR, REVENUE_MONTHS, SIGNAL_DATES, UNIVERSE } from "./config";
 
 interface Row {
@@ -128,19 +126,14 @@ function buildRows(): Row[] {
       const hist = cs.slice(0, i + 1);
       const win = hist.slice(-63); // 正式站評等用 3 個月日K
       const chips = t86.get(date)?.get(sym) ?? null;
-      const signals = computeSignals(win, price, "3m");
-      const framework = computePriceFramework(win, price, "TW");
-      const m = computeChaseMetrics(hist, price, date, chips?.foreignNetShares);
-      const scored = score({
-        symbol: sym, name: sym, price, changePercent: 0, sources: [], signals, chips,
-        chipsRatios: null, fundamentals: null, earnings: null, announcements: [], headlines: [],
-      });
+      // 正式評等核心（src/lib/ai/ratingCore.ts，跟 stockRating.ts 同一個函式）；各追高防護組合逐一算。
+      const coreInput = { symbol: sym, name: sym, price, market: "TW" as const, candles: win, chaseCandles: hist, asOfDay: date, chips };
+      const base = computeRatingCore(coreInput);
+      const { scored, framework } = base;
+      const m = base.chase!;
       const codes: Record<string, RatingCode> = {};
       for (const [name, guards] of Object.entries(VARIANTS)) {
-        codes[name] = computeSiteRating({
-          facets: scored.facets, supportCount: scored.supportCount, againstCount: scored.againstCount,
-          signals, framework, chase: m, guards,
-        }).code;
+        codes[name] = computeRatingCore({ ...coreInput, guards }).rating.code;
       }
       const entry = cs[i + 1].open;
       const ret = (k: number) => (cs[i + k] ? (cs[i + k].close / entry - 1) * 100 : null);

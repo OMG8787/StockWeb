@@ -15,11 +15,8 @@
  * 只新增這個檔案，不改 run.ts／wide*.ts 既有行為（只 import wideData.ts 的唯讀載入函式）。
  */
 import type { Candle } from "@/lib/data/types";
-import { computeSignals } from "@/lib/signals";
-import { score } from "@/lib/ai/actionScoring";
-import { computePriceFramework } from "@/lib/ai/grounding/priceLevels";
-import { computeSiteRating } from "@/lib/ai/siteRating";
-import { ACTIVE_CHASE_GUARDS, computeChaseMetrics } from "@/lib/ai/chaseGuards";
+import { computeRatingCore } from "@/lib/ai/ratingCore";
+import { ACTIVE_CHASE_GUARDS } from "@/lib/ai/chaseGuards";
 import { computeRatingFeatures, featureBases, similarKey } from "@/lib/ai/learning/features";
 import { classifyRegime, REGIME_LABEL, type MarketRegime } from "@/lib/ai/learning/regime";
 import { computeOutcome } from "@/lib/ai/learning/reward";
@@ -59,16 +56,10 @@ function buildFromWide(): EvalRecord[] {
       const hist: Candle[] = cs.slice(0, i + 1);
       const win = hist.slice(-63);
       const chips = loadChipsCached(date).get(u.sym) ?? null;
-      const signals = computeSignals(win, price, "3m");
-      const framework = computePriceFramework(win, price, "TW");
-      const chase = computeChaseMetrics(hist, price, date, chips?.foreignNetShares);
-      const scored = score({
-        symbol: u.sym, name: u.name, price, changePercent: 0, sources: [], signals, chips,
-        chipsRatios: null, fundamentals: null, earnings: null, announcements: [], headlines: [],
-      });
-      const rating = computeSiteRating({
-        facets: scored.facets, supportCount: scored.supportCount, againstCount: scored.againstCount,
-        signals, framework, chase, guards: ACTIVE_CHASE_GUARDS,
+      // 正式評等核心（src/lib/ai/ratingCore.ts，跟 stockRating.ts 同一個函式）。
+      const { scored, framework, chase, rating } = computeRatingCore({
+        symbol: u.sym, name: u.name, price, market: "TW", candles: win, chaseCandles: hist, asOfDay: date, chips,
+        guards: ACTIVE_CHASE_GUARDS,
       });
       const ry = revenueYoyAsOf(date, u.sym);
       const f = computeRatingFeatures({

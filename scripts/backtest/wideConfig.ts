@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { WEAK_MARKET_RET60_PCT } from "@/lib/ai/siteRating";
 
 /**
  * 擴大樣本回測（--wide，2026-10-05 建立）設定。所有門檻／抽樣參數都在這裡事先定好，不依結果調參。
@@ -30,7 +31,8 @@ export const ROUND_TRIP_COST_PCT = 0.4;
 export const HORIZONS = [5, 10, 20] as const;
 
 /** 市況分段：訊號日加權指數近 60 個交易日報酬 > +5% 上漲、< -5% 下跌、其餘盤整。 */
-export const REGIME_RET60_PCT = 5;
+/** 跟正式站弱市況提示同一個門檻（siteRating.ts WEAK_MARKET_RET60_PCT，2026-10-06 整合稽核改為 import，避免兩邊各寫一份）。 */
+export const REGIME_RET60_PCT = WEAK_MARKET_RET60_PCT;
 
 /** 快取目錄（不提交）。 */
 export const WIDE_CACHE_DIR =

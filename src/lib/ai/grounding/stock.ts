@@ -26,7 +26,8 @@ import { describeIndicatorState, describeRecentCrosses, RECENT_CROSSES_TITLE } f
 import { getMarketStatus, isTaipeiWeekend } from "@/lib/marketStatus";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { chipsSectionTitle, formatStockNewsLines } from "./stockNewsAndChips";
-import { computePriceFramework, describePriceFramework } from "./priceLevels";
+import { describePriceFramework } from "./priceLevels";
+import { ratingPriceFramework } from "../ratingCore";
 import { describeChipsRatios } from "./chipsRatios";
 import { getUsStockSentiment } from "@/lib/data/sentiment";
 import { describeSocialSentiment } from "./sentiment";
@@ -165,13 +166,14 @@ export async function buildStockGrounding(
     lines.push("（歷史走勢資料目前無法取得）");
   }
   // 支撐／壓力＋自洽的買進區間／出場價／不追價，由程式算好（見 priceLevels.ts）；興櫃成交稀疏不給。
-  const levelCandles = chartYear?.candles ?? chart?.candles;
   if (stockRating) {
     // 直接用評等那份框架，買進區間的數字才會跟評等逐字相同。
     const levelsText = describePriceFramework(stockRating.framework, { avoid: stockRating.rating.code === "avoid" });
     if (levelsText) lines.push(levelsText);
-  } else if (levelCandles && quote.board !== "emerging") {
-    const levelsText = describePriceFramework(computePriceFramework(levelCandles, quote.price, quote.market));
+  } else {
+    // 評等暫時算不出來時的備援：跟評等同一個規則與同一份 3 個月日K（ratingCore.ts ratingPriceFramework）。
+    // 2026-10-06 整合稽核：以前這裡用 1 年日K，評等恢復後價位會跟備援時不同。
+    const levelsText = describePriceFramework(ratingPriceFramework(chart?.candles, quote.price, quote.market, quote.board));
     if (levelsText) lines.push(levelsText);
   }
   lines.push("（來源：即時/近即時公開資料）");

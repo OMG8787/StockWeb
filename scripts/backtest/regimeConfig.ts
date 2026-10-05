@@ -1,4 +1,5 @@
 import path from "node:path";
+import { WEAK_MARKET_RET60_PCT } from "@/lib/ai/siteRating";
 import { WIDE_CACHE_DIR } from "./wideConfig";
 
 /**
@@ -13,7 +14,8 @@ import { WIDE_CACHE_DIR } from "./wideConfig";
  * 樣本外期間（OOS）：2022-01～2024-09（含 2022 年空頭），選樣方法與擴大回測（wideConfig.ts）完全相同，
  * 只是改用 2021 年底（訊號期之前）的成交金額排名。樣本內（IS）＝擴大回測的 2024-10～2026-08 資料（直接讀既有快取）。
  */
-export const REGIME_A_PCT = 5;
+/** 定義 A 門檻＝正式站弱市況提示門檻（siteRating.ts WEAK_MARKET_RET60_PCT，同一個常數）。 */
+export const REGIME_A_PCT = WEAK_MARKET_RET60_PCT;
 export const REGIME_B_MA = 60;
 
 export interface PeriodConfig {

@@ -14,11 +14,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Candle } from "@/lib/data/types";
-import { computeSignals } from "@/lib/signals";
-import { score } from "@/lib/ai/actionScoring";
-import { computePriceFramework } from "@/lib/ai/grounding/priceLevels";
-import { computeSiteRating, type RatingCode } from "@/lib/ai/siteRating";
-import { ACTIVE_CHASE_GUARDS, computeChaseMetrics, type ChaseMetrics } from "@/lib/ai/chaseGuards";
+import { computeRatingCore } from "@/lib/ai/ratingCore";
+import type { RatingCode } from "@/lib/ai/siteRating";
+import { ACTIVE_CHASE_GUARDS, type ChaseMetrics } from "@/lib/ai/chaseGuards";
 import { HORIZONS, REGIME_RET60_PCT, ROUND_TRIP_COST_PCT, SIGNAL_END, SIGNAL_START, WIDE_CACHE_DIR } from "./wideConfig";
 import { buildUniverse, loadCandles, loadChips, rankedCount, revenueYoyAsOf, weeklySignalDates, type Tier } from "./wideData";
 
@@ -102,17 +100,14 @@ function buildRows(): { rows: WRow[]; universe: ReturnType<typeof buildUniverse>
       const hist = cs.slice(0, i + 1);
       const win = hist.slice(-63);
       const chips = chipsByDate.get(date)?.get(u.sym) ?? null;
-      const signals = computeSignals(win, price, "3m");
-      const framework = computePriceFramework(win, price, "TW");
-      const m = computeChaseMetrics(hist, price, date, chips?.foreignNetShares);
-      const scored = score({
-        symbol: u.sym, name: u.name, price, changePercent: 0, sources: [], signals, chips,
-        chipsRatios: null, fundamentals: null, earnings: null, announcements: [], headlines: [],
+      // 正式評等核心（src/lib/ai/ratingCore.ts，跟 stockRating.ts 同一個函式）。
+      const core = computeRatingCore({
+        symbol: u.sym, name: u.name, price, market: "TW", candles: win, chaseCandles: hist, asOfDay: date, chips,
+        guards: ACTIVE_CHASE_GUARDS,
       });
-      const code = computeSiteRating({
-        facets: scored.facets, supportCount: scored.supportCount, againstCount: scored.againstCount,
-        signals, framework, chase: m, guards: ACTIVE_CHASE_GUARDS,
-      }).code;
+      const { scored } = core;
+      const m = core.chase!;
+      const code = core.rating.code;
       const closes = hist.map((c) => c.close);
       const avg = (k: number) => mean(closes.slice(-k));
       rows.push({

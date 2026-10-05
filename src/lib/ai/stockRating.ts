@@ -1,13 +1,12 @@
 import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
 import type { Market } from "@/lib/data";
 import { cachedWithDegradedNullTtl } from "@/lib/data/degradedCache";
-import { computeSignals } from "@/lib/signals";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
-import { score, type Facet } from "./actionScoring";
-import { computeChaseMetrics } from "./chaseGuards";
+import type { Facet } from "./actionScoring";
+import { computeRatingCore } from "./ratingCore";
 import { logRating, type RatingSource } from "./ratingLog";
-import { computePriceFramework, type PriceFramework } from "./grounding/priceLevels";
-import { computeSiteRating, type SiteRating } from "./siteRating";
+import type { PriceFramework } from "./grounding/priceLevels";
+import type { SiteRating } from "./siteRating";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { sectorFactorDirection } from "./grounding/sectorFactors";
 import { computeRatingFeatures, type RatingFeatures } from "./learning/features";
@@ -66,34 +65,22 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     getEarnings(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
   ]);
-  const signals = chart ? computeSignals(chart.candles, quote.price, "3m") : [];
-  const scored = score({
+  // 「資料 → 結論」由 ratingCore.ts 唯一組裝（回測工具也呼叫同一個，見該檔說明）。
+  const { scored, framework, chase, rating } = computeRatingCore({
     symbol: quote.symbol,
     name: quote.name,
     price: quote.price,
     changePercent: quote.changePercent,
-    sources: [],
-    signals,
+    market: quote.market,
+    board: quote.board,
+    // 3 個月日K：價位框架只用到 MA60／近60日高低；追高防護也用同一份（2026-10-05 檢討回測，見 chaseGuards.ts）。
+    candles: chart?.candles,
+    asOfDay: taipeiDayKey(),
     chips,
     chipsRatios,
     fundamentals,
     earnings,
     announcements,
-    headlines: [],
-  });
-  // 興櫃成交稀疏不給價位框架（跟個股資料區塊同一個規則）。
-  const levelCandles = chart?.candles;
-  const framework =
-    levelCandles && quote.board !== "emerging" ? computePriceFramework(levelCandles, quote.price, quote.market) : null;
-  // 追高防護（2026-10-05 檢討回測，見 chaseGuards.ts）：用同一份 3 個月日K＋現價＋當日外資買賣超。
-  const chase = chart ? computeChaseMetrics(chart.candles, quote.price, taipeiDayKey(), chips?.foreignNetShares) : null;
-  const rating = computeSiteRating({
-    facets: scored.facets,
-    supportCount: scored.supportCount,
-    againstCount: scored.againstCount,
-    signals,
-    framework,
-    chase,
     marketRet60Pct: await marketRetPromise,
   });
   const [regime, sectorDirection] = await Promise.all([regimePromise, sectorDirPromise]);
