@@ -93,11 +93,9 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
   // 不抓任何報價，所以每次按鍵都查也不會對上游資料源造成負擔。
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
-      setSuggestions([]);
-      setOpen(false);
-      return;
-    }
+    // 清空時收起清單改在 onChange 裡直接做（見下方輸入框），不在 effect 裡同步 setState
+    //（react-hooks/set-state-in-effect：effect 本體同步 setState 會造成連鎖重繪）。
+    if (!trimmed) return;
     const timer = setTimeout(() => {
       const seq = ++requestSeq.current;
       lookup(trimmed)
@@ -224,7 +222,15 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (!e.target.value.trim()) {
+                  // 清空輸入：讓進行中的建議查詢作廢，並立刻收起清單
+                  requestSeq.current++;
+                  setSuggestions([]);
+                  setOpen(false);
+                }
+              }}
               onKeyDown={handleKeyDown}
               onFocus={() => {
                 if (suggestions.length > 0) setOpen(true);
