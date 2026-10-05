@@ -247,6 +247,8 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       timeoutMs: 30000,
       totalBudgetMs: 38000, // 資料抓取最久約 10~15 秒＋這段＜maxDuration 60 秒，否則整個函式被 Vercel 砍掉（2026-10-05 實測 refresh 逾時）
       maxOutputTokens: 6000,
+      // 每天少量、價值高：Gemini 用非 lite 思考模型（每日配額、思考模型最多用 65% 時間，逾時／額度用完退回 lite，見 gemini.ts）。
+      geminiTier: "premium",
     });
 
     if (result.usedAi) {

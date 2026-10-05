@@ -61,6 +61,14 @@ export const GEMINI_THINKING_LEVEL = "low";
 export const GEMINI_THINKING_BUDGET = 1024;
 /** 思考 token 也算進 maxOutputTokens：非 lite 模型呼叫時另外加這麼多，正文才不會被截斷。 */
 export const GEMINI_THINKING_ALLOWANCE = 4096;
+/**
+ * 整個 Gemini 呼叫（含換模型重試）共用呼叫端給的 timeoutMs；非 lite 思考模型最多只用其中這個比例，
+ * 留時間給 lite 備援（快報 maxDuration 60 秒，思考模型逾時後還要能退回 lite，不能整段被 Vercel 砍掉）。
+ */
+export const GEMINI_THINKING_TIME_SHARE = 0.65;
+/** 剩餘時間少於這個就不再換下一個模型。 */
+const GEMINI_MIN_ATTEMPT_MS = 4000;
+
 /** 不是一般文字生成用的模型（語音、圖片、向量、即時串流等），一律排除。 */
 export const GEMINI_EXCLUDED_MODEL_PATTERN =
   /tts|image|embedding|vision|audio|live|aqa|robotics|computer-use|omni|transcribe|lyria|nano-banana|deep-research|antigravity/i;
@@ -270,13 +278,19 @@ export async function askGeminiWithModel(
   const order = tier === "standard" && known && candidates.includes(known) ? [known, ...candidates.filter((m) => m !== known)] : candidates;
 
   let lastError: unknown = new Error("沒有任何 Gemini 模型可用");
+  const totalMs = options.timeoutMs ?? 12000;
+  const deadline = Date.now() + totalMs;
+  const thinkingDeadline = Date.now() + totalMs * GEMINI_THINKING_TIME_SHARE;
   for (const model of order) {
-    if (isGeminiThinkingModel(model) && !process.env.GEMINI_MODEL && !(await reserveThinkingCall(model))) {
+    const thinking = isGeminiThinkingModel(model);
+    const remaining = (thinking ? thinkingDeadline : deadline) - Date.now();
+    if (remaining < GEMINI_MIN_ATTEMPT_MS) continue;
+    if (thinking && !process.env.GEMINI_MODEL && !(await reserveThinkingCall(model))) {
       lastError = new Error(`Gemini（${model}）今日免費額度已用到上限 ${GEMINI_PREMIUM_DAILY_CAP} 次`);
       continue;
     }
     try {
-      const text = await callGemini(model, system, messages, apiKey, options);
+      const text = await callGemini(model, system, messages, apiKey, { ...options, timeoutMs: remaining });
       knownGoodModel.set(cacheKey, model);
       return { text, model };
     } catch (err) {
