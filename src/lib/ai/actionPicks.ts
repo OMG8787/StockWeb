@@ -37,7 +37,7 @@ export interface ActionBriefPick {
   reason: string;
   /** 程式組好的操作計畫（價位全部來自評等） */
   plan?: string;
-  /** AI 判斷層的一行看法（AI 有調整時才有，見 learning/aiAdjust.ts describeAiView） */
+  /** AI 判斷層的一行看法——2026-10-06 起不顯示給使用者（冠軍／挑戰者證明前只記錄），保留欄位相容舊快取 */
   aiView?: string | null;
 }
 
@@ -216,7 +216,7 @@ export function groupedPickLines(
     const risk = str(t?.risk);
     // AI 看法接在同一個條列尾端（MarkdownLite 不支援巢狀清單，另起一行會被當成另一檔）。
     return [
-      `- **${p.name}(${p.symbol})**：${p.label}。${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}${p.aiView ? `${p.aiView}。` : ""}`,
+      `- **${p.name}(${p.symbol})**：${p.label}。${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,
     ];
   };
   const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 建議買進（開盤或盤中可買）**` : "**建議買進（現價可分批買）**";
@@ -258,4 +258,51 @@ export function renderActionBrief(input: RenderInput): string {
   if (ai && watch) out.push(`**留意**：${sentence(watch)}。`);
   if (!ai) out.push(`**留意**：AI 白話說明暫時無法產生（${(input.failureNote ?? "未知原因").replace(/。$/, "")}），以上為程式依各面向評分與價位算出的評等。`);
   return out.join("\n");
+}
+
+/** AI 解說層（只在時點重寫）：撰寫當下每一檔的結論字樣，用來判斷現在還能不能沿用。 */
+export interface ActionAiLayer {
+  ai: ActionBriefAiJson | null;
+  /** 撰寫當下名單：代號 → 評等字樣（label）。結論或價位字樣不同就不可沿用該檔解說。 */
+  labels: Record<string, string>;
+  notChaseSymbol: string | null;
+}
+
+/**
+ * 合併「程式即時名單」與「時點撰寫的 AI 解說」（純函式，有測試）。
+ * - 名單裡某檔在撰寫當下也在名單、而且評等字樣（含價位）完全相同 → 沿用 AI 理由／風險。
+ * - 新加入或結論／價位已改變 → 只用程式理由，並註明「解說將於下次更新（HH:MM）補上」；絕不沿用舊解說。
+ * - 「我的看法」只在名單（代號＋字樣）跟撰寫當下完全相同時才顯示；「不建議追」AI 句只在同一檔時沿用。
+ */
+export function mergeAiExplanation(
+  picks: ActionBriefPick[],
+  layer: ActionAiLayer | null,
+  notChaseSymbol: string | null,
+  nextUpdate: string
+): { picks: ActionBriefPick[]; ai: ActionBriefAiJson | null; stale: string[] } {
+  if (!layer?.ai) return { picks, ai: null, stale: [] };
+  const stale: string[] = [];
+  const keepPicks: Record<string, { reason?: string; risk?: string }> = {};
+  const merged = picks.map((p) => {
+    const sym = p.symbol.toUpperCase();
+    const same = layer.labels[sym] === p.label;
+    const t = same ? aiPickText(layer.ai, p) : undefined;
+    if (t) {
+      keepPicks[sym] = t;
+      return p;
+    }
+    if (!same) stale.push(sym);
+    return same ? p : { ...p, reason: `${sentence(p.reason)}（解說將於下次更新（${nextUpdate}）補上）` };
+  });
+  const sameList =
+    stale.length === 0 && Object.keys(layer.labels).length === picks.length && picks.every((p) => layer.labels[p.symbol.toUpperCase()] === p.label);
+  const ai: ActionBriefAiJson = {
+    ...layer.ai,
+    picks: keepPicks,
+    view: sameList ? layer.ai.view : undefined,
+    confidence: sameList ? layer.ai.confidence : undefined,
+    confidenceReason: sameList ? layer.ai.confidenceReason : undefined,
+    notChase: layer.notChaseSymbol && layer.notChaseSymbol === notChaseSymbol ? layer.ai.notChase : undefined,
+  };
+  return { picks: merged, ai, stale };
 }

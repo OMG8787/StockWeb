@@ -77,3 +77,25 @@ export function writtenAtLabel(generatedAt: string, modelName?: string | null, f
   const model = modelName ? `（${modelName}${fellBackToLite ? "；較強模型今日額度用完或暫時無法使用，改用此模型" : ""}）` : "";
   return `分析撰寫於 ${t}${model}，數字即時更新`;
 }
+
+/** 下一個時點的 "HH:MM"（今天還有就是今天的，否則是之後第一個有時點的日子的第一個）。 */
+export function nextSlotTime(now: Date, trading: readonly string[], holiday: readonly string[]): string {
+  const hhmm = taipeiHHMM(now);
+  for (let ahead = 0; ahead < 7; ahead++) {
+    const d = new Date(now.getTime() + ahead * 86400_000);
+    const slots = isWeekday(d) ? trading : holiday;
+    const later = ahead === 0 ? slots.filter((t) => t > hhmm) : [...slots];
+    if (later.length > 0) return later[0];
+  }
+  return trading[0];
+}
+
+export const nextActionBriefSlotTime = (now: Date = new Date()) => nextSlotTime(now, ACTION_BRIEF_SLOTS_TRADING, ACTION_BRIEF_SLOTS_HOLIDAY);
+
+/** 今日建議卡片：名單與價位（程式即時）與分析文字（時點重寫）兩個時間分開標示。 */
+export function actionBriefTimeLabel(listAt: string, writtenAt: string | null, modelName?: string | null, fellBackToLite = false): string {
+  const list = `名單與價位即時（${taipeiHHMM(new Date(listAt))}）`;
+  if (!writtenAt) return `${list}，分析文字暫時無法產生`;
+  const model = modelName ? `（${modelName}${fellBackToLite ? "；較強模型今日額度用完或暫時無法使用，改用此模型" : ""}）` : "";
+  return `${list}，分析文字撰寫於 ${taipeiHHMM(new Date(writtenAt))}${model}`;
+}

@@ -1,11 +1,22 @@
+import { cached } from "@/lib/data/cache";
+import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { slotCached } from "./slotCache";
-import { actionBriefSlot } from "./aiSchedule";
+import { actionBriefSlot, nextActionBriefSlotTime } from "./aiSchedule";
+import type { StockRatingResult } from "./stockRating";
 import { premiumFellBack } from "./gemini";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
-import { buildPlan, parseActionBriefJson, renderActionBrief, type ActionBriefPick } from "./actionPicks";
+import {
+  buildPlan,
+  mergeAiExplanation,
+  parseActionBriefJson,
+  renderActionBrief,
+  type ActionAiLayer,
+  type ActionBriefPick,
+  type NotChasePick,
+} from "./actionPicks";
 import { getAiJudgments } from "./aiJudge";
-import { describeAiView, type AiJudgment } from "./learning/aiAdjust";
+import type { AiJudgment } from "./learning/aiAdjust";
 import { guardAnswerNumbers } from "./numberGuard";
 import { modelInfo, type ModelInfo } from "./modelName";
 import { getTradingStance, type BriefMode, type TradingStance } from "./tradingStance";
@@ -33,6 +44,8 @@ export interface ActionBrief {
   picks: ActionBriefPick[];
   /** 要用較強模型、但額度用完或暫時無法使用而改用其他模型（卡片標示用） */
   fellBackToLite?: boolean;
+  /** 名單與價位（程式即時層）的計算時間；generatedAt 是 AI 解說撰寫時間（沒有 AI 時同 listAt） */
+  listAt?: string;
 }
 
 // 2026-09-20：拉長回 30 分鐘——這是一段給人「一天看幾次」的摘要性建議文字，
@@ -122,43 +135,39 @@ function buildActionSystemPrompt(stance: TradingStance): string {
 
 export { NOT_CHASE_TITLE, groupedPickLines, type ActionBriefPick } from "./actionPicks";
 
-export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {
-  const stance = getTradingStance();
-  return slotCached(
-    // v2：輸出格式從「3-5條值得留意的重點」改成「多面向驗證過的今日建議買進清單」，
-    // 舊格式的快取內容跟新的頁面說明對不起來，換 key 直接作廢舊結果。
-    // v3：體檢表新增「持股結構面（大戶／外資／融資）」，作廢舊快取。
-    // v4：2026-10-04 輸出改成精簡格式（每檔一條：結論＋關鍵數字＋風險），作廢舊的長篇快取。
-    // v5：體檢表持股結構面加上券資比；v6：第四項改成融券使用率（融券÷融券限額），作廢舊快取。
-    // v7：2026-10-05 名單改由本站綜合評等決定（siteRating.ts），並依時段分「今日建議／明日開盤建議」——
-    //     key 帶台北日期＋模式，盤中版本不會在 14:30 後（含 SWR 寬限期）被沿用成明日開盤建議。
-    // v8：2026-10-05 名單分「建議買進／等回檔（現價不買）」兩組，picks 多了 code。
-    // v9：2026-10-05 加「我的看法」排序與把握程度、措辭不暗示贏大盤。
-    // v10：14:30 後改「明日操作建議」（開盤＋盤中操作計畫）。
-    // v13：2026-10-05 果斷二分：只剩「建議買進」（最多 5 檔）與「先不要買／不建議追」、弱市況頁首提示。
-    // v12：AI JSON picks key 容錯。v11：2026-10-05 名單（分組上限、互斥）改由程式決定、AI 回 JSON 只寫解說，加 AI 看法行。
-    // v14：2026-10-05 改成只在 aiSchedule.ts 的時點用較強模型重寫（slotCache.ts），其間沿用最近一次版本。
-    "action-brief:v14",
-    actionBriefSlot(),
+/** AI 解說層快取前綴：帶台北日期＋時段——不跨日沿用、今日建議→明日操作建議時換一份（slotCached 的 latest 也在這個前綴下）。 */
+export function actionAiLayerPrefix(day: string, mode: BriefMode): string {
+  return `action-brief-ai:v1:${day}:${mode}`;
+}
+
+/** 程式即時層（名單、結論、價位、操作計畫）：跟 stockRating 同樣 10 分鐘，不需要 AI、不吃配額。 */
+export const ACTION_LIST_TTL_MS = 10 * 60_000;
+
+interface ActionListLayer {
+  grounding: string;
+  picks: ActionBriefPick[];
+  ratings: StockRatingResult[];
+  indexSummary: string;
+  notChase: NotChasePick | null;
+  gainersAvailable: boolean;
+  marketNote: string | null;
+  listAt: string;
+}
+
+/** AI 解說層快取物件（slotCached 需要 usedAi）。 */
+interface StoredAiLayer extends ActionAiLayer {
+  usedAi: boolean;
+  generatedAt: string;
+  model?: ModelInfo;
+  fellBackToLite?: boolean;
+}
+
+function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
+  return cached(
+    `action-list:v1:${taipeiDayKey()}:${stance.briefMode}`,
+    ACTION_LIST_TTL_MS,
     async () => {
       const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote } = await buildActionGrounding();
-      const sysPrompt = buildActionSystemPrompt(stance);
-      // 主文 AI 與 AI 判斷層（每檔每天最多一次、快取）平行跑；判斷層失敗就沒有 AI 看法行，不影響名單。
-      const [result, judgments] = await Promise.all([
-        // Not on a blocking user-wait path (client-fetched, not SSR-blocking).
-        // maxOutputTokens 給足：CJK token 多，被截斷的 JSON 解析不了會退回程式版。
-        callAiProviders(sysPrompt, [{ role: "user", content: `參考資料：\n${stance.stanceLine}\n\n${grounding}` }], {
-          timeoutMs: 25000,
-          maxOutputTokens: 1600,
-          // 每天少量、價值高：用非 lite 思考模型（有每日配額，用完自動退回 lite，見 gemini.ts）。
-          geminiTier: "premium",
-          geminiPurpose: "action",
-        }),
-        getAiJudgments(
-          ratedPicks.map((p) => p.rating),
-          "today-brief"
-        ).catch(() => new Map<string, AiJudgment>()),
-      ]);
       const picks: ActionBriefPick[] = ratedPicks.map((p) => ({
         symbol: p.rating.symbol,
         name: p.rating.name,
@@ -167,26 +176,79 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
         holdingLabel: p.rating.rating.holdingLabel,
         reason: p.rating.rating.reason,
         plan: buildPlan(p.rating.rating, stance),
-        aiView: describeAiView(judgments.get(p.rating.symbol.toUpperCase()), p.rating.rating.code),
       }));
-      const base = { title: stance.briefTitle, mode: stance.briefMode, picks };
-      const ai = result.usedAi ? parseActionBriefJson(result.answer) : null;
-      if (result.usedAi && !ai) console.warn("[action-brief] AI 回傳不是 JSON，改用程式版");
-      const text = renderActionBrief({
-        stance,
-        marketLine: indexSummary.replace(/^大盤：/, ""),
-        buy: picks.filter((p) => p.code !== "avoid"),
-        notChase,
-        marketNote,
-        gainersAvailable,
-        ai,
-        failureNote: result.usedAi ? "AI 回傳格式錯誤" : result.failureReason ?? "未知原因",
-      });
-      // AI 寫的理由裡若有價位數字，跟程式價位比對（見 numberGuard.ts）。
-      const guarded = guardAnswerNumbers(text, grounding);
-      if (guarded.fixes.length > 0) console.warn("[action-brief] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-      return { ...base, text: guarded.text, usedAi: !!ai, generatedAt: new Date().toISOString(), ...(ai ? { model: modelInfo(result.model), fellBackToLite: premiumFellBack(result.model) } : {}) };
+      return { grounding, picks, ratings: ratedPicks.map((p) => p.rating), indexSummary, notChase, gainersAvailable, marketNote, listAt: new Date().toISOString() };
     },
     { forceRefresh }
   );
+}
+
+/**
+ * 今日建議＝兩層合併（2026-10-06 整合稽核：只用 slotCached 時名單與價位可能比個股評等舊數小時、甚至跨日）：
+ * ①名單、結論、價位、操作計畫＝程式即時（getActionList，跟 stockRating 同一份 10 分鐘評等）；
+ * ②AI 解說（理由、看法、排序）＝只在 aiSchedule.ts 的時點用較強模型重寫（slotCached），key 帶台北日期＋時段，
+ *   不跨日、時段切換（今日→明日操作）換一份；合併規則見 actionPicks.ts mergeAiExplanation。
+ */
+export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {
+  const stance = getTradingStance();
+  const list = await getActionList(stance, forceRefresh);
+  // 版本史：v2～v13 見 git log；v14 改時點重寫；ai:v1（2026-10-06）只存 AI 解說，名單改程式即時。
+  const layer = await slotCached<StoredAiLayer>(
+    actionAiLayerPrefix(taipeiDayKey(), stance.briefMode),
+    actionBriefSlot(),
+    async () => {
+      const sysPrompt = buildActionSystemPrompt(stance);
+      // AI 判斷層照樣在時點跑、只寫進評等紀錄（冠軍／挑戰者證明前不顯示給使用者，2026-10-06 使用者：「那到底要以哪個為主」）。
+      const [result] = await Promise.all([
+        callAiProviders(sysPrompt, [{ role: "user", content: `參考資料：
+${stance.stanceLine}
+
+${list.grounding}` }], {
+          timeoutMs: 25000,
+          maxOutputTokens: 1600,
+          // 每天少量、價值高：用非 lite 思考模型（有每日配額，用完自動退回 lite，見 gemini.ts）。
+          geminiTier: "premium",
+          geminiPurpose: "action",
+        }),
+        getAiJudgments(list.ratings, "today-brief").catch(() => new Map<string, AiJudgment>()),
+      ]);
+      const ai = result.usedAi ? parseActionBriefJson(result.answer) : null;
+      if (result.usedAi && !ai) console.warn("[action-brief] AI 回傳不是 JSON，改用程式版");
+      return {
+        ai,
+        labels: Object.fromEntries(list.picks.map((p) => [p.symbol.toUpperCase(), p.label])),
+        notChaseSymbol: list.notChase?.symbol ?? null,
+        usedAi: !!ai,
+        generatedAt: new Date().toISOString(),
+        ...(ai ? { model: modelInfo(result.model), fellBackToLite: premiumFellBack(result.model) } : {}),
+      };
+    },
+    { forceRefresh }
+  ).catch(() => null);
+
+  const merged = mergeAiExplanation(list.picks, layer, list.notChase?.symbol ?? null, nextActionBriefSlotTime());
+  const text = renderActionBrief({
+    stance,
+    marketLine: list.indexSummary.replace(/^大盤：/, ""),
+    buy: merged.picks.filter((p) => p.code !== "avoid"),
+    notChase: list.notChase,
+    marketNote: list.marketNote,
+    gainersAvailable: list.gainersAvailable,
+    ai: merged.ai,
+    failureNote: "模型暫時無法使用，下次更新時點會再試",
+  });
+  // AI 寫的理由裡若有價位數字，跟程式價位比對（見 numberGuard.ts）。
+  const guarded = guardAnswerNumbers(text, list.grounding);
+  if (guarded.fixes.length > 0) console.warn("[action-brief] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
+  const usedAi = !!merged.ai;
+  return {
+    title: stance.briefTitle,
+    mode: stance.briefMode,
+    picks: list.picks,
+    text: guarded.text,
+    usedAi,
+    listAt: list.listAt,
+    generatedAt: usedAi && layer ? layer.generatedAt : list.listAt,
+    ...(usedAi && layer?.model ? { model: layer.model, fellBackToLite: layer.fellBackToLite } : {}),
+  };
 }

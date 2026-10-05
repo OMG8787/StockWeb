@@ -4,7 +4,7 @@ import type { ActionBrief } from "@/lib/ai/actionBrief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
 import { useBriefStance } from "./ActionBriefHeading";
 import MarkdownLite from "./MarkdownLite";
-import { writtenAtLabel } from "@/lib/ai/aiSchedule";
+import { actionBriefTimeLabel } from "@/lib/ai/aiSchedule";
 
 /**
  * Fetched client-side rather than server-rendered, same reasoning as
@@ -43,9 +43,7 @@ export default function ActionBriefCard() {
         {/* 2026-10-05 使用者：更新時間照實寫——分析文字只在固定時點重寫（aiSchedule.ts），數字另外即時更新。 */}
         {brief
           ? ` · ${
-              brief.usedAi
-                ? writtenAtLabel(brief.generatedAt, brief.model?.name, brief.fellBackToLite)
-                : `資料整理於 ${new Date(brief.generatedAt).toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei", hour: "2-digit", minute: "2-digit", hour12: false })}`
+              actionBriefTimeLabel(brief.listAt ?? brief.generatedAt, brief.usedAi ? brief.generatedAt : null, brief.model?.name, brief.fellBackToLite)
             }`
           : ""}
       </p>
