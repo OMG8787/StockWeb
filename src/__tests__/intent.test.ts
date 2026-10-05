@@ -160,7 +160,7 @@ describe("沒指名對象的買賣是非題 vs 全市場推薦", () => {
       expect(wantsMarketWideBuyIdea(q), q).toBe(false);
       expect(isBareTradeYesNoQuestion(q), q).toBe(true);
     }
-    for (const q of ["建議買什麼", "下週開盤建議買入的股票。", "建議布局哪些標的", "有什麼可以買的", "建議挑幾檔買"]) {
+    for (const q of ["建議買什麼", "下週開盤建議買入的股票。", "建議布局哪些標的", "有什麼可以買的", "建議挑幾檔買", "今天有什麼股票推薦買進？"]) {
       expect(wantsMarketWideBuyIdea(q), q).toBe(true);
       expect(isBareTradeYesNoQuestion(q), q).toBe(false);
     }
