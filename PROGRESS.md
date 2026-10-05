@@ -412,6 +412,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-06：跨模型評測框架與第一份基準
+
+- scripts/eval（`4beccdb`…`50806d7`）：題庫 33 題（含使用者真實回報）、程式評分器、三家同輸入執行器（forceProvider、假時鐘、--judge、--regrade、--compare），報告 docs/eval/（先看 2026-10-06-baseline-analysis.md）。改前 722a9c6→改後 0e01390：Lite 97%→96%、NVIDIA 94%→95%（持平，二分化沒讓模型變差）；Groq 免費 TPM 8000 接不住個股題（約1萬token）。Lite 守規則最高但深度不足（評審 3.1 vs NVIDIA 4.3）。
+- 評測抓到的 bug（待「提高 Lite 下限」agent 處理）：9999 不存在被說「有涵蓋暫時連不上」（notFoundNote 無條件夾帶）；「建鼎呢」帶對話紀錄時錯字比對被 movers 判斷跳過；名稱標記外洩「國巨*」；盤後定價立場行與二分評等矛盾；RULE_NO_UNVERIFIABLE_CONFESSION 不該只要有對話紀錄就組入；比較題規則範例被照抄。Stock-web-before worktree 已移除。
+
 ### 2026-10-05（續7）：今日快報因果版＋存檔、手機固定表頭、Gemini 分級
 
 - 今日快報（`b04cdc8`…`987978b`）：今日重點／台股美股「現象→原因→後續」／明天要留意，約650～900字；BRIEF_RULE_CAUSE_GROUNDING 原因須有出處否則寫原因不明；briefArchive.ts 每日存檔（Redis brief-archive:v1，一天最多2次、17:00後覆蓋定稿、含參考資料與模型、保留400天）＋ /api/brief-archive。正式站 Gemini 3 Flash 產生 903 字範例。限制：Nemotron 備援會編原因。
