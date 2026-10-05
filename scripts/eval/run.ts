@@ -189,8 +189,34 @@ async function judge(question: string, answer: string, judgeVariant: string): Pr
   }
 }
 
+// ---------------------------------------------------------------- 重新評分（改了 graders／checks 後不用重打模型）
+async function regrade(jsonPath: string) {
+  const { normalizeZhTw } = await import("@/lib/ai/zhTwNormalize");
+  const data = JSON.parse(fs.readFileSync(jsonPath, "utf8")) as { startedAt: string; variants: string[]; captures: CaseCapture[]; records: EvalRecord[] };
+  const cases = EVAL_CASES.filter((c) => data.captures.some((x) => x.caseId === c.id));
+  for (const r of data.records) {
+    const c = cases.find((x) => x.id === r.caseId);
+    const cap = data.captures.find((x) => x.caseId === r.caseId);
+    if (!c || !cap?.grounding || !r.ok || r.rawAnswer == null) continue;
+    r.checks = gradeAnswer({
+      caseDef: c,
+      rawAnswer: r.rawAnswer,
+      finalAnswer: r.finalAnswer ?? "",
+      grounding: cap.grounding,
+      zhFixedCount: normalizeZhTw(r.rawAnswer).fixedCount,
+      phase: (cap.phase ?? "after-close") as Phase,
+    });
+  }
+  fs.writeFileSync(jsonPath, JSON.stringify(data, null, 1));
+  const date = path.basename(jsonPath, ".json");
+  fs.writeFileSync(jsonPath.replace(/\.json$/, ".md"), renderReport({ date, startedAt: data.startedAt, variants: data.variants, cases, captures: data.captures, records: data.records }));
+  log(`重新評分完成：${jsonPath.replace(/\.json$/, ".md")}`);
+}
+
 // ---------------------------------------------------------------- 主程式
 async function main() {
+  const regradePath = arg("regrade");
+  if (regradePath) return regrade(regradePath);
   const only = arg("only")?.split(",");
   const variants = arg("variants")?.split(",") ?? DEFAULT_VARIANTS;
   const withJudge = process.argv.includes("--judge");
@@ -218,7 +244,13 @@ async function main() {
       captures.push({ caseId: c.id, error: cap.error });
       continue;
     }
-    captures.push({ caseId: c.id, phase: cap.phase, systemChars: cap.system.length, userChars: cap.messages.reduce((n, m) => n + m.content.length, 0) });
+    captures.push({
+      caseId: c.id,
+      phase: cap.phase,
+      systemChars: cap.system.length,
+      userChars: cap.messages.reduce((n, m) => n + m.content.length, 0),
+      grounding: cap.grounding,
+    });
     const results = await Promise.all(
       variants.map(async (v) => {
         const s = performance.now();

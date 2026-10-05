@@ -123,7 +123,7 @@ export function gradeUniversal(g: GradeInput): CheckResult[] {
   // 引用教訓／相似案例時要帶數字證據（2026-10-05 已知問題：AI 引用教訓沒帶證據數字）。
   const lessonSentences = plain(g.finalAnswer)
     .split(/(?<=[。！？])|\n+/)
-    .filter((s) => /教訓|相似案例|回測/.test(s));
+    .filter((s) => /教訓|相似案例|本站回測|回測(顯示|結果|統計|中|數據)/.test(s));
   if (lessonSentences.length > 0) {
     const bare = lessonSentences.filter((s) => !/\d/.test(s));
     out.push({ rule: "引用教訓／相似案例帶數字", pass: bare.length === 0, detail: bare[0]?.slice(0, 80) });
@@ -159,6 +159,7 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
     }
     case "ratingEach": {
       const miss: string[] = [];
+      const head = firstSentences(ans, 2);
       for (const s of spec.symbols) {
         const r = ratings.get(s.toUpperCase());
         if (!r) {
@@ -166,9 +167,20 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
           continue;
         }
         const label = coreLabel(r.unheld);
-        const at = nameOrSymbolIndex(ans, r);
-        // 該檔第一次出現後 200 字內要有自己的評等字樣（「建議先不要買」等）。
-        if (at < 0 || !ans.slice(at, at + 200).includes(label)) miss.push(`${r.name}(${s})應為「${label}」`);
+        // 通過條件：該檔任一次出現的前 80～後 200 字內有自己的評等字樣；或開頭用「兩檔都／都是＋字樣」一起講（且各檔字樣相同）。
+        const names = [r.symbol, r.name.replace(/[*＊]|-KY$/g, ""), r.name].filter((n) => n.length >= 2);
+        const near = names.some((n) => {
+          for (let i = ans.indexOf(n); i >= 0; i = ans.indexOf(n, i + 1)) {
+            if (ans.slice(Math.max(0, i - 80), i + 200).includes(label)) return true;
+          }
+          return false;
+        });
+        const sameLabelAll = spec.symbols.every((x) => {
+          const rx = ratings.get(x.toUpperCase());
+          return rx && coreLabel(rx.unheld) === label;
+        });
+        const collective = sameLabelAll && new RegExp(`都(是|為)?「?${label}`).test(head);
+        if (!near && !collective) miss.push(`${r.name}(${s})應為「${label}」`);
       }
       return { rule: "每檔照各自評等", pass: miss.length === 0, detail: miss.join("；") || undefined };
     }

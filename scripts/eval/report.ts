@@ -19,6 +19,8 @@ export interface CaseCapture {
   phase?: string;
   systemChars?: number;
   userChars?: number;
+  /** 這題附給 AI 的參考資料（重新評分用；只存在 JSON，不進報告） */
+  grounding?: string;
   error?: string;
 }
 
