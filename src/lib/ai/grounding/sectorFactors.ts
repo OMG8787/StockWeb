@@ -39,15 +39,25 @@ const OIL_TREND_THRESHOLD_PCT = 1;
  * 把「近期方向＋對這個產業的意義」先算好寫成一句話。2026-10-04 正式站實測：只給數字時，
  * 模型會只寫「高油價壓縮獲利」而忽略「近1週已經下跌」——使用者要的正是這個變化。
  */
-function trendVerdict(oil: OilQuote[], hit: OilSensitivity): string {
+function oilTrend(oil: OilQuote[]): { avg: number; dir: "上漲" | "下跌" | "持平" } | null {
   const w = oil.map((o) => o.change1wPct).filter((v): v is number => v != null);
-  if (w.length === 0) return "";
+  if (w.length === 0) return null;
   const avg = w.reduce((a, b) => a + b, 0) / w.length;
-  const dir = avg <= -OIL_TREND_THRESHOLD_PCT ? "下跌" : avg >= OIL_TREND_THRESHOLD_PCT ? "上漲" : "持平";
-  const meaning =
-    dir === "持平" || hit.onOilDown == null
-      ? ""
-      : `，對這個產業通常${dir === "下跌" ? hit.onOilDown : hit.onOilDown === "偏利多" ? "偏利空" : "偏利多"}`;
+  return { avg, dir: avg <= -OIL_TREND_THRESHOLD_PCT ? "下跌" : avg >= OIL_TREND_THRESHOLD_PCT ? "上漲" : "持平" };
+}
+
+/** 油價近期方向對這個產業的意義（持平或方向不明確回 null）。 */
+function oilEffect(dir: "上漲" | "下跌" | "持平", hit: OilSensitivity): "偏利多" | "偏利空" | null {
+  if (dir === "持平" || hit.onOilDown == null) return null;
+  return dir === "下跌" ? hit.onOilDown : hit.onOilDown === "偏利多" ? "偏利空" : "偏利多";
+}
+
+function trendVerdict(oil: OilQuote[], hit: OilSensitivity): string {
+  const t = oilTrend(oil);
+  if (!t) return "";
+  const { avg, dir } = t;
+  const effect = oilEffect(dir, hit);
+  const meaning = effect ? `，對這個產業通常${effect}` : "";
   return `【結論】油價近1週${dir}（平均${avg >= 0 ? "+" : ""}${Math.round(avg * 100) / 100}%）${meaning}——回答時必須講出這個方向，不可只說油價高低。`;
 }
 
@@ -59,4 +69,16 @@ export async function describeSectorFactors(item: { symbol: string; market: "TW"
   const oil = await getOilQuotes().catch(() => [] as OilQuote[]);
   if (oil.length === 0) return `${SECTOR_FACTORS_TITLE}（油價）：這檔屬於「${industry}」，油價是關鍵外部因子，但這次油價資料暫時抓不到`;
   return `${SECTOR_FACTORS_TITLE}（油價，近即時期貨報價，判斷買賣時必須納入）：這檔屬於「${industry}」——${hit.effect}。${oil.map(describeOil).join("；")}。${trendVerdict(oil, hit)}`;
+}
+
+/**
+ * 評等紀錄用（learning/features.ts 的 sf 欄位）：產業外部因子目前的方向，+＝偏利多、-＝偏利空；
+ * 非油價敏感產業、油價持平、方向不明確或抓不到油價都回 null（非敏感產業不多抓任何資料）。
+ */
+export async function sectorFactorDirection(item: { symbol: string; market: "TW" | "US"; sector: string }): Promise<"+" | "-" | null> {
+  const hit = OIL_SENSITIVE.find((s) => s.pattern.test(fineIndustryOf(item)));
+  if (!hit) return null;
+  const t = oilTrend(await getOilQuotes().catch(() => [] as OilQuote[]));
+  const effect = t ? oilEffect(t.dir, hit) : null;
+  return effect === "偏利多" ? "+" : effect === "偏利空" ? "-" : null;
 }

@@ -8,6 +8,11 @@ import { computeChaseMetrics } from "./chaseGuards";
 import { logRating, type RatingSource } from "./ratingLog";
 import { computePriceFramework, type PriceFramework } from "./grounding/priceLevels";
 import { computeSiteRating, type SiteRating } from "./siteRating";
+import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
+import { sectorFactorDirection } from "./grounding/sectorFactors";
+import { computeRatingFeatures, type RatingFeatures } from "./learning/features";
+import type { MarketRegime } from "./learning/regime";
+import { getMarketRegime } from "./learning/regimeData";
 
 /**
  * 單一個股的「本站綜合評等」唯一入口（有 I/O、有快取）。今日建議、AI 問答全市場推薦、
@@ -32,6 +37,10 @@ export interface StockRatingResult {
   /** 五面向評分（評等紀錄用） */
   facets: Facet[];
   framework: PriceFramework | null;
+  /** 評等當下所有判斷依據的狀態（AI 經驗累積用，見 learning/features.ts；舊快取沒有） */
+  features?: RatingFeatures;
+  /** 評等當下的台股市況（learning/regime.ts；抓不到加權指數時 null） */
+  regime?: MarketRegime | null;
   computedAt: string;
 }
 
@@ -40,6 +49,13 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
   if (!quote) return null;
   // 只用 3 個月日K（技術篩選掃描時多半已快取）：1 年日K對 TWSE 要逐月抓 12 次，名單一次評 8 檔會被限流；
   // 價位框架只用到 MA60／近60日高低，3 個月日K（約 60 根）就夠。
+  // 市況＋產業外部因子方向：評等紀錄的特徵用，不影響評等結論；都 fail open。
+  const regimePromise = quote.market === "TW" ? getMarketRegime().catch(() => null) : Promise.resolve(null);
+  const sectorDirPromise = ensureTwUniverseWarm()
+    .then(() =>
+      sectorFactorDirection({ symbol: quote.symbol, market: quote.market, sector: findInUniverse(quote.symbol, quote.market)?.sector ?? "" })
+    )
+    .catch(() => null);
   const [chart, chips, chipsRatios, fundamentals, earnings, announcements] = await Promise.all([
     getChart(quote.symbol, "3m", quote.market).catch(() => null),
     getChips(quote.symbol, quote.market).catch(() => null),
@@ -77,6 +93,17 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     framework,
     chase,
   });
+  const [regime, sectorDirection] = await Promise.all([regimePromise, sectorDirPromise]);
+  const features = computeRatingFeatures({
+    candles: chart?.candles,
+    price: quote.price,
+    chase,
+    chips,
+    chipsRatios,
+    earnings,
+    framework,
+    sectorDirection,
+  });
   return {
     symbol: quote.symbol,
     market: quote.market,
@@ -85,6 +112,8 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     rating,
     facets: scored.facets,
     framework,
+    features,
+    regime,
     computedAt: new Date().toISOString(),
   };
 }

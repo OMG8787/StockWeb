@@ -3,6 +3,8 @@ import { kvEnabled, redis } from "@/lib/data/kv";
 import { getTwTradingPhase, taipeiDayKey, type TwTradingPhase } from "@/lib/pollingSchedule";
 import type { RatingCode } from "./siteRating";
 import type { StockRatingResult } from "./stockRating";
+import type { RatingFeatures } from "./learning/features";
+import type { MarketRegime } from "./learning/regime";
 
 /**
  * 本站綜合評等紀錄（2026-10-05 使用者確認設計）：推薦與不推薦都存，事後用
@@ -13,7 +15,7 @@ import type { StockRatingResult } from "./stockRating";
  *   寫得進去，結論變了 field 不同就會再記一筆（A→B→A 的第二次 A 不會再記，屬已知簡化）。
  * - 省指令：同一個 serverless 執行個體記過的 field 放記憶體，不重複打 Redis；真的要寫時
  *   HSETNX＋EXPIRE 合成一個 pipeline（一次 HTTP）。
- * - 大小：每筆約 0.6KB，一天幾十～一兩百檔，一年約 10MB 內；key 保留 400 天。
+ * - 大小：每筆約 0.6KB（2026-10-05 加判斷依據特徵 feat 後約 0.9KB），一天幾十～一兩百檔，一年約 10MB 內；key 保留 400 天。
  * - fail open：沒有 Redis、寫入失敗都安靜略過，不影響評等回應；用 after() 在回應送出後才寫。
  */
 
@@ -67,6 +69,25 @@ export interface RatingLogEntry {
   /** 觸發的追高防護 id */
   chaseHits: string[];
   source: RatingSource;
+  /** 判斷依據的具體狀態（2026-10-05 起才有；舊紀錄 undefined，見 learning/features.ts） */
+  feat?: RatingFeatures;
+  /** 評等當下市況（多頭／空頭／盤整；2026-10-05 起才有，抓不到加權指數時 null） */
+  rg?: MarketRegime | null;
+  /**
+   * 第二階段預留：AI 判斷層在程式評等之上調整後的結論（最多 ±1 級）與理由。
+   * 第一階段一律不寫（undefined）；冠軍／挑戰者比較時「程式評等 code」與「ai.code」各算各的獎勵。
+   */
+  ai?: AiAdjustment;
+}
+
+/** 第二階段預留：AI 調整後結論。 */
+export interface AiAdjustment {
+  code: RatingCode;
+  /** 相對程式評等調整幾級（-1／0／+1；buy 為最高級） */
+  delta: -1 | 0 | 1;
+  reason: string;
+  /** 哪個模型做的調整（例如 gemini） */
+  model?: string;
 }
 
 export function buildRatingLogEntry(r: StockRatingResult, source: RatingSource, now: Date = new Date()): RatingLogEntry {
@@ -88,6 +109,8 @@ export function buildRatingLogEntry(r: StockRatingResult, source: RatingSource, 
     exit: r.rating.exit,
     chaseHits: r.rating.chaseHits.map((h) => h.id),
     source,
+    ...(r.features ? { feat: r.features } : {}),
+    ...(r.regime !== undefined ? { rg: r.regime } : {}),
   };
 }
 
