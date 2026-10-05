@@ -15,12 +15,15 @@ import {
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
+import { modelInfo, type ModelInfo } from "./modelName";
 import { getMarketStatus, marketStatusLabel, weekendNoteForAi } from "@/lib/marketStatus";
 
 export interface DailyBrief {
   text: string;
   usedAi: boolean;
   generatedAt: string;
+  /** 產生這份快報的模型（AI 失敗走資料整理時沒有） */
+  model?: ModelInfo;
 }
 
 // Originally date-keyed and cached for ~25h (generated once each morning by
@@ -231,7 +234,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
     });
 
     if (result.usedAi) {
-      return { text: result.answer, usedAi: true, generatedAt: new Date().toISOString() };
+      return { text: result.answer, usedAi: true, generatedAt: new Date().toISOString(), model: modelInfo(result.model) };
     }
 
     // AI 掛掉時的資料整理，跟 AI 版同一種骨架（總結／台股／美股／留意），只放客觀數字。

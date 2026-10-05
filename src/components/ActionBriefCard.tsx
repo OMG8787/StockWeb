@@ -37,7 +37,7 @@ export default function ActionBriefCard() {
         )}
       </div>
       <p className="mt-3 text-[13px] text-(--text-muted)">
-        {brief?.usedAi ? "由 AI 依當前市場資料自動生成，" : ""}
+        {brief?.usedAi ? `由 AI${brief.model ? `（${brief.model.name}）` : ""}依當前市場資料自動生成，` : ""}
         僅為個人參考看法，不構成投資建議
         {brief ? ` · 更新於 ${new Date(brief.generatedAt).toLocaleTimeString("zh-TW", { timeZone: "Asia/Taipei" })}` : ""}
       </p>

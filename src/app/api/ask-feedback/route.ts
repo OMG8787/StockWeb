@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { recordModelEvent } from "@/lib/ai/modelStats";
 import { kvEnabled, redis } from "@/lib/data/kv";
 
 /**
@@ -29,6 +30,8 @@ interface FeedbackEntry {
   answer: string;
   reason?: string;
   symbol?: string;
+  /** 那則回答由哪個模型產生（模型 id，例如 gemini-2.5-flash；備援文字沒有） */
+  model?: string;
   /** rating＝site 時：回報當下所在頁面（路徑＋查詢字串） */
   page?: string;
   at: string;
@@ -70,6 +73,7 @@ export async function POST(req: NextRequest) {
   }
   const symbol = clip(body.symbol, 20).trim();
   const page = clip(body.page, 200).trim();
+  const model = clip(body.model, 80).trim();
   // at 以伺服器時間為準（客戶端時鐘不可信），客戶端傳的 at 不採用。
   const entry: FeedbackEntry = {
     rating: body.rating,
@@ -78,6 +82,7 @@ export async function POST(req: NextRequest) {
     ...(reason ? { reason } : {}),
     ...(symbol ? { symbol } : {}),
     ...(page ? { page } : {}),
+    ...(model ? { model } : {}),
     at: new Date().toISOString(),
   };
 
@@ -88,6 +93,7 @@ export async function POST(req: NextRequest) {
       console.error("[ask-feedback] redis write failed:", err);
     }
   }
+  if (model && body.rating !== "site") recordModelEvent(model, body.rating);
   return NextResponse.json({ ok: true, stored: kvEnabled });
 }
 

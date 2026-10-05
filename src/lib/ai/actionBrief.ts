@@ -6,6 +6,7 @@ import { buildPlan, parseActionBriefJson, renderActionBrief, type ActionBriefPic
 import { getAiJudgments } from "./aiJudge";
 import { describeAiView, type AiJudgment } from "./learning/aiAdjust";
 import { guardAnswerNumbers } from "./numberGuard";
+import { modelInfo, type ModelInfo } from "./modelName";
 import { getTradingStance, type BriefMode, type TradingStance } from "./tradingStance";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { HOLDING_STRUCTURE_FACET_NAME } from "./actionScoring";
@@ -26,6 +27,8 @@ export interface ActionBrief {
   /** 「今日建議」或「明日操作建議」「下個交易日操作建議」（依產生當下的時段，見 tradingStance.ts） */
   title: string;
   mode: BriefMode;
+  /** 產生白話解說的模型（AI 失敗走程式版時沒有） */
+  model?: ModelInfo;
   /** 名單（程式依本站綜合評等決定，AI 問答全市場推薦也讀這份） */
   picks: ActionBriefPick[];
 }
@@ -175,7 +178,7 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
       // AI 寫的理由裡若有價位數字，跟程式價位比對（見 numberGuard.ts）。
       const guarded = guardAnswerNumbers(text, grounding);
       if (guarded.fixes.length > 0) console.warn("[action-brief] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-      return { ...base, text: guarded.text, usedAi: !!ai, generatedAt: new Date().toISOString() };
+      return { ...base, text: guarded.text, usedAi: !!ai, generatedAt: new Date().toISOString(), ...(ai ? { model: modelInfo(result.model) } : {}) };
     },
     // 過期先回舊建議、背景重算（寬限期見 swrPolicy.ts），訪客不用現場等 AI。
     { forceRefresh, staleWhileRevalidateMs: AI_SWR_MS }

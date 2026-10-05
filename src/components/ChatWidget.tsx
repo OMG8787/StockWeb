@@ -13,6 +13,9 @@ interface ChatMessage {
   text: string;
   // 錯誤訊息（「抱歉，發生錯誤…」）不是真正的AI回答，不顯示 👍／👎。
   isError?: boolean;
+  /** 回答的模型（好讀名稱＋原始 id）；usedAi＝false 是 AI 全部失敗、顯示原始資料的備援文字 */
+  model?: { id: string; name: string };
+  usedAi?: boolean;
 }
 
 // 2026-09-23 Opus地毯式巡檢抓到的真實bug：畫面渲染時直接呼叫getWatchlist()
@@ -125,7 +128,7 @@ export default function ChatWidget() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "發生錯誤");
-      setMessages((m) => [...m, { role: "assistant", text: data.answer }]);
+      setMessages((m) => [...m, { role: "assistant", text: data.answer, model: data.model, usedAi: data.usedAi }]);
     } catch (err) {
       setMessages((m) => [...m, { role: "assistant", text: `抱歉，發生錯誤：${(err as Error).message}`, isError: true }]);
     } finally {
@@ -254,8 +257,13 @@ export default function ChatWidget() {
                   >
                     {m.role === "assistant" ? <MarkdownLite text={m.text} /> : <p className="whitespace-pre-wrap">{m.text}</p>}
                   </div>
+                  {m.role === "assistant" && !m.isError && (m.model || m.usedAi === false) && (
+                    <p className="mt-0.5 text-[11px] text-(--text-muted)">
+                      {m.usedAi === false ? "AI 暫時無法回答（顯示原始資料）" : `由 ${m.model!.name} 回答`}
+                    </p>
+                  )}
                   {m.role === "assistant" && !m.isError && (
-                    <AnswerFeedback question={messages[i - 1]?.text ?? ""} answer={m.text} symbol={contextSymbol?.symbol} />
+                    <AnswerFeedback question={messages[i - 1]?.text ?? ""} answer={m.text} symbol={contextSymbol?.symbol} model={m.model?.id} />
                   )}
                 </div>
               </div>

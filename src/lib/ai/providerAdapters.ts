@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { askGemini } from "./gemini";
+import { askGeminiWithModel } from "./gemini";
 import { callOpenAiCompatible } from "./openaiCompat";
 import type { ProviderId } from "./providerHealth";
 import type { ChatTurn } from "./types";
@@ -38,7 +38,8 @@ export interface ProviderAdapter {
   canHandle(system: string, turns: ChatTurn[], maxOutputTokens: number): boolean;
   /** 這家的理想逾時時間（實際還會被整條備援鏈的總截止時間壓縮）。 */
   preferredTimeoutMs(callerTimeoutMs: number): number;
-  call(system: string, turns: ChatTurn[], options: AdapterCallOptions): Promise<string>;
+  /** 回傳文字與實際使用的模型 id（每則 AI 回答標示模型用，見 modelName.ts）。 */
+  call(system: string, turns: ChatTurn[], options: AdapterCallOptions): Promise<{ text: string; model: string }>;
 }
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
@@ -53,6 +54,8 @@ const NVIDIA_MIN_TIMEOUT_MS = 40_000;
 const NVIDIA_EXTRA_BODY = { chat_template_kwargs: { enable_thinking: true, low_effort: true } };
 /** 新聞挑選／摘要這類照格式回 JSON 的工作：開著思考實測 10 則摘要要 98 秒還被截斷，關掉。 */
 const NVIDIA_SIMPLE_TASK_BODY = { chat_template_kwargs: { enable_thinking: false } };
+
+const ANTHROPIC_MODEL = "claude-sonnet-5";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
@@ -79,7 +82,7 @@ const geminiAdapter: ProviderAdapter = {
   canHandle: () => true,
   preferredTimeoutMs: (callerTimeoutMs) => callerTimeoutMs,
   call: (system, turns, options) =>
-    askGemini(system, turns, process.env.GEMINI_API_KEY ?? "", {
+    askGeminiWithModel(system, turns, process.env.GEMINI_API_KEY ?? "", {
       timeoutMs: options.timeoutMs,
       maxOutputTokens: options.maxOutputTokens,
     }),
@@ -92,18 +95,19 @@ const nvidiaAdapter: ProviderAdapter = {
   canHandle: () => true,
   preferredTimeoutMs: (callerTimeoutMs) => Math.max(callerTimeoutMs, NVIDIA_MIN_TIMEOUT_MS),
   call: async (system, turns, options) => {
+    const model = process.env.NVIDIA_MODEL || NVIDIA_DEFAULT_MODEL;
     const { text } = await callOpenAiCompatible({
       label: "NVIDIA",
       url: NVIDIA_URL,
       apiKey: process.env.NVIDIA_API_KEY ?? "",
-      model: process.env.NVIDIA_MODEL || NVIDIA_DEFAULT_MODEL,
+      model,
       system,
       turns,
       maxTokens: options.maxOutputTokens + (options.simpleTask ? 0 : NVIDIA_REASONING_ALLOWANCE),
       timeoutMs: options.timeoutMs,
       extraBody: options.simpleTask ? NVIDIA_SIMPLE_TASK_BODY : NVIDIA_EXTRA_BODY,
     });
-    return text;
+    return { text, model };
   },
 };
 
@@ -119,11 +123,12 @@ const groqAdapter: ProviderAdapter = {
   },
   preferredTimeoutMs: (callerTimeoutMs) => Math.min(callerTimeoutMs, GROQ_MAX_TIMEOUT_MS),
   call: async (system, turns, options) => {
+    const model = process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL;
     const { text, rateLimit } = await callOpenAiCompatible({
       label: "Groq",
       url: GROQ_URL,
       apiKey: process.env.GROQ_API_KEY ?? "",
-      model: process.env.GROQ_MODEL || GROQ_DEFAULT_MODEL,
+      model,
       system,
       turns,
       maxTokens: options.maxOutputTokens + GROQ_REASONING_ALLOWANCE,
@@ -133,7 +138,7 @@ const groqAdapter: ProviderAdapter = {
     if (rateLimit.remainingTokens !== undefined && rateLimit.resetTokensMs !== undefined) {
       groqRemaining = { tokens: rateLimit.remainingTokens, resetAt: Date.now() + rateLimit.resetTokensMs };
     }
-    return text;
+    return { text, model };
   },
 };
 
@@ -152,7 +157,7 @@ const anthropicAdapter: ProviderAdapter = {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const message = await client.messages.create(
       {
-        model: "claude-sonnet-5",
+        model: ANTHROPIC_MODEL,
         max_tokens: options.maxOutputTokens,
         system,
         messages: turns.map((t) => ({ role: t.role, content: t.content })),
@@ -168,7 +173,7 @@ const anthropicAdapter: ProviderAdapter = {
     // 快取，每日快報一快取就是 25 小時）。
     if (message.stop_reason === "max_tokens") throw new Error("Claude 回覆被輸出長度上限截斷");
     if (!answer) throw new Error("Claude 回傳了空白回覆");
-    return answer;
+    return { text: answer, model: ANTHROPIC_MODEL };
   },
 };
 

@@ -110,12 +110,22 @@ export async function askGemini(
   apiKey: string,
   options: GeminiCallOptions = {}
 ): Promise<string> {
+  return (await askGeminiWithModel(system, messages, apiKey, options)).text;
+}
+
+/** 同 askGemini，另外回傳實際回答的模型名稱（每則 AI 回答標示模型用）。 */
+export async function askGeminiWithModel(
+  system: string,
+  messages: ChatTurn[],
+  apiKey: string,
+  options: GeminiCallOptions = {}
+): Promise<{ text: string; model: string }> {
   const keyId = apiKey.slice(-8);
   const known = knownGoodModel.get(keyId);
 
   if (known) {
     try {
-      return await callGemini(known, system, messages, apiKey, options);
+      return { text: await callGemini(known, system, messages, apiKey, options), model: known };
     } catch {
       knownGoodModel.delete(keyId); // it stopped working; re-probe below
     }
@@ -128,7 +138,7 @@ export async function askGemini(
     try {
       const text = await callGemini(model, system, messages, apiKey, options);
       knownGoodModel.set(keyId, model);
-      return text;
+      return { text, model };
     } catch (err) {
       lastError = err;
     }

@@ -26,5 +26,5 @@ export interface EvalRecord {
   /** 各期間結果；key 是交易日數（"1"／"5"／"20"），還沒滿期就沒有 */
   o: Partial<Record<"1" | "5" | "20", HorizonOutcome>>;
   /** 第二階段預留：AI 調整後結論與其獎勵（冠軍／挑戰者比較用） */
-  ai?: { code: RatingCode; delta: number; o?: Partial<Record<"1" | "5" | "20", HorizonOutcome>> };
+  ai?: { code: RatingCode; delta: number; model?: string; o?: Partial<Record<"1" | "5" | "20", HorizonOutcome>> };
 }

@@ -27,7 +27,7 @@ for i in items:
         local = "?"
     sys.stdout.reconfigure(encoding="utf-8")
     print("-" * 60)
-    print(f"[{i.get('rating')}] 台北 {local}（UTC {at}） 股票={i.get('symbol', '-')} 頁面={i.get('page', '-')}")
+    print(f"[{i.get('rating')}] 台北 {local}（UTC {at}） 股票={i.get('symbol', '-')} 頁面={i.get('page', '-')} 模型={i.get('model', '-')}")
     print(f"問：{i.get('question', '')[:200]}")
     print(f"答：{i.get('answer', '')[:300]}")
     if i.get("reason"):

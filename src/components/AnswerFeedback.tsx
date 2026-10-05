@@ -24,7 +24,18 @@ const REPORT_MAX_CHARS = 1000;
  * 📝回報（2026-10-04 使用者要求）：比 👎 的一句原因更完整，可以自由描述問題或建議，
  * 跟聊天輸入框一樣支援打字與🎤語音輸入（共用 lib/useVoiceInput）。
  */
-export default function AnswerFeedback({ question, answer, symbol }: { question: string; answer: string; symbol?: string }) {
+export default function AnswerFeedback({
+  question,
+  answer,
+  symbol,
+  model,
+}: {
+  question: string;
+  answer: string;
+  symbol?: string;
+  /** 這則回答的模型 id（存進回饋，分析各模型表現用） */
+  model?: string;
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [rating, setRating] = useState<Rating | null>(null);
   const [reason, setReason] = useState("");
@@ -47,7 +58,7 @@ export default function AnswerFeedback({ question, answer, symbol }: { question:
     if (sending) return;
     setSending(true);
     setSendError(null);
-    const ok = await postFeedback({ rating: r, question, answer, reason: why?.trim() || undefined, symbol });
+    const ok = await postFeedback({ rating: r, question, answer, reason: why?.trim() || undefined, symbol, model });
     setSending(false);
     if (!ok) {
       // 失敗就留在原本的畫面（回報內容不清掉），讓使用者知道沒送到、可以再按一次

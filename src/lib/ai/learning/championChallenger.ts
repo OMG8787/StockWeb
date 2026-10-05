@@ -33,6 +33,8 @@ export interface ChampionChallenger {
   /** 5 日配對差（AI 獎勵−程式獎勵）的平均與 t 值（只算 AI 有調整的；樣本 <2 為 null） */
   edge5: { n: number; mean: number | null; t: number | null };
   promotion: { ready: boolean; checks: Array<{ label: string; ok: boolean }> };
+  /** AI 調整的 5 日獎勵依模型分開（同一批配對紀錄） */
+  byModel: Array<{ model: string; n: number; adjustedN: number; program: number | null; ai: number | null }>;
   /** 「AI調整」這個判斷依據在依據權重表裡的列 */
   aiBasis: BasisStat[];
 }
@@ -101,8 +103,26 @@ export function summarizeChampionChallenger(records: EvalRecord[], basisStats: B
     },
     { label: `逐筆配對差 t 值 ≥ ${P.minT}（目前 ${t ?? "—"}）`, ok: t != null && t >= P.minT },
   ];
+  const models = new Map<string, Array<{ p: number; a: number; adj: boolean }>>();
+  for (const r of withAi) {
+    const p = r.o["5"]?.rw;
+    const a = aiReward(r, "5");
+    if (p == null || a == null) continue;
+    const k = r.ai?.model ?? "（未記錄）";
+    models.set(k, [...(models.get(k) ?? []), { p, a, adj: (r.ai?.delta ?? 0) !== 0 }]);
+  }
+  const byModel = [...models.entries()]
+    .map(([model, xs]) => ({
+      model,
+      n: xs.length,
+      adjustedN: xs.filter((x) => x.adj).length,
+      program: avg(xs.map((x) => x.p)),
+      ai: avg(xs.map((x) => x.a)),
+    }))
+    .sort((a, b) => b.n - a.n);
   return {
     rows,
+    byModel,
     edge5: { n: diffs.length, mean: mean == null ? null : r2(mean), t },
     promotion: { ready: checks.every((c) => c.ok), checks },
     aiBasis: basisStats.filter((b) => b.basis.startsWith("ai:")),

@@ -118,7 +118,7 @@ async function judgeBatch(rs: StockRatingResult[], day: string): Promise<Map<str
     simpleTask: true,
   });
   const bases = new Map<string, RatingCode>(rs.map((r) => [r.symbol.toUpperCase(), r.rating.code]));
-  const parsed = result.usedAi ? parseAiJudgments(result.answer, bases, new Date(), result.provider) : new Map<string, AiJudgment>();
+  const parsed = result.usedAi ? parseAiJudgments(result.answer, bases, new Date(), result.model ?? result.provider) : new Map<string, AiJudgment>();
   const ok: Array<[string, Stored]> = [];
   const failed: Array<[string, Stored]> = [];
   for (const r of rs) {

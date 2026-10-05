@@ -37,6 +37,7 @@ import { buildCannedAnswer, sanitizeLeakedMarkers } from "./askFallback";
 import { composeAskSystemPrompt } from "./askSystemCompose";
 import { getMarketStatus } from "@/lib/marketStatus";
 import { guardAnswerNumbers } from "./numberGuard";
+import { modelInfo } from "./modelName";
 
 // `@/lib/ai/ask` 的公開介面刻意保持不變：這兩個型別原本就宣告在這個檔案裡，
 // 拆檔之後搬到 askTypes.ts，這裡再原樣匯出，呼叫端（api/ask/route.ts）完全
@@ -462,7 +463,7 @@ ${actionBriefText}` : "",
     // 回答後檢查關鍵價位（停損／出場／區間／不追價）有沒有抄錯，抄錯自動更正為程式值（見 numberGuard.ts）。
     const guarded = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(result.answer)), grounding);
     if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-    return { answer: guarded.text, groundedSymbol, usedAi: true };
+    return { answer: guarded.text, groundedSymbol, usedAi: true, model: modelInfo(result.model) };
   }
 
   return {

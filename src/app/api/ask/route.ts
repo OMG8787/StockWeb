@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { answerQuestion, type HoldingInput } from "@/lib/ai/ask";
 import type { ChatTurn } from "@/lib/ai/types";
+import { recordModelEvent } from "@/lib/ai/modelStats";
 
 // Default Node function budget isn't enough for the "分析我的關注清單" path:
 // that fans out a full buildStockGrounding() (quote+chart+chips+fundamentals+
@@ -84,6 +85,8 @@ export async function POST(req: NextRequest) {
   const holdings = parseHoldings(body.holdings);
   try {
     const result = await answerQuestion(question, symbol, history, holdings);
+    // 各模型回答數（成績看板「各模型」，modelStats.ts）。
+    recordModelEvent(result.model?.id, result.usedAi ? "answer" : "fallback");
     return NextResponse.json(result);
   } catch (err) {
     // The widget renders `data.error` on a non-OK response; without this an

@@ -121,7 +121,7 @@ function toEval(e: RatingLogEntry, prev: EvalRecord | undefined): EvalRecord {
     ...(e.feat ? { f: e.feat } : {}),
     sk: similarKey(e.feat, e.rg),
     o: prev?.o ?? {},
-    ...(e.ai ? { ai: { code: e.ai.code, delta: e.ai.delta } } : {}),
+    ...(e.ai ? { ai: { code: e.ai.code, delta: e.ai.delta, ...(e.ai.model ? { model: e.ai.model } : {}) } } : {}),
   };
 }
 

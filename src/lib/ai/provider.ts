@@ -15,6 +15,8 @@ export interface ProviderResult {
   usedAi: boolean;
   /** 實際回答的供應商（usedAi 為 true 時才有）。 */
   provider?: ProviderId;
+  /** 實際回答的模型 id（usedAi 為 true 時才有；好讀名稱見 modelName.ts displayModelName） */
+  model?: string;
   /** Set only when usedAi is false — what each configured provider said when it failed. */
   failureReason?: string;
 }
@@ -121,7 +123,7 @@ export async function callAiProviders(
     const timeoutMs = Math.min(adapter.preferredTimeoutMs(callerTimeoutMs), remaining);
     const startedAt = Date.now();
     try {
-      const raw = await adapter.call(system, turns, { timeoutMs, maxOutputTokens, simpleTask });
+      const { text: raw, model } = await adapter.call(system, turns, { timeoutMs, maxOutputTokens, simpleTask });
       const checked = options.normalizeZhTw === false ? { text: raw, fixedCount: 0 } : normalizeZhTw(raw);
       if ("rejectReason" in checked && checked.rejectReason) {
         console.error(`[ai] ${adapter.label} output rejected:`, checked.rejectReason);
@@ -132,8 +134,8 @@ export async function callAiProviders(
         console.warn(`[ai] ${adapter.label} output: fixed ${checked.fixedCount} simplified/Japanese chars`);
       }
       recordProviderSuccess(adapter.id);
-      console.info(`[ai] answered by ${adapter.label} in ${Date.now() - startedAt}ms`);
-      return { answer: checked.text, usedAi: true, provider: adapter.id };
+      console.info(`[ai] answered by ${adapter.label} (${model}) in ${Date.now() - startedAt}ms`);
+      return { answer: checked.text, usedAi: true, provider: adapter.id, model };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(`[ai] ${adapter.label} call failed:`, message);

@@ -7,6 +7,8 @@ import { WEIGHT_HALF_LIFE_TRADING_DAYS, WEIGHT_PRIOR_STRENGTH } from "@/lib/ai/l
 import { MISS_EXCESS_THRESHOLD_PCT, REWARD_MDD_PENALTY, TRADE_COST_PCT } from "@/lib/ai/learning/reward";
 import { LESSONS } from "@/lib/ai/lessons";
 import { RATING_LABEL } from "@/lib/ai/siteRating";
+import { readModelStats } from "@/lib/ai/modelStats";
+import { displayModelName } from "@/lib/ai/modelName";
 import { AI_ADJUST_AFFECTS_CONCLUSION, AI_ADJUST_PROMOTION } from "@/lib/ai/learning/aiAdjust";
 
 /**
@@ -19,6 +21,10 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 export const dynamic = "force-dynamic";
+
+/** 「各模型」區塊統計最近幾天。 */
+const MODEL_STATS_DAYS = 30;
+const ratio = (n: number, d: number) => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
 
 /** 判斷依據表最多列幾列（依筆數排序）。 */
 const BASIS_ROWS_MAX = 80;
@@ -36,7 +42,7 @@ function Insufficient({ n, min }: { n: number; min: number }) {
 }
 
 export default async function ScoreboardPage() {
-  const s = await readLearningSummary().catch(() => null);
+  const [s, modelStats] = await Promise.all([readLearningSummary().catch(() => null), readModelStats(MODEL_STATS_DAYS).catch(() => [])]);
   const cc = s?.championChallenger;
   return (
     <div className="space-y-4">
@@ -163,6 +169,57 @@ export default async function ScoreboardPage() {
             )}
           </ul>
         </div>
+      </section>
+
+      <section className={card}>
+        <h2 className="font-semibold">各模型（最近 {MODEL_STATS_DAYS} 天）</h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-(--text-muted)">
+          AI 問答每則回答由哪個模型產生（免費額度用完時會自動換下一家）；👍／👎／📝回報比例＝該模型回答收到的回饋數÷回答數。「無（備援文字）」＝所有 AI 都失敗、顯示原始資料。
+        </p>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className={th}>模型</th>
+                <th className={th}>回答數</th>
+                <th className={th}>👍</th>
+                <th className={th}>👎</th>
+                <th className={th}>📝回報</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modelStats.map((m) => (
+                <tr key={m.model} className="border-t border-(--gridline)">
+                  <td className={td}>{m.model === "none" ? "無（備援文字）" : displayModelName(m.model)}</td>
+                  <td className={td}>{m.answer}</td>
+                  <td className={td}>{`${m.up}（${ratio(m.up, m.answer)}）`}</td>
+                  <td className={td}>{`${m.down}（${ratio(m.down, m.answer)}）`}</td>
+                  <td className={td}>{`${m.report}（${ratio(m.report, m.answer)}）`}</td>
+                </tr>
+              ))}
+              {modelStats.length === 0 && (
+                <tr>
+                  <td className={td} colSpan={5}>
+                    尚無資料（2026-10-05 起開始計數）
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 text-[13px] text-(--text-muted)">AI 判斷層調整的 5 日平均獎勵（依模型）：</div>
+        {cc && cc.byModel && cc.byModel.length > 0 ? (
+          <ul className="list-disc pl-5 text-sm">
+            {cc.byModel.map((m) => (
+              <li key={m.model}>
+                {displayModelName(m.model)}：{m.n} 筆（有調整 {m.adjustedN}），程式評等 <span className={tone(m.program)}>{fmtPct(m.program)}</span>／AI 調整後{" "}
+                <span className={tone(m.ai)}>{fmtPct(m.ai)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-(--text-muted)">尚無已滿 5 日、有 AI 判斷的紀錄</p>
+        )}
       </section>
 
       <section className={card}>
