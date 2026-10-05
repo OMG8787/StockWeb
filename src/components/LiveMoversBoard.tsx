@@ -25,23 +25,41 @@ import MarketStatusBadge from "./MarketStatusBadge";
  * 全市場批次抓取是全站最貴的上游呼叫，縮到 10 秒會讓整個搜尋/排行頁重新
  * 變慢（見 PROGRESS.md 2026-09-11 那次效能事故）。
  */
-export default function LiveMoversBoard({ market, initialItems }: { market: Market; initialItems: SearchItem[] }) {
+export default function LiveMoversBoard({
+  market,
+  initialItems,
+  sortBy = "changePercent",
+  sortDir = "desc",
+  limit = 8,
+  showStatus = true,
+}: {
+  market: Market;
+  initialItems: SearchItem[];
+  /** 2026-10-05：/highlights 的漲幅／跌幅／成交量榜也共用這個元件，排序條件用參數帶入。 */
+  sortBy?: "changePercent" | "volume";
+  sortDir?: "asc" | "desc";
+  limit?: number;
+  /** /highlights 頁首已經有台美市場狀態，各榜不必重複顯示。 */
+  showStatus?: boolean;
+}) {
   const [items, setItems] = useState(initialItems);
   const [status, setStatus] = useState<MarketStatus>(() => getMarketStatus(market));
 
   useLivePolling({
-    restartKey: market,
+    restartKey: `${market}:${sortBy}:${sortDir}:${limit}`,
     decide: (now, settledDayKey) => {
       setStatus(getMarketStatus(market, now));
       return getPollDecision(market, now, settledDayKey);
     },
     onFetch: async () => {
-      const res = await fetch(`/api/search?market=${market}&sortBy=changePercent&sortDir=desc&limit=8`);
+      const res = await fetch(`/api/search?market=${market}&sortBy=${sortBy}&sortDir=${sortDir}&limit=${limit}`);
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.items) && data.items.length > 0) setItems(data.items);
     },
   });
+
+  if (!showStatus) return <StockTable items={items} />;
 
   return (
     <div>

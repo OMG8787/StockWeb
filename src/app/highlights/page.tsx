@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import StockTable from "@/components/StockTable";
+import LiveMoversBoard from "@/components/LiveMoversBoard";
 import MarketTabs from "@/components/MarketTabs";
 import MomentumSection from "@/components/MomentumSection";
 import MarketStatusBadge from "@/components/MarketStatusBadge";
@@ -13,6 +13,8 @@ export const metadata: Metadata = {
   description: "台股與美股的漲幅榜、跌幅榜、成交量榜與技術訊號共振股，分市場排名，快速掌握市場焦點。",
   alternates: { canonical: "/highlights" },
 };
+
+const BOARD_LIMIT = 10;
 
 export default async function HighlightsPage() {
   const [twGainers, usGainers, twLosers, usLosers, twVolume, usVolume] = await Promise.all([
@@ -51,20 +53,26 @@ export default async function HighlightsPage() {
       <Board
         title="漲幅榜"
         description="今日漲幅最大的股票"
-        twItems={twGainers.slice(0, 10)}
-        usItems={usGainers.slice(0, 10)}
+        sortBy="changePercent"
+        sortDir="desc"
+        twItems={twGainers.slice(0, BOARD_LIMIT)}
+        usItems={usGainers.slice(0, BOARD_LIMIT)}
       />
       <Board
         title="跌幅榜"
         description="今日跌幅最大的股票"
-        twItems={twLosers.slice(0, 10)}
-        usItems={usLosers.slice(0, 10)}
+        sortBy="changePercent"
+        sortDir="asc"
+        twItems={twLosers.slice(0, BOARD_LIMIT)}
+        usItems={usLosers.slice(0, BOARD_LIMIT)}
       />
       <Board
         title="成交量榜"
         description="今日成交量最高的股票，通常代表市場關注度高"
-        twItems={twVolume.slice(0, 10)}
-        usItems={usVolume.slice(0, 10)}
+        sortBy="volume"
+        sortDir="desc"
+        twItems={twVolume.slice(0, BOARD_LIMIT)}
+        usItems={usVolume.slice(0, BOARD_LIMIT)}
       />
 
       <MomentumSection />
@@ -72,14 +80,20 @@ export default async function HighlightsPage() {
   );
 }
 
+// 2026-10-05：三個榜改用 LiveMoversBoard（跟首頁同一套 useLivePolling＋pollingSchedule），盤中每 30 秒更新、
+// 背景分頁暫停；技術訊號共振股（MomentumSection）每檔要抓日K、是全站最貴的計算之一，且訊號以日K為主，維持載入時抓一次。
 function Board({
   title,
   description,
+  sortBy,
+  sortDir,
   twItems,
   usItems,
 }: {
   title: string;
   description: string;
+  sortBy: "changePercent" | "volume";
+  sortDir: "asc" | "desc";
   twItems: Awaited<ReturnType<typeof searchStocks>>;
   usItems: Awaited<ReturnType<typeof searchStocks>>;
 }) {
@@ -87,7 +101,10 @@ function Board({
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
       <h2 className="font-semibold">{title}</h2>
       <p className="mb-3 text-xs text-(--text-muted)">{description}</p>
-      <MarketTabs tw={<StockTable items={twItems} />} us={<StockTable items={usItems} />} />
+      <MarketTabs
+        tw={<LiveMoversBoard market="TW" initialItems={twItems} sortBy={sortBy} sortDir={sortDir} limit={BOARD_LIMIT} showStatus={false} />}
+        us={<LiveMoversBoard market="US" initialItems={usItems} sortBy={sortBy} sortDir={sortDir} limit={BOARD_LIMIT} showStatus={false} />}
+      />
     </section>
   );
 }
