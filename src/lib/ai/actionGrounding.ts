@@ -20,7 +20,7 @@ import type { Signal } from "@/lib/signals";
 import { getNewsFeed, type NewsFeed } from "@/lib/ai/newsfeed";
 import { formatSharesWithLots } from "@/lib/format";
 import { buildMarketOverviewText } from "./marketOverview";
-import { getStockRatings, type StockRatingResult } from "./stockRating";
+import { getStockRating, getStockRatings, type StockRatingResult } from "./stockRating";
 import { describeSiteRating, isRecommendable, WEAK_MARKET_RET60_PCT, weakMarketNote } from "./siteRating";
 import { getTaiexRet60Pct } from "./learning/regimeData";
 import { PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
@@ -201,6 +201,8 @@ function listUsMomentum(
 
 /** 今日建議名單最多對幾檔算本站綜合評等（每檔可能要抓日K，見 stockRating.ts）。 */
 const RATED_PICK_LIMIT = 8;
+/** 「不建議追」挑中的股票若本站評等其實是建議買進，最多換幾次（每次可能多算一檔評等）。 */
+const NOT_CHASE_VERIFY_ATTEMPTS = 3;
 
 export interface RatedPick {
   candidate: ScoredCandidate;
@@ -284,8 +286,36 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
   const picks: RatedPick[] = groups.buy.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
   const ret60 = await getTaiexRet60Pct().catch(() => null);
   const marketNote = ret60 != null && ret60 < WEAK_MARKET_RET60_PCT ? weakMarketNote(ret60) : null;
-  // 「不建議追」也由程式挑，並且一定排除建議名單裡的代號（互斥）。
-  const notChase = selectNotChase(liquidGainers, candidates, picks.map((p) => p.rating.symbol));
+  // 體檢表裡已有本站評等的候選股，五面向與支持數一律改用評等那份（2026-10-06 整合稽核：候選股原本用技術訊號共振清單／
+  // 漲幅榜的訊號另算一次，同一檔在體檢表寫「支持 1/5」、評等行卻寫「支持面向 3/5」，AI 與使用者看到兩個數字）。
+  const shown = candidates.map((c) => {
+    const r = ratings.get(c.symbol.toUpperCase());
+    return r ? { ...c, facets: r.facets, supportCount: r.rating.supportCount, againstCount: r.rating.againstCount } : c;
+  });
+  // 「不建議追」也由程式挑，並且一定排除建議名單裡的代號（互斥）；挑中的那一檔再查一次本站評等（快取命中為主），
+  // 評等其實是建議買進就換下一檔——否則今日建議寫「不建議追 X」、個股頁問 AI 卻說「建議買進 X」。
+  const notChaseExclude = new Set([
+    ...picks.map((p) => p.rating.symbol.toUpperCase()),
+    ...[...ratings.values()].filter((r) => isRecommendable(r.rating)).map((r) => r.symbol.toUpperCase()),
+  ]);
+  let notChase: NotChasePick | null = null;
+  for (let attempt = 0; attempt < NOT_CHASE_VERIFY_ATTEMPTS; attempt++) {
+    const cand = selectNotChase(liquidGainers, shown, notChaseExclude);
+    if (!cand) break;
+    const r = ratings.get(cand.symbol.toUpperCase()) ?? (await getStockRating(cand.symbol, "TW", "today-brief").catch(() => null));
+    if (r && isRecommendable(r.rating)) {
+      notChaseExclude.add(cand.symbol.toUpperCase());
+      continue;
+    }
+    notChase = r
+      ? {
+          ...cand,
+          supportCount: r.rating.supportCount,
+          weakFacets: r.facets.filter((f) => f.verdict !== "支持").map((f) => f.name.replace(/（.*$/, "")),
+        }
+      : cand;
+    break;
+  }
   const notRecommended = qualified
     .slice(0, RATED_PICK_LIMIT)
     .map((c) => ratings.get(c.symbol.toUpperCase()))
@@ -303,7 +333,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     "【今日台股候選股「多面向體檢表」——這是你做買進判斷的主要依據】",
     "候選來源刻意混合四種挑法：技術訊號共振清單、今日漲幅榜、三大法人買超榜、投信買超榜，所以這份名單裡同時有「多面向都到位的標的」跟「只有單一面向亮眼、其他面向沒跟上的假訊號」，請自己分辨，不要因為某檔出現在名單上就當成推薦。",
     `「面向支持數」是本站用客觀規則算好的（${SCORED_FACET_LABEL}共 ${SCORED_FACET_COUNT} 項，各自標【支持】【中性】【不支持】【無資料】），直接引用即可，不要自己重算或改成別的數字。「籌碼面」是三大法人當天的買賣超（流量）；「持股結構面」是大戶持股比例（集保週資料，跟上一週比）、外資持股比例（跟前一交易日比）、融資使用率這三項持股比例（存量）的變化，兩者是不同的面向。持股結構面的規則（本站自訂、非權威標準）：大戶持股較上一週上升、外資持股較前一交易日上升、融資使用率低於 ${MARGIN_UTIL_LOW}% 或下降各算加分；大戶週減、外資持股下降、融資使用率 ${MARGIN_UTIL_HIGH}% 以上或單日上升 ${MARGIN_UTIL_SURGE_POINTS} 個百分點以上（散戶槓桿過熱）各算扣分；加分≥2且無扣分為【支持】、扣分≥2為【不支持】，每一項後面標的（加分）（扣分）就是這樣算出來的。消息面刻意不判斷利多利空、也不計入支持數，只把真實標題端給你，方向要你自己讀標題判斷。本站設定的估值分界：本益比 ${PE_CHEAP} 倍以下算便宜、${PE_EXPENSIVE} 倍以上算貴、殖利率 ${YIELD_GOOD}% 以上算高。`,
-    candidates.length > 0 ? candidates.map(describeCandidate).join("\n") : "（今日無候選股資料）",
+    shown.length > 0 ? shown.map(describeCandidate).join("\n") : "（今日無候選股資料）",
     "",
     `【本站已先幫你篩過的結果】今日候選股中，面向支持數 ≥${QUALIFY_MIN_SUPPORT} 且明確不支持面向 ≤${QUALIFY_MAX_AGAINST} 的共 ${qualified.length} 檔：${
       qualified.length > 0 ? qualified.map((c) => `${c.name}(${c.symbol})`).join("、") : "無"
