@@ -1,11 +1,43 @@
 import { getTechnicalScreen } from "@/lib/data";
 import type { TechScreenItem } from "@/lib/data";
 import { describeTechState } from "./indicators";
+import {
+  KD_NEAR_CROSS_CONVERGING_DAYS,
+  KD_NEAR_CROSS_MAX_EST_DAYS,
+  KD_NEAR_CROSS_MAX_GAP,
+  MACD_NEAR_CROSS_CONVERGING_DAYS,
+  MACD_NEAR_CROSS_MAX_EST_DAYS,
+} from "@/lib/nearCross";
 
 // 明細表最多列幾檔：凡是「今天有任一交叉」的一律全部列出（這才是多重指標
 // 篩選真正會用到的母體，通常一天只有十幾檔），另外再補上成交金額最大的
 // 幾檔（讓「台積電現在技術面如何」這類問法也有數值可引用）。
 const TECH_TABLE_EXTRA_BY_TURNOVER = 25;
+
+/** 「即將交叉」清單共用的免責說明：AI 必須照這個意思轉述，不可說成「明天會交叉」。 */
+export const NEAR_CROSS_DISCLAIMER =
+  "這是依最近幾天兩線收斂的趨勢線性外推的推估（判斷門檻為本站自訂經驗值，不是權威標準），明天不一定會交叉，股價一轉向差距就可能重新拉開";
+
+/** MACD 數值的刻度隨股價差很多（低價股可能只有 0.0x），小數位數依大小調整。 */
+const fmtMacd = (v: number) => (Math.abs(v) >= 1 ? v.toFixed(2) : v.toFixed(3));
+
+/** 「即將KD交叉」清單的一行：附 K、D、差距逐日變化與推估天數。 */
+function describeKdNearCross(i: TechScreenItem): string {
+  const n = i.state.kdNearCross;
+  if (!n) return "";
+  const golden = n.direction === "golden";
+  const zone = n.fast <= 30 ? "低檔/超賣區" : n.fast >= 70 ? "高檔/超買區" : "中間區間";
+  return `${i.name}(${i.symbol})，現價${i.price}(${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%)：K值${n.fast.toFixed(1)}${golden ? "仍低於" : "仍高於"}D值${n.slow.toFixed(1)}（${zone}），兩線差距近${n.gaps.length}日 ${n.gaps.map((g) => g.toFixed(1)).join("→")}（K值${golden ? "上升" : "下降"}、差距連續縮小），照目前速度推估約${Math.max(1, Math.round(n.estDays))}個交易日內可能${golden ? "黃金" : "死亡"}交叉`;
+}
+
+/** 「即將MACD交叉」清單的一行：附 DIF、訊號線、柱狀體逐日變化與推估天數。 */
+function describeMacdNearCross(i: TechScreenItem): string {
+  const n = i.state.macdNearCross;
+  if (!n) return "";
+  const golden = n.direction === "golden";
+  const hist = n.gaps.map((g) => fmtMacd(golden ? -g : g)).join("→");
+  return `${i.name}(${i.symbol})，現價${i.price}(${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%)：DIF ${fmtMacd(n.fast)}${golden ? "仍低於" : "仍高於"}訊號線 ${fmtMacd(n.slow)}（DIF在0軸${n.fast >= 0 ? "上方" : "下方"}），柱狀體(DIF−訊號線)近${n.gaps.length}日 ${hist}（連續縮小、逼近0），照目前速度推估約${Math.max(1, Math.round(n.estDays))}個交易日內可能${golden ? "黃金" : "死亡"}交叉`;
+}
 
 /**
  * 「多重技術指標同時符合」的篩選資料。
@@ -53,6 +85,28 @@ export async function buildTechScreenGrounding(): Promise<string> {
       (i) => i.state.kd?.cross === "golden" && i.state.rsi != null && i.state.rsi <= 40
     );
 
+    // 依推估天數由近到遠排，最可能先交叉的排前面。
+    const byEst = (pick: (i: TechScreenItem) => number | undefined) => (a: TechScreenItem, b: TechScreenItem) =>
+      (pick(a) ?? Infinity) - (pick(b) ?? Infinity);
+    const kdNearGolden = items
+      .filter((i) => i.state.kdNearCross?.direction === "golden")
+      .sort(byEst((i) => i.state.kdNearCross?.estDays));
+    const kdNearDeath = items
+      .filter((i) => i.state.kdNearCross?.direction === "death")
+      .sort(byEst((i) => i.state.kdNearCross?.estDays));
+    const macdNearGolden = items
+      .filter((i) => i.state.macdNearCross?.direction === "golden")
+      .sort(byEst((i) => i.state.macdNearCross?.estDays));
+    const macdNearDeath = items
+      .filter((i) => i.state.macdNearCross?.direction === "death")
+      .sort(byEst((i) => i.state.macdNearCross?.estDays));
+    const fmtNear = (list: TechScreenItem[], describe: (i: TechScreenItem) => string) =>
+      list.length === 0
+        ? "（掃描範圍內目前一檔都沒有符合條件，這是實際逐檔比對後的結果）"
+        : list.map((i) => `- ${describe(i)}`).join("\n");
+    const nearHeader = (label: string, count: number, rule: string) =>
+      `${marketLabel}【即將${label}（尚未交叉、僅為推估）】共${count}檔；條件：${rule}。注意：${NEAR_CROSS_DISCLAIMER}。`;
+
     const crossed = items.filter((i) => i.state.macdCross !== null || i.state.kd?.cross != null);
     const crossedSymbols = new Set(crossed.map((i) => i.symbol));
     const extras = items
@@ -70,6 +124,14 @@ export async function buildTechScreenGrounding(): Promise<string> {
       `${marketLabel}最新交易日 KD黃金交叉（K值上穿D值，共${kdGolden.length}檔；括號裡會註明發生在低檔/中間/高檔，低檔交叉是最標準的轉強訊號，高檔交叉要留意追高風險）：\n${fmtList(kdGolden)}`,
       `${marketLabel}最新交易日 MACD死亡交叉（共${macdDeath.length}檔）：\n${fmtList(macdDeath)}`,
       `${marketLabel}最新交易日 KD死亡交叉（共${kdDeath.length}檔）：\n${fmtList(kdDeath)}`,
+      `${nearHeader("KD黃金交叉", kdNearGolden.length, `K值仍低於D值、差距在${KD_NEAR_CROSS_MAX_GAP}點內且連續${KD_NEAR_CROSS_CONVERGING_DAYS}天縮小、K值今天上升、照目前速度約${KD_NEAR_CROSS_MAX_EST_DAYS}個交易日內交叉`)}
+${fmtNear(kdNearGolden, describeKdNearCross)}`,
+      `${nearHeader("MACD黃金交叉", macdNearGolden.length, `DIF仍低於訊號線、柱狀體(DIF−訊號線)為負且連續${MACD_NEAR_CROSS_CONVERGING_DAYS}天往0收斂、照目前速度約${MACD_NEAR_CROSS_MAX_EST_DAYS}個交易日內歸零`)}
+${fmtNear(macdNearGolden, describeMacdNearCross)}`,
+      `${nearHeader("KD死亡交叉", kdNearDeath.length, `K值仍高於D值、差距在${KD_NEAR_CROSS_MAX_GAP}點內且連續${KD_NEAR_CROSS_CONVERGING_DAYS}天縮小、K值今天下降、照目前速度約${KD_NEAR_CROSS_MAX_EST_DAYS}個交易日內交叉`)}
+${fmtNear(kdNearDeath, describeKdNearCross)}`,
+      `${nearHeader("MACD死亡交叉", macdNearDeath.length, `DIF仍高於訊號線、柱狀體為正且連續${MACD_NEAR_CROSS_CONVERGING_DAYS}天往0收斂、照目前速度約${MACD_NEAR_CROSS_MAX_EST_DAYS}個交易日內歸零`)}
+${fmtNear(macdNearDeath, describeMacdNearCross)}`,
       `${marketLabel}「均線多頭排列 且 RSI未過熱（RSI<70）」（共${bullishMaHealthyRsi.length}檔）：\n${fmtList(bullishMaHealthyRsi)}`,
       `${marketLabel}「均線多頭排列 且 MACD黃金交叉」（共${bullishMaMacdGolden.length}檔）：\n${fmtList(bullishMaMacdGolden)}`,
       `${marketLabel}「KD黃金交叉 且 RSI仍低（RSI≤40，尚未漲多）」（共${oversoldTurning.length}檔）：\n${fmtList(oversoldTurning)}`,
