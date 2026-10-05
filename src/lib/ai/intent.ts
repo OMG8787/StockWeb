@@ -142,14 +142,23 @@ export const TECH_INDICATOR_PATTERN =
 const TECH_SCREEN_VERB_PATTERN =
   /有沒有|有没有|有哪些|哪些|哪幾|哪几|哪支|哪一?檔|哪一?只|找出|找到|篩選|筛选|挑出|選股|选股|推薦|推荐|符合|同時|同时|都在|都已|條件|条件|股票|標的|标的/;
 
+// 「快要／即將交叉」的問法（2026-10-05：使用者問「那有快黃金交叉的嗎?」原本因為沒有
+// 「有沒有/哪些」這類找股動詞而接不住）。這類說法本身就是在找「快要發生交叉的股票」，
+// 不需要再配找股動詞；同樣只在問句沒指到特定股票時才檢查（見上方註解）。
+export const TECH_NEAR_CROSS_PATTERN =
+  /(快要?|即將|即将|將要|将要|就要|準備|准备|接近|逼近)\s*(KD|MACD|K值|D值)?(線|线|指標|指标)?\s*的?\s*(黃金交叉|黄金交叉|死亡交叉|交叉|金叉|死叉)|要交叉了/i;
+
 export function conversationWantsTechScreen(question: string, history: ChatTurn[]): boolean {
+  if (TECH_NEAR_CROSS_PATTERN.test(question)) return true;
   if (TECH_INDICATOR_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
   // 極短的接續追問（「那KD呢」「其他呢」）本身不成句，靠對話脈絡判斷——
   // 跟 conversationWantsMovers 完全同一套邏輯，理由見那裡的註解。
   if (!isFollowupShape(question)) return false;
   return history.some(
     (turn) =>
-      turn.role === "user" && TECH_INDICATOR_PATTERN.test(turn.content) && TECH_SCREEN_VERB_PATTERN.test(turn.content)
+      turn.role === "user" &&
+      (TECH_NEAR_CROSS_PATTERN.test(turn.content) ||
+        (TECH_INDICATOR_PATTERN.test(turn.content) && TECH_SCREEN_VERB_PATTERN.test(turn.content)))
   );
 }
 

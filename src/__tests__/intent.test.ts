@@ -18,6 +18,7 @@ vi.mock("@/lib/ai/symbolResolve", () => ({
 
 import {
   conversationWantsMovers,
+  conversationWantsTechScreen,
   detectHistoryPeriod,
   HISTORY_PERIOD_MAX_DAYS,
   isBareTradeYesNoQuestion,
@@ -198,5 +199,32 @@ describe("沒指名對象的買賣是非題 vs 全市場推薦", () => {
     // 原本的全市場追問行為仍在（沒有個股可追問時）
     expect(conversationWantsMovers("可以買嗎", history)).toBe(true);
     expect(conversationWantsMovers("建議買什麼", [])).toBe(true);
+  });
+});
+
+describe("conversationWantsTechScreen：快要／即將交叉的問法", () => {
+  it("沒有找股動詞也接得住「快黃金交叉」這類說法", () => {
+    for (const q of [
+      "那有快黃金交叉的嗎?",
+      "有快要KD黃金交叉的股票嗎",
+      "即將交叉的有哪些",
+      "快金叉的呢",
+      "快要死叉的",
+      "接近MACD黃金交叉的股票",
+    ]) {
+      expect(conversationWantsTechScreen(q, []), q).toBe(true);
+    }
+  });
+
+  it("短追問：上一句問過快要交叉，接「那死亡交叉呢」「美股呢」仍附清單", () => {
+    const history: ChatTurn[] = [
+      { role: "user", content: "那有快黃金交叉的嗎?" },
+      { role: "assistant", content: "……" },
+    ];
+    expect(conversationWantsTechScreen("美股呢", history)).toBe(true);
+  });
+
+  it("純名詞解釋不觸發", () => {
+    expect(conversationWantsTechScreen("黃金交叉是什麼意思", [])).toBe(false);
   });
 });
