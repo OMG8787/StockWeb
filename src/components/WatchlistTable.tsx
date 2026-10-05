@@ -10,6 +10,10 @@ import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fi
 import { ensureChipsRatios, getChipsRatioValue, useChipsRatioRow, type ChipsRatioPick } from "@/lib/useChipsRatios";
 import { CHIPS_RATIO_PICKS } from "@/lib/chipsRatiosList";
 import { ChipsRatioCells, ChipsRatioHeaderCells } from "./ChipsRatioCells";
+import { useChipsColumnsVisible, setChipsColumnsVisible } from "@/lib/chipsColumnsStore";
+import ChipsColumnsToggle from "./ChipsColumnsToggle";
+import IndustryCell from "./IndustryCell";
+import StickyTableScroll from "./StickyTableScroll";
 import WatchlistButton from "./WatchlistButton";
 
 /**
@@ -204,7 +208,11 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           quick glance) makes the swipe discoverable without redesigning the
           table into a stacked mobile layout. sm: hides it once the table
           actually fits without scrolling. */}
-      <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看持有股數／購買價格／損益，表頭與名稱欄會固定 →</p>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看持有股數／購買價格／損益，表頭與名稱欄會固定 →</p>
+        {/* 籌碼四欄一鍵收合：全站共用同一個狀態（lib/chipsColumnsStore.ts），美股表沒有這四欄所以不顯示。 */}
+        {market === "TW" && <ChipsColumnsToggle className="ml-auto" />}
+      </div>
       {held.length > 0 && (
         <DraggableGroup title={`持有中（${held.length}）`} items={held} sortable market={held[0].market} group="held" />
       )}
@@ -241,6 +249,7 @@ function DraggableGroup({
   group: "held" | "unheld";
 }) {
   const [order, setOrder] = useState<string[]>(() => items.map(groupKey));
+  const chipsVisible = useChipsColumnsVisible();
   const [sortField, setSortField] = useState<HeldSortField>("investedAmount");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   /** 僅關注組最近一次按的籌碼比例排序（決定按鈕上的箭頭、再按一次切換方向）；只存在這次瀏覽。 */
@@ -309,9 +318,9 @@ function DraggableGroup({
   function handlePointerMove(y: number) {
     const dragKey = draggingKeyRef.current;
     if (!dragKey) return;
-    // 手機／平板表格在有上限高度的捲動容器裡（見 globals.css .watchlist-scroll）：把手被按住時
+    // 手機／平板表格在有上限高度的捲動容器裡（見 globals.css .sticky-scroll）：把手被按住時
     // 瀏覽器不會捲動（touch-action:none），所以指標靠近容器上下緣時手動捲一小段，才拖得到容器外的列。
-    const container = rowRefs.current.get(dragKey)?.closest<HTMLElement>(".watchlist-scroll");
+    const container = rowRefs.current.get(dragKey)?.closest<HTMLElement>(".sticky-scroll");
     if (container && container.scrollHeight > container.clientHeight + 1) {
       const cr = container.getBoundingClientRect();
       if (y > cr.bottom - 48) container.scrollTop += 12;
@@ -389,8 +398,22 @@ function DraggableGroup({
 
   // 只有一檔時排序沒有意義，按鈕只會變成誤導（按了畫面完全沒變）。
   const showIndustryButton = group === "unheld" && items.length > 1;
-  // 籌碼比例四欄只在台股表顯示（美股沒有這些公開資料）。
-  const showChips = items[0].market === "TW";
+  // 籌碼比例四欄只在台股表顯示（美股沒有這些公開資料），且使用者沒按「隱藏籌碼欄位」。
+  const isTwTable = items[0].market === "TW";
+  const showChips = isTwTable && chipsVisible;
+  // 籌碼排序目前生效、但欄位被隱藏：排序照常運作（順序仍依籌碼比例），只提示欄位已收合並給一鍵展開。
+  const chipsSortActive = group === "held" ? isChipsField(sortField) : unheldChipsSort != null;
+  const chipsHiddenHint =
+    isTwTable && !chipsVisible && chipsSortActive ? (
+      <button
+        type="button"
+        onClick={() => setChipsColumnsVisible(true)}
+        className="text-[11px] text-(--accent) underline"
+        title="排序依籌碼比例，但籌碼欄位目前已隱藏；點一下展開欄位"
+      >
+        籌碼欄位已隱藏，點此顯示
+      </button>
+    ) : null;
 
   return (
     <div>
@@ -403,6 +426,7 @@ function DraggableGroup({
         {sortable && (
           <div className="ml-auto flex items-center gap-1.5">
             {chipsLoading && <span className="text-[11px] text-(--text-muted)">籌碼資料載入中…</span>}
+            {chipsHiddenHint}
             <select
               value={sortField}
               onChange={(e) => applySort(e.target.value as HeldSortField, sortDir)}
@@ -444,6 +468,7 @@ function DraggableGroup({
         {showIndustryButton && (
           <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
             {chipsLoading && <span className="text-[11px] text-(--text-muted)">籌碼資料載入中…</span>}
+            {chipsHiddenHint}
             <button
               type="button"
               onClick={() => {
@@ -480,12 +505,12 @@ function DraggableGroup({
         )}
       </div>
       )}
-      <div className="watchlist-scroll">
+      <StickyTableScroll>
         {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／融券使用率），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
-          className={`watchlist-table w-full text-sm xl:min-w-0 ${
-            showChips ? (sortable ? "min-w-[1180px]" : "min-w-[1000px]") : sortable ? "min-w-[900px]" : "min-w-[720px]"
+          className={`sticky-table w-full text-sm xl:min-w-0 ${
+            showChips ? (sortable ? "min-w-[1180px]" : "min-w-[1000px]") : sortable ? "min-w-[760px]" : "min-w-[560px]"
           }`}
         >
           <thead>
@@ -493,7 +518,7 @@ function DraggableGroup({
               <th className="w-8 pr-1 text-right font-medium">#</th>
               <th className="w-6" />
               <th className="w-8" />
-              <th className="wl-sticky-name py-2 pr-1.5 font-medium whitespace-nowrap">代碼 / 名稱</th>
+              <th className="sticky-name py-2 pr-1.5 font-medium whitespace-nowrap">代碼 / 名稱</th>
               <th className="py-2 pr-1.5 font-medium" title={FINE_INDUSTRY_HINT}>
                 產業
               </th>
@@ -557,7 +582,7 @@ function DraggableGroup({
             })}
           </tbody>
         </table>
-      </div>
+      </StickyTableScroll>
     </div>
   );
 }
@@ -664,7 +689,7 @@ function HoldingRow({
       <td className="py-2 pl-1">
         <WatchlistButton symbol={item.symbol} market={item.market} name={item.name} />
       </td>
-      <td className="wl-sticky-name py-2 pr-1.5">
+      <td className="sticky-name py-2 pr-1.5">
         {/* 名稱一行、代碼＋市場小字在下一行：比原本「名稱 代碼 [台股]」同一行省約 80px，桌機才塞得下不橫向捲動。 */}
         <Link
           href={`/stock/${item.symbol}?market=${item.market}`}
@@ -678,11 +703,10 @@ function HoldingRow({
           </span>
         </Link>
       </td>
-      {/* 產業文字可能很長（例如「塑化中游（可塑劑／塑膠原料）」）：限寬單行截斷，完整文字放 title。 */}
+      {/* 產業文字可能很長（例如「塑化中游（可塑劑／塑膠原料）」）：桌機限寬單行截斷、完整文字放 title；
+          手機最多 2 行完整顯示，點一下展開全文（IndustryCell）。 */}
       <td className="py-2 pr-1.5 text-(--text-secondary)">
-        <div className="max-w-[7.5rem] truncate 2xl:max-w-[12rem]" title={fineIndustryOf(item)}>
-          {fineIndustryOf(item)}
-        </div>
+        <IndustryCell text={fineIndustryOf(item)} desktopClassName="xl:max-w-[7.5rem] xl:truncate 2xl:max-w-[12rem]" />
       </td>
       {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} compact />}
       <td className="py-2 pr-1.5 text-right tabular-nums text-(--text-secondary)">
