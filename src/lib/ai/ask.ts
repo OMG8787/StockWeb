@@ -458,13 +458,7 @@ ${actionBriefText}` : "",
           await callAiProviders(system, messages, { maxOutputTokens: 1800 })
         : await callAiProviders(system, messages);
   if (result.usedAi) {
-    // 回答後檢查關鍵價位（停損／出場／區間／不追價）有沒有抄錯，抄錯自動更正為程式值（見 numberGuard.ts）。
-    const guarded = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(result.answer)), grounding);
-    if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-    // 先不要買的股票不可出現出場價／買進區間（見 ratingConsistencyGuard.ts）。
-    const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
-    if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
-    return { answer: consistent.text, groundedSymbol, usedAi: true, model: modelInfo(result.model) };
+    return { answer: postProcessAiAnswer(result.answer, grounding), groundedSymbol, usedAi: true, model: modelInfo(result.model) };
   }
 
   return {
@@ -472,4 +466,16 @@ ${actionBriefText}` : "",
     groundedSymbol,
     usedAi: false,
   };
+}
+
+/**
+ * AI 回答送出前的程式後處理（唯一入口；跨模型評測 scripts/eval/run.ts 也呼叫這一個，兩邊才不會漂移）：
+ * 清內部標記 → 拿掉評等標籤 → 關鍵價位抄錯更正為程式值（numberGuard.ts）→ 先不要買的股票刪掉出場價／買進區間（ratingConsistencyGuard.ts）。
+ */
+export function postProcessAiAnswer(answer: string, grounding: string): string {
+  const guarded = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(answer)), grounding);
+  if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
+  const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
+  if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
+  return consistent.text;
 }

@@ -157,14 +157,16 @@ async function callVariant(variant: string, cap: Captured): Promise<{ text: stri
 
 async function postProcess(raw: string, grounding: string) {
   const { normalizeZhTw } = await import("@/lib/ai/zhTwNormalize");
+  const checked = normalizeZhTw(raw);
+  if ("rejectReason" in checked && checked.rejectReason) return { final: "", zhFixed: checked.fixedCount, reject: checked.rejectReason };
+  // 與正式流程同一個後處理入口（ask.ts postProcessAiAnswer）。舊版程式（例如評測改動前的 commit）沒有這個匯出時，
+  // 退回當時 ask.ts 的寫法：清內部標記→拿掉評等標籤→關鍵價位更正。
+  const ask = (await import("@/lib/ai/ask")) as { postProcessAiAnswer?: (a: string, g: string) => string };
+  if (ask.postProcessAiAnswer) return { final: ask.postProcessAiAnswer(checked.text, grounding), zhFixed: checked.fixedCount };
   const { sanitizeLeakedMarkers } = await import("@/lib/ai/askFallback");
   const { stripRatingTags } = await import("@/lib/ai/siteRating");
   const { guardAnswerNumbers } = await import("@/lib/ai/numberGuard");
-  const checked = normalizeZhTw(raw);
-  if ("rejectReason" in checked && checked.rejectReason) return { final: "", zhFixed: checked.fixedCount, reject: checked.rejectReason };
-  // 與 ask.ts 回答後處理相同：清內部標記→拿掉評等標籤→關鍵價位更正。
-  const final = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(checked.text)), grounding).text;
-  return { final, zhFixed: checked.fixedCount };
+  return { final: guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(checked.text)), grounding).text, zhFixed: checked.fixedCount };
 }
 
 // ---------------------------------------------------------------- LLM 評審（輔助）
