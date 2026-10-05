@@ -179,7 +179,10 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
           const rx = ratings.get(x.toUpperCase());
           return rx && coreLabel(rx.unheld) === label;
         });
-        const collective = sameLabelAll && new RegExp(`都(是|為)?「?${label}`).test(head);
+        const collective =
+          (sameLabelAll && new RegExp(`都(是|為)?「?${label}`).test(head)) ||
+          // 只問一檔時，第一句就是評等字樣即可（名稱常在後面才出現）。
+          (spec.symbols.length === 1 && firstSentences(ans, 1).includes(label));
         if (!near && !collective) miss.push(`${r.name}(${s})應為「${label}」`);
       }
       return { rule: "每檔照各自評等", pass: miss.length === 0, detail: miss.join("；") || undefined };

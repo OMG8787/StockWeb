@@ -325,4 +325,46 @@ export const EVAL_CASES: EvalCase[] = [
     source: "weekendNoteForAi＋RULE_TRADING_STANCE（假時鐘：週六 11:00）",
     tags: ["時段"],
   },
+  // ---------------- 2026-10-06 新增（使用者 10/5 晚間回報）
+  {
+    id: "earlier-claim-chase",
+    title: "「白天你不是說不要追高南亞」：看不到更早紀錄要直說，並用評等＋短線風險解釋，結論與看法不可矛盾",
+    question: "白天你不是說不要追高南亞",
+    checks: [
+      { kind: "require", name: "說明看不到更早的對話", any: ["只看得到這次", "看不到更早", "看不到.{0,6}(白天|早上|之前|先前)"] },
+      { kind: "ratingEach", symbols: ["1303"] },
+      { kind: "require", name: "回應追高疑慮（短線風險／漲多／分批）", any: ["追高", "漲多", "短線.{0,6}(風險|回檔)", "分批"] },
+      { kind: "forbid", name: "不可道歉承認", any: ["抱歉", "不好意思", "我說錯"] },
+    ],
+    source: "使用者📝 2026-10-06 00:54「那到底要以哪個為主」",
+    tags: ["對話", "一致性"],
+  },
+  {
+    id: "news-us-iran",
+    title: "「今天有沒有美國伊朗的新聞」：不可只說沒有，要講查的範圍（本站抓到的新聞）",
+    question: "今天有沒有美國伊朗的新聞",
+    checks: [
+      { kind: "require", name: "講清楚查證範圍", any: ["本站.{0,10}新聞", "抓到的", "收錄", "新聞(來源|標題|清單)", "目前.{0,8}(資料|新聞)(裡|中)"] },
+      { kind: "forbid", name: "不可一句「資料裡沒有」帶過", any: ["^資料裡沒有[^。]*。?$"] },
+      { kind: "length", min: 40 },
+    ],
+    source: "使用者📝 2026-10-06 00:57「是真的沒有還是沒有收入，要查清楚」",
+    tags: ["誠實", "新聞"],
+  },
+  {
+    id: "typo-name",
+    title: "錯字「建鼎呢」：要猜最可能的健鼎(3044)並確認、照評等分析，不可說資料庫沒有",
+    question: "建鼎呢?",
+    history: [
+      { role: "user", content: "台光電可以買嗎？" },
+      { role: "assistant", content: "台光電(2383)建議先不要買，技術面不支持。" },
+    ],
+    checks: [
+      { kind: "require", name: "解析成健鼎(3044)", any: ["3044"] },
+      { kind: "forbid", name: "不可說沒有資料", any: ["沒有建鼎", "資料庫中沒有", "查不到"] },
+      { kind: "ratingEach", symbols: ["3044"] },
+    ],
+    source: "使用者📝 2026-10-05 19:08「答錯字可以先詢問是否是XXX並給分析」",
+    tags: ["名稱解析", "對話"],
+  },
 ];
