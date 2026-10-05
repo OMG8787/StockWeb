@@ -54,10 +54,14 @@ const SESSIONS: Record<MarketScope, Session> = {
   US: { timeZone: "America/New_York", openMinutes: 9 * 60 + 30, closeMinutes: 16 * 60 },
 };
 
+/** 各市場開收盤時刻（唯讀匯出給 pollingSchedule.ts 等共用，不要在別處另寫一份 9:00／13:30）。 */
+export const MARKET_SESSIONS: Readonly<Record<MarketScope, Readonly<Session>>> = SESSIONS;
+
 // 08:30 local Taipei time — see the MarketStatus comment above for what
 // this window means. Only defined for TW; getMarketStatus() below never
 // reads this for "US".
-const TW_PRE_MARKET_START_MINUTES = 8 * 60 + 30;
+/** 台股試撮開始（08:30）。全站唯一定義：pollingSchedule.ts 的 TW_LIVE_START_MINUTES 直接引用這個。 */
+export const TW_PRE_MARKET_START_MINUTES = 8 * 60 + 30;
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 

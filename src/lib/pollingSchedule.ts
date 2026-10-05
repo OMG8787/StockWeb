@@ -1,4 +1,5 @@
-import { getMarketStatus, type MarketScope } from "@/lib/marketStatus";
+// 開收盤時刻全站唯一定義在 marketStatus.ts（盤中／收盤徽章、AI 時段立場、輪詢、評等紀錄時段都由此推得）。
+import { getMarketStatus, MARKET_SESSIONS, TW_PRE_MARKET_START_MINUTES, type MarketScope } from "@/lib/marketStatus";
 
 /**
  * 全站「即時報價類」資料該多久刷新一次的單一權威來源。
@@ -33,7 +34,7 @@ import { getMarketStatus, type MarketScope } from "@/lib/marketStatus";
  */
 
 /** 08:30 台北時間——試撮開始，TWSE/TPEx 已經在公布模擬撮合價。 */
-export const TW_LIVE_START_MINUTES = 8 * 60 + 30;
+export const TW_LIVE_START_MINUTES = TW_PRE_MARKET_START_MINUTES;
 /**
  * 興櫃（Emerging）專用時段。興櫃交易時間是 **09:00~15:00**（櫃買中心「興櫃股票
  * 交易制度」頁面白紙黑字寫「上午9時~下午3時」），跟上市櫃的 09:00~13:30 不同，
@@ -52,11 +53,11 @@ export const TW_LIVE_START_MINUTES = 8 * 60 + 30;
  */
 export const EMERGING_LIVE_START_MINUTES = 9 * 60;
 /** 15:00 台北時間——興櫃收盤（狀態徽章用這個時間判斷盤中/已收盤）。 */
-export const EMERGING_CLOSE_MINUTES = 15 * 60;
+export const EMERGING_CLOSE_MINUTES = MARKET_SESSIONS["TW-EMERGING"].closeMinutes;
 /** 15:10 台北時間——輪詢多留 10 分鐘，讓最後一輪抓到結算後的最終數字。 */
 export const EMERGING_LIVE_END_MINUTES = 15 * 60 + 10;
 /** 13:30 台北時間——上市櫃一般交易收盤。 */
-export const TW_CLOSE_MINUTES = 13 * 60 + 30;
+export const TW_CLOSE_MINUTES = MARKET_SESSIONS.TW.closeMinutes;
 /** 14:30 台北時間——盤後定價交易結束，之後當日數字不會再變動。 */
 export const TW_LIVE_END_MINUTES = 14 * 60 + 30;
 /** 14:40 台北時間——收盤後補抓一次最終數字的時間點。 */
@@ -165,7 +166,7 @@ export type TwTradingPhase = "pre-open" | "intraday" | "after-hours-fixed" | "af
 export function getTwTradingPhase(now: Date = new Date()): TwTradingPhase {
   const clock = taipeiClock(now);
   if (!isTwWeekday(clock)) return "weekend";
-  if (clock.minutes < 9 * 60) return "pre-open";
+  if (clock.minutes < MARKET_SESSIONS.TW.openMinutes) return "pre-open";
   if (clock.minutes < TW_CLOSE_MINUTES) return "intraday";
   if (clock.minutes < TW_LIVE_END_MINUTES) return "after-hours-fixed";
   return "after-close";
