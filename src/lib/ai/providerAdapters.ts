@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { askGeminiWithModel } from "./gemini";
+import { askGeminiWithModel, type GeminiTier } from "./gemini";
 import { callOpenAiCompatible } from "./openaiCompat";
 import type { ProviderId } from "./providerHealth";
 import type { ChatTurn } from "./types";
@@ -27,6 +27,8 @@ export interface AdapterCallOptions {
   maxOutputTokens: number;
   /** 格式固定、不需要推理的工作（見 CallAiProvidersOptions.simpleTask）。 */
   simpleTask?: boolean;
+  /** Gemini 模型等級（見 gemini.ts）：premium＝每天少量、價值高的工作用非 lite 思考模型（有每日配額）。 */
+  geminiTier?: GeminiTier;
 }
 
 export interface ProviderAdapter {
@@ -85,6 +87,7 @@ const geminiAdapter: ProviderAdapter = {
     askGeminiWithModel(system, turns, process.env.GEMINI_API_KEY ?? "", {
       timeoutMs: options.timeoutMs,
       maxOutputTokens: options.maxOutputTokens,
+      tier: options.geminiTier,
     }),
 };
 

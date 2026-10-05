@@ -146,6 +146,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
         callAiProviders(sysPrompt, [{ role: "user", content: `參考資料：\n${stance.stanceLine}\n\n${grounding}` }], {
           timeoutMs: 25000,
           maxOutputTokens: 1600,
+          // 每天少量、價值高：用非 lite 思考模型（有每日配額，用完自動退回 lite，見 gemini.ts）。
+          geminiTier: "premium",
         }),
         getAiJudgments(
           ratedPicks.map((p) => p.rating),

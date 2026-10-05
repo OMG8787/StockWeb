@@ -112,10 +112,12 @@ async function judgeBatch(rs: StockRatingResult[], day: string): Promise<Map<str
     .join("\n");
   const blocks = await Promise.all(rs.map(describeForJudge));
   const result = await callAiProviders(AI_JUDGE_SYSTEM, [{ role: "user", content: `${market}\n\n${blocks.join("\n\n")}` }], {
-    timeoutMs: 15000,
+    timeoutMs: 20000,
     totalBudgetMs: 25000,
     maxOutputTokens: 300 + rs.length * 200,
     simpleTask: true,
+    // 每日批次、價值高：非 lite 思考模型（每日配額，用完退回 lite，見 gemini.ts）。
+    geminiTier: "premium",
   });
   const bases = new Map<string, RatingCode>(rs.map((r) => [r.symbol.toUpperCase(), r.rating.code]));
   const parsed = result.usedAi ? parseAiJudgments(result.answer, bases, new Date(), result.model ?? result.provider) : new Map<string, AiJudgment>();

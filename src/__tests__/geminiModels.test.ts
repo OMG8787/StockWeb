@@ -1,47 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { rankGeminiModels } from "@/lib/ai/gemini";
+import { GEMINI_THINKING_ALLOWANCE, geminiGenerationConfig, isGeminiThinkingModel, rankGeminiModels } from "@/lib/ai/gemini";
 
-describe("rankGeminiModels（Gemini 模型偏好順序）", () => {
-  it("lite 排在 ListModels 前面時，仍優先 2.5-flash、flash-latest，lite 最後", () => {
-    const listed = [
-      "gemini-flash-lite-latest",
-      "gemini-2.5-flash-lite",
-      "gemini-2.0-flash",
-      "gemini-flash-latest",
-      "gemini-2.5-flash",
-      "gemini-2.5-pro",
-    ];
-    expect(rankGeminiModels(listed)).toEqual([
-      "gemini-2.5-flash",
-      "gemini-flash-latest",
-      "gemini-2.0-flash",
-      "gemini-flash-lite-latest",
-      "gemini-2.5-flash-lite",
-      "gemini-2.5-pro",
-    ]);
+// 2026-10-05 這把金鑰的實際 ListModels（節錄）
+const LISTED =
+  "gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-preview-tts, gemma-4-31b-it, gemini-flash-latest, gemini-flash-lite-latest, gemini-pro-latest, gemini-2.5-flash-lite, gemini-2.5-flash-image, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-omni-flash-preview, gemini-3.8-flash, gemini-3.8-flash-tts".split(
+    ", "
+  );
+
+describe("rankGeminiModels（Gemini 模型分級）", () => {
+  it("standard（AI 問答）：lite 主力在前，flash-lite-latest 第一", () => {
+    const r = rankGeminiModels(LISTED, "standard");
+    expect(r.slice(0, 4)).toEqual(["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]);
+    expect(r.slice(4).every((m) => !/lite/.test(m))).toBe(true);
   });
 
-  it("排除語音、圖片、向量、即時串流等非文字生成模型", () => {
-    const listed = [
-      "gemini-2.5-flash-preview-tts",
-      "gemini-2.5-flash-image",
-      "gemini-embedding-001",
-      "gemini-2.5-flash-native-audio-latest",
-      "gemini-live-2.5-flash-preview",
-      "gemini-2.5-flash",
-    ];
-    expect(rankGeminiModels(listed)).toEqual(["gemini-2.5-flash"]);
+  it("premium（今日快報／建議／AI 判斷層）：非 lite 思考模型在前，lite 最後備援", () => {
+    const r = rankGeminiModels(LISTED, "premium");
+    expect(r.slice(0, 4)).toEqual(["gemini-flash-latest", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"]);
+    expect(r.at(-1)).toMatch(/lite/);
   });
 
-  it("偏好模型都不在清單時，非 lite 的 flash 先於 lite", () => {
-    expect(rankGeminiModels(["gemini-2.0-flash-lite", "gemini-3-flash-preview"])).toEqual([
-      "gemini-3-flash-preview",
-      "gemini-2.0-flash-lite",
-    ]);
+  it("排除語音、圖片、向量、omni、pro、gemma 等", () => {
+    const r = rankGeminiModels(LISTED, "premium");
+    expect(r.some((m) => /tts|image|omni|pro|gemma/.test(m))).toBe(false);
   });
 
-  it("2026-10-05 實際 ListModels 清單：前 4 個候選不含 lite／tts／image／omni", () => {
-    const listed = "gemini-2.5-flash, gemini-2.5-pro, gemini-2.5-flash-preview-tts, gemma-4-31b-it, gemini-flash-latest, gemini-flash-lite-latest, gemini-pro-latest, gemini-2.5-flash-lite, gemini-2.5-flash-image, gemini-3-flash-preview, gemini-3.1-flash-lite, gemini-3.5-flash, gemini-3.5-flash-lite, gemini-omni-flash-preview, gemini-3.8-flash".split(", ");
-    expect(rankGeminiModels(listed).slice(0, 4)).toEqual(["gemini-2.5-flash", "gemini-flash-latest", "gemini-3-flash-preview", "gemini-3.5-flash"]);
+  it("思考模型的 generationConfig 加 thinkingConfig 與思考預算；lite 不加", () => {
+    expect(isGeminiThinkingModel("gemini-3.5-flash")).toBe(true);
+    expect(isGeminiThinkingModel("gemini-flash-lite-latest")).toBe(false);
+    expect(geminiGenerationConfig("gemini-3.5-flash", 1600)).toMatchObject({
+      maxOutputTokens: 1600 + GEMINI_THINKING_ALLOWANCE,
+      thinkingConfig: { thinkingLevel: "low" },
+    });
+    expect(geminiGenerationConfig("gemini-2.5-flash", 1000)).toMatchObject({ thinkingConfig: { thinkingBudget: 1024 } });
+    const lite = geminiGenerationConfig("gemini-flash-lite-latest", 1000);
+    expect(lite.maxOutputTokens).toBe(1000);
+    expect(lite).not.toHaveProperty("thinkingConfig");
   });
 });
