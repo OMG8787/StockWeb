@@ -190,3 +190,17 @@ body {
      bold. */
   font-weight: 700;
 }
+
+/* 關注清單表格（WatchlistTable）：桌機寬度（>=1280px，不再有橫向捲動容器）表頭固定在頁面頂端。
+   網站頂部導覽列不是 sticky/fixed（隨頁面捲走），所以 top:0 即可，不會被蓋住。
+   表頭背景必須不透明（跟區塊底色同一個 token），否則底下的列會透出來；
+   border-collapse 下 sticky 儲存格的邊線不會跟著走，所以用 inset box-shadow 畫底線。 */
+@media (min-width: 1280px) {
+  .watchlist-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background-color: var(--surface-1);
+    box-shadow: inset 0 -1px 0 var(--gridline);
+  }
+}

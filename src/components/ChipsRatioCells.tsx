@@ -19,12 +19,13 @@ function shortDate(iso: string | undefined): string {
   return iso && iso.length === 10 ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}` : "";
 }
 
-export function ChipsRatioHeaderCells() {
+/** compact＝關注清單用：欄距收窄、表頭允許換行（桌機不橫向捲動）；預設維持原樣（StockTable 等不受影響）。 */
+export function ChipsRatioHeaderCells({ compact = false }: { compact?: boolean }) {
   const { majorDate, majorPrevDate } = useChipsRatiosMeta();
   const weekNote = majorDate
     ? `目前為 ${shortDate(majorDate)} 那週${majorPrevDate ? `，比較 ${shortDate(majorPrevDate)} 那週` : ""}。`
     : "";
-  const th = "py-2 pr-4 font-medium text-right whitespace-nowrap";
+  const th = compact ? "py-2 pr-2 font-medium text-right leading-tight" : "py-2 pr-4 font-medium text-right whitespace-nowrap";
   return (
     <>
       <th
@@ -67,18 +68,21 @@ function Delta({ pair, prevLabel, pendingPrev, missingPrev }: { pair: RatioPair;
   );
 }
 
-const TD = "py-2.5 pr-4 text-right tabular-nums whitespace-nowrap";
+const TD_DEFAULT = "py-2.5 pr-4 text-right tabular-nums whitespace-nowrap";
+const TD_COMPACT = "py-2 pr-2 text-right tabular-nums whitespace-nowrap";
 
 function Cell({
   entry,
   pick,
   prevLabel,
   missingPrev,
+  TD,
 }: {
   entry: ChipsRatioEntry;
   pick: ChipsRatioPick;
   prevLabel: string;
   missingPrev: string;
+  TD: string;
 }) {
   if (entry.status === "idle" || entry.status === "loading") {
     return (
@@ -109,7 +113,8 @@ function Cell({
 }
 
 /** 一列的四格；美股列（market !== "TW"）一律「—」。 */
-export function ChipsRatioCells({ entry, isTw }: { entry: ChipsRatioEntry; isTw: boolean }) {
+export function ChipsRatioCells({ entry, isTw, compact = false }: { entry: ChipsRatioEntry; isTw: boolean; compact?: boolean }) {
+  const TD = compact ? TD_COMPACT : TD_DEFAULT;
   if (!isTw) {
     return (
       <>
@@ -123,10 +128,10 @@ export function ChipsRatioCells({ entry, isTw }: { entry: ChipsRatioEntry; isTw:
   }
   return (
     <>
-      <Cell entry={entry} pick="major" prevLabel="上一週" missingPrev="累積中" />
-      <Cell entry={entry} pick="foreign" prevLabel="前一交易日" missingPrev="—" />
-      <Cell entry={entry} pick="margin" prevLabel="前一交易日" missingPrev="—" />
-      <Cell entry={entry} pick="short" prevLabel="前一交易日" missingPrev="—" />
+      <Cell entry={entry} pick="major" prevLabel="上一週" missingPrev="累積中" TD={TD} />
+      <Cell entry={entry} pick="foreign" prevLabel="前一交易日" missingPrev="—" TD={TD} />
+      <Cell entry={entry} pick="margin" prevLabel="前一交易日" missingPrev="—" TD={TD} />
+      <Cell entry={entry} pick="short" prevLabel="前一交易日" missingPrev="—" TD={TD} />
     </>
   );
 }

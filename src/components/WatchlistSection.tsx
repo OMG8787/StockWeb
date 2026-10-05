@@ -276,8 +276,9 @@ export default function WatchlistSection() {
   });
   const displayItems: HoldingItem[] = [...heldItems, ...unheldItems];
 
+  // xl（>=1280px）時比主內容欄（max-w-6xl）更寬：關注清單欄位多，桌機要一次全部顯示、不用橫向捲動。
   return (
-    <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
+    <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4 xl:ml-[calc((100%-min(100vw-3rem,1760px))/2)] xl:w-[min(calc(100vw-3rem),1760px)]">
       <div className="mb-2 flex items-center justify-between">
         <h2 className="font-semibold">我的關注</h2>
         {displayItems.length > 0 && (

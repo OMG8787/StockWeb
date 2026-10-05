@@ -204,7 +204,7 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           quick glance) makes the swipe discoverable without redesigning the
           table into a stacked mobile layout. sm: hides it once the table
           actually fits without scrolling. */}
-      <p className="text-[13px] text-(--text-muted) sm:hidden">← 可左右滑動查看持有股數／購買價格／損益 →</p>
+      <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看持有股數／購買價格／損益 →</p>
       {held.length > 0 && (
         <DraggableGroup title={`持有中（${held.length}）`} items={held} sortable market={held[0].market} group="held" />
       )}
@@ -472,12 +472,12 @@ function DraggableGroup({
         )}
       </div>
       )}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto xl:overflow-visible">
         {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／融券使用率），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
-          className={`w-full text-sm ${
-            showChips ? (sortable ? "min-w-[1320px]" : "min-w-[1160px]") : sortable ? "min-w-[960px]" : "min-w-[800px]"
+          className={`watchlist-table w-full text-sm xl:min-w-0 ${
+            showChips ? (sortable ? "min-w-[1180px]" : "min-w-[1000px]") : sortable ? "min-w-[900px]" : "min-w-[720px]"
           }`}
         >
           <thead>
@@ -485,19 +485,19 @@ function DraggableGroup({
               <th className="w-8 pr-1 text-right font-medium">#</th>
               <th className="w-6" />
               <th className="w-8" />
-              <th className="py-2 pr-4 font-medium">代碼 / 名稱</th>
-              <th className="py-2 pr-4 font-medium" title={FINE_INDUSTRY_HINT}>
+              <th className="py-2 pr-2 font-medium">代碼 / 名稱</th>
+              <th className="py-2 pr-2 font-medium" title={FINE_INDUSTRY_HINT}>
                 產業
               </th>
-              <th className="py-2 pr-4 font-medium text-right">股價</th>
-              <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
-              <th className="py-2 pr-4 font-medium text-right">成交量</th>
-              {showChips && <ChipsRatioHeaderCells />}
-              <th className="py-2 pr-4 font-medium text-right">持有股數</th>
-              <th className="py-2 pr-4 font-medium text-right">購買價格</th>
+              <th className="py-2 pr-2 font-medium text-right">股價</th>
+              <th className="py-2 pr-2 font-medium text-right">漲跌幅</th>
+              <th className="py-2 pr-2 font-medium text-right">成交量</th>
+              {showChips && <ChipsRatioHeaderCells compact />}
+              <th className="py-2 pr-2 font-medium text-right">持有股數</th>
+              <th className="py-2 pr-2 font-medium text-right">購買價格</th>
               {sortable && (
                 <th
-                  className="py-2 pr-4 font-medium text-right"
+                  className="py-2 pr-2 font-medium text-right"
                   title={
                     market === "TW"
                       ? "假設買賣手續費各0.1425%、賣出證券交易稅0.3%（一般網路券商常見費率，實際依個人開戶條件為準），無條件進位到分— 股價達到此價才保證真正扣除成本後不虧"
@@ -509,14 +509,14 @@ function DraggableGroup({
               )}
               {sortable && (
                 <th
-                  className="py-2 pr-4 font-medium text-right"
+                  className="py-2 pr-2 font-medium text-right"
                   title={market === "TW" ? "購買價格×股數，已計入買進手續費0.1425%（捨去到整數元，與券商實際計費方式一致）" : "購買價格×股數"}
                 >
                   投資金額
                 </th>
               )}
               <th
-                className="py-2 pr-4 font-medium text-right"
+                className="py-2 pr-2 font-medium text-right"
                 title={
                   market === "TW"
                     ? "以現在股價全部賣出、扣掉賣出手續費0.1425%與證交稅0.3%（皆捨去到整數元）後的淨收入，減去投資金額（已含買進手續費）"
@@ -638,9 +638,9 @@ function HoldingRow({
   const invested = hasHoldingInput ? investedAmount(costNum, sharesNum, item.market) : null;
 
   return (
-    <tr ref={combinedRowRef} className="border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
-      <td className="py-2.5 pr-1 text-right tabular-nums text-(--text-muted)">{rowNumber}</td>
-      <td className="py-2.5 pl-1">
+    <tr ref={combinedRowRef} className="whitespace-nowrap border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
+      <td className="py-2 pr-1 text-right tabular-nums text-(--text-muted)">{rowNumber}</td>
+      <td className="py-2 pl-1">
         <button
           type="button"
           aria-label={`拖曳調整 ${item.name} 的順序`}
@@ -652,20 +652,30 @@ function HoldingRow({
           ⠿
         </button>
       </td>
-      <td className="py-2.5 pl-1">
+      <td className="py-2 pl-1">
         <WatchlistButton symbol={item.symbol} market={item.market} name={item.name} />
       </td>
-      <td className="py-2.5 pr-4">
-        <Link href={`/stock/${item.symbol}?market=${item.market}`} className="font-medium hover:text-(--accent)">
+      <td className="py-2 pr-2">
+        {/* 名稱一行、代碼＋市場小字在下一行：比原本「名稱 代碼 [台股]」同一行省約 80px，桌機才塞得下不橫向捲動。 */}
+        <Link
+          href={`/stock/${item.symbol}?market=${item.market}`}
+          className="block whitespace-nowrap font-medium hover:text-(--accent)"
+          title={`${item.name} ${item.symbol}（${item.market === "TW" ? "台股" : "美股"}）`}
+        >
           {item.name}
-          <span className="ml-1.5 text-(--text-muted) tabular-nums">{item.symbol}</span>
+          <span className="block text-xs font-normal text-(--text-muted) tabular-nums">
+            {item.symbol}
+            <span className="ml-1.5 rounded bg-(--page-plane) px-1 py-px text-[11px]">{item.market === "TW" ? "台股" : "美股"}</span>
+          </span>
         </Link>
-        <span className="ml-2 rounded bg-(--page-plane) px-1.5 py-0.5 text-[12px] text-(--text-muted)">
-          {item.market === "TW" ? "台股" : "美股"}
-        </span>
       </td>
-      <td className="py-2.5 pr-4 text-(--text-secondary)">{fineIndustryOf(item)}</td>
-      <td className="py-2.5 pr-4 text-right tabular-nums">
+      {/* 產業文字可能很長（例如「塑化中游（可塑劑／塑膠原料）」）：限寬單行截斷，完整文字放 title。 */}
+      <td className="py-2 pr-2 text-(--text-secondary)">
+        <div className="max-w-[9.5rem] truncate" title={fineIndustryOf(item)}>
+          {fineIndustryOf(item)}
+        </div>
+      </td>
+      <td className="py-2 pr-2 text-right tabular-nums">
         {item.price != null ? (
           formatPrice(item.price, currency)
         ) : (
@@ -675,17 +685,17 @@ function HoldingRow({
         )}
       </td>
       <td
-        className={`py-2.5 pr-4 text-right font-medium tabular-nums ${
+        className={`py-2 pr-2 text-right font-medium tabular-nums ${
           item.changePercent != null ? priceDirectionClass(item.changePercent) : "text-(--text-muted)"
         }`}
       >
         {item.changePercent != null ? formatPercent(item.changePercent) : "—"}
       </td>
-      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
+      <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">
         {item.volume != null ? formatVolume(item.volume, item.market) : "—"}
       </td>
-      {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} />}
-      <td className="py-2.5 pr-4 text-right">
+      {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} compact />}
+      <td className="py-2 pr-2 text-right">
         <input
           type="number"
           min="0"
@@ -693,10 +703,10 @@ function HoldingRow({
           onChange={(e) => setShares(e.target.value)}
           onBlur={commit}
           placeholder="—"
-          className="w-20 rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
+          className="w-[4.5rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
         />
       </td>
-      <td className="py-2.5 pr-4 text-right">
+      <td className="py-2 pr-2 text-right">
         <input
           type="number"
           min="0"
@@ -705,24 +715,24 @@ function HoldingRow({
           onChange={(e) => setCostBasis(e.target.value)}
           onBlur={commit}
           placeholder="—"
-          className="w-20 rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
+          className="w-[4.5rem] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
         />
       </td>
       {showHoldingColumns && (
-        <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
+        <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">
           {breakEven != null ? formatPrice(breakEven, currency) : "—"}
         </td>
       )}
       {showHoldingColumns && (
-        <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
+        <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">
           {invested != null ? formatAmount(invested, currency) : "—"}
         </td>
       )}
-      <td className={`py-2.5 pr-4 text-right tabular-nums ${pnl != null ? priceDirectionClass(pnl) : "text-(--text-muted)"}`}>
+      <td className={`py-2 pr-2 text-right tabular-nums ${pnl != null ? priceDirectionClass(pnl) : "text-(--text-muted)"}`}>
         {pnl != null ? (
           <>
             {formatAmountChange(pnl, currency)}
-            {pnlPercent != null && <span className="ml-1 text-xs">({formatPercent(pnlPercent)})</span>}
+            {pnlPercent != null && <span className="block text-xs">({formatPercent(pnlPercent)})</span>}
           </>
         ) : (
           "—"
