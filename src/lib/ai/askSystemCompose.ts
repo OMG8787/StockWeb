@@ -53,6 +53,9 @@ import {
   RULE_LIST_REFERENCE,
 } from "./askSystemPrompt";
 import { SITE_RATING_TITLE } from "./siteRating";
+import { SIMILAR_CASES_TITLE } from "./learning/similar";
+import { LESSONS_TITLE } from "./learning/lessonMatch";
+import { RULE_EXPERIENCE } from "./learning/experienceRule";
 
 /** 這些字串必須跟各 grounding 產生的區塊文字一致；改那邊的標題要一起改這裡。 */
 export const BLOCK_MARKERS = {
@@ -65,6 +68,8 @@ export const BLOCK_MARKERS = {
   macro: "美國總體經濟", // macroText.ts
   nightFutures: "夜盤", // marketIndices / marketOverview.ts
   indicators: /RSI|KD|MACD|黃金交叉|死亡交叉/,
+  similarCases: SIMILAR_CASES_TITLE, // learning/similar.ts（共用常數）
+  lessons: LESSONS_TITLE, // learning/lessonMatch.ts（共用常數）
 } as const;
 
 /** 使用者引用「你更早說過」的話（看不到的對話）。 */
@@ -165,6 +170,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     c.stockCount > 0 && !c.marketWide ? RULE_ONLY_ASKED_STOCKS : "",
     c.listReference ? RULE_LIST_REFERENCE : "",
     dataText.includes(SITE_RATING_TITLE) ? RULE_FOLLOW_SITE_RATING : "",
+    dataText.includes(BLOCK_MARKERS.similarCases) || dataText.includes(BLOCK_MARKERS.lessons) ? RULE_EXPERIENCE : "",
     c.hasTradingStance ? RULE_TRADING_STANCE : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),

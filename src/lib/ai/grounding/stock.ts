@@ -34,6 +34,7 @@ import { buildHistoryContext } from "./history";
 import { describeSectorFactors } from "./sectorFactors";
 import { findInUniverse } from "@/lib/data";
 import { getStockRating } from "../stockRating";
+import { describeExperience } from "../learning/experienceText";
 import type { RatingSource } from "../ratingLog";
 import { describeRatingForHolding } from "../holdingRating";
 import type { HistoryPeriod } from "../intent";
@@ -115,6 +116,8 @@ export async function buildStockGrounding(
         ).text
       }（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
+    // AI 經驗層：相似案例統計＋相關教訓（learning/experienceText.ts；只有台股）。
+    lines.push(...(await describeExperience(stockRating).catch(() => [] as string[])));
   }
   if (quote.board === "emerging") {
     lines.push(
