@@ -20,6 +20,17 @@ import type { MarketRegime } from "./learning/regime";
  */
 
 export const RATING_LOG_KEY_PREFIX = "rating-log:v1:";
+
+/**
+ * 評等紀錄的 Redis hash key 與 field——唯一定義處（2026-10-06 整合稽核：原本 ratingLog／aiJudge／learningStore／ratingChange
+ * 各自手拼 `${代號}#${結論}`，任何一邊改格式其他邊就讀不到）。學習工作的 learning:v1:eval:{日期} 也用同一個 field。
+ */
+export function ratingLogKey(day: string): string {
+  return `${RATING_LOG_KEY_PREFIX}${day}`;
+}
+export function ratingLogField(symbol: string, code: RatingCode): string {
+  return `${symbol}#${code}`;
+}
 const RATING_LOG_TTL_SECONDS = 400 * 86_400;
 
 export type RatingSource = "today-brief" | "ai-ask" | "stock-button" | "tech-screen" | "other";
@@ -121,8 +132,8 @@ const seen = new Set<string>();
 
 async function writeEntry(entry: RatingLogEntry): Promise<void> {
   if (!kvEnabled || !redis) return;
-  const key = `${RATING_LOG_KEY_PREFIX}${entry.day}`;
-  const field = `${entry.symbol}#${entry.code}`;
+  const key = ratingLogKey(entry.day);
+  const field = ratingLogField(entry.symbol, entry.code);
   const memo = `${key}|${field}`;
   if (seen.has(memo)) return;
   seen.add(memo);
@@ -166,7 +177,7 @@ export async function readRatingLog(from: string, to: string): Promise<RatingLog
   }
   if (days.length === 0) return [];
   const p = redis.pipeline();
-  for (const day of days) p.hgetall(`${RATING_LOG_KEY_PREFIX}${day}`);
+  for (const day of days) p.hgetall(ratingLogKey(day));
   const results = (await p.exec()) as Array<Record<string, unknown> | null>;
   const out: RatingLogEntry[] = [];
   for (const h of results) {

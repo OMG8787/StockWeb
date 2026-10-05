@@ -4,7 +4,7 @@ import { kvEnabled, redis } from "@/lib/data/kv";
 import { fetchNews } from "@/lib/data/news";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { callAiProviders } from "./provider";
-import { buildRatingLogEntry, RATING_LOG_KEY_PREFIX, type RatingLogEntry, type RatingSource } from "./ratingLog";
+import { buildRatingLogEntry, ratingLogField, ratingLogKey, type RatingLogEntry, type RatingSource } from "./ratingLog";
 import { describeSiteRating, type RatingCode } from "./siteRating";
 import type { StockRatingResult } from "./stockRating";
 import { describeExperience } from "./learning/experienceText";
@@ -206,8 +206,8 @@ function attachAiToRatingLog(r: StockRatingResult, j: AiJudgment, source: Rating
   if (!kvEnabled || !redis || j.baseCode !== r.rating.code) return;
   const task = async () => {
     const entry = buildRatingLogEntry(r, source);
-    const key = `${RATING_LOG_KEY_PREFIX}${entry.day}`;
-    const field = `${entry.symbol}#${entry.code}`;
+    const key = ratingLogKey(entry.day);
+    const field = ratingLogField(entry.symbol, entry.code);
     const ai = { code: j.code, delta: j.delta, reason: j.reason, confidence: j.confidence, ...(j.model ? { model: j.model } : {}) };
     try {
       const existing = (await redis!.hget(key, field)) as RatingLogEntry | string | null;

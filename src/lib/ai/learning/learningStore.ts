@@ -4,7 +4,7 @@ import { resolveTwExchange } from "@/lib/data/symbols";
 import { ensureTwUniverseWarm } from "@/lib/data/universe";
 import type { Candle } from "@/lib/data/types";
 import { getTwTradingPhase, taipeiDayKey } from "@/lib/pollingSchedule";
-import { readRatingLog, type RatingLogEntry } from "../ratingLog";
+import { ratingLogField, readRatingLog, type RatingLogEntry } from "../ratingLog";
 import { LESSONS } from "../lessons";
 import { featureBases, similarKey } from "./features";
 import { validateLessons, type LessonValidation } from "./lessonMatch";
@@ -159,7 +159,7 @@ export async function runLearningUpdate(opts: { force?: boolean; now?: Date } = 
     const existing = await readEvalDays(pendDays);
     // 只挑「下一個缺的期間已經可能滿期」的紀錄（平日數當上限，國定假日頂多多抓幾次），避免每次都重抓還沒滿期的。
     const pending = logs.filter((e) => {
-      const prev = existing.get(e.day)?.[`${e.symbol}#${e.code}`];
+      const prev = existing.get(e.day)?.[ratingLogField(e.symbol, e.code)];
       const next = REWARD_HORIZONS.find((h) => !prev?.o[String(h) as "1"]);
       return next != null && weekdaysAfter(e.day, today, e.session === "開盤前", todayClosed) >= next;
     });
@@ -181,7 +181,7 @@ export async function runLearningUpdate(opts: { force?: boolean; now?: Date } = 
       for (const e of pending) {
         const stock = candleMap.get(e.symbol);
         if (!stock || stock.length === 0) continue;
-        const field = `${e.symbol}#${e.code}`;
+        const field = ratingLogField(e.symbol, e.code);
         const rec = toEval(e, existing.get(e.day)?.[field]);
         let changed = false;
         for (const h of REWARD_HORIZONS) {
