@@ -84,9 +84,36 @@ const EXPLICIT_HOLDINGS_SCOPE_PATTERN = /(我的|我).{0,3}(關注|自選|持股
 export const HOLDINGS_TOPIC_PATTERN =
   /(我的|我).{0,3}(關注|自選|持股|持有|庫存|部位)|關注清單|自選股|持股|持有|庫存|手上|成本|損益|賺|賠|虧|停損|止損|停利|止盈|續抱|加碼|減碼|該賣|要賣|賣掉|攤平|套牢|解套/;
 
+// 2026-10-04 使用者回報：先問「2330 最近走勢如何？」，接著問「建議買嗎?」，AI 卻改推薦全市場
+// 其他股票——BUY_IDEA_INTENT_PATTERN 第一段「建議.{0,8}買」把這句是非題當成「建議買什麼」。
+// 全市場推薦必須同時有「要列一份清單」的字眼才算；沒指名對象的買賣是非題見 isBareTradeYesNoQuestion。
+const LIST_REQUEST_PATTERN =
+  /什麼|甚麼|什么|啥|哪|推薦|推荐|名單|名单|清單|清单|標的|标的|(幾|几|一|兩|两|二|三|四|五|\d)\s*(檔|档|支|只)|股票|個股|个股|其他|別的|别的/;
+
 /** 開放式『建議買什麼』且沒有明講只限自己清單 → 範圍是整個市場，不是關注清單。 */
 export function wantsMarketWideBuyIdea(question: string): boolean {
-  return BUY_IDEA_INTENT_PATTERN.test(question) && !EXPLICIT_HOLDINGS_SCOPE_PATTERN.test(question);
+  return (
+    BUY_IDEA_INTENT_PATTERN.test(question) &&
+    LIST_REQUEST_PATTERN.test(question) &&
+    !EXPLICIT_HOLDINGS_SCOPE_PATTERN.test(question)
+  );
+}
+
+// 「建議買嗎」「可以買嗎」「要不要買」「值得買嗎」「該賣嗎」：沒指名對象、也沒要一份清單的短句
+// 買賣是非題。對話裡有正在談的個股時，就是在追問那一檔（ask.ts 先用 resolveFollowupTargets
+// 找回那一檔，找到就不會再走全市場篩選）；對話裡沒有個股時維持原本的全市場行為。
+const TRADE_VERB_PATTERN = /買|买|賣|卖|進場|进场|出場|出场|加碼|加码|減碼|减码|入手|布局|佈局|續抱|续抱|抱著|抱着|停損|停损|停利/;
+const YES_NO_PATTERN = /嗎|吗|要不要|該不該|该不该|能不能|可不可以|值不值得|好不好|適不適合|适不适合|呢|[?？]$/;
+const BARE_TRADE_YESNO_MAX_LEN = 16;
+export function isBareTradeYesNoQuestion(question: string): boolean {
+  const trimmed = question.trim();
+  return (
+    trimmed.length <= BARE_TRADE_YESNO_MAX_LEN &&
+    TRADE_VERB_PATTERN.test(trimmed) &&
+    YES_NO_PATTERN.test(trimmed) &&
+    !LIST_REQUEST_PATTERN.test(trimmed) &&
+    !SCREENING_WORDS_PATTERN.test(trimmed)
+  );
 }
 
 export function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
@@ -179,7 +206,25 @@ export async function resolveFollowupTargets(
     trimmed.length <= VERIFY_OR_TIME_FOLLOWUP_MAX_LEN &&
     VERIFY_OR_TIME_FOLLOWUP_PATTERN.test(trimmed) &&
     !SCREENING_WORDS_PATTERN.test(trimmed);
-  if (!hasPronoun && !bareMetric && !verifyOrTime) return [];
+  const bareTradeYesNo = isBareTradeYesNoQuestion(trimmed);
+  if (!hasPronoun && !bareMetric && !verifyOrTime && !bareTradeYesNo) return [];
+
+  // 只有「建議買嗎」這種是非題觸發時：主詞是使用者自己最近問的那一檔（AI 回答裡可能順帶提到
+  // 別的公司，不能拿來當主詞）；使用者沒講過個股時，只在上一則有提到股票的 AI 回答「恰好只有
+  // 一檔」才沿用——AI 剛列了好幾檔推薦時，「可以買嗎」指的是哪檔不明確，回空讓它走原本的流程。
+  if (bareTradeYesNo && !hasPronoun && !bareMetric && !verifyOrTime) {
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role !== "user") continue;
+      const found = await guessSymbolsFromText(history[i].content);
+      if (found.length > 0) return [{ symbol: found[0].symbol, market: found[0].market }];
+    }
+    for (let i = history.length - 1; i >= 0; i--) {
+      const found = await guessSymbolsFromText(history[i].content);
+      if (found.length === 0) continue;
+      return found.length === 1 ? [{ symbol: found[0].symbol, market: found[0].market }] : [];
+    }
+    return [];
+  }
 
   const ordinal = parseOrdinal(trimmed);
   // 由新到舊找第一則真的有提到股票的訊息（通常是 AI 上一則點名了幾檔的回答）。

@@ -15,6 +15,7 @@ import {
   detectHistoryPeriod,
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
+  isBareTradeYesNoQuestion,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
   HOLDINGS_TOPIC_PATTERN,
   SINGLE_STOCK_ANALYSIS_INTENT_PATTERN,
@@ -54,6 +55,11 @@ export async function answerQuestion(
   let targets: Array<{ symbol: string; market: Market | undefined }> = contextSymbol
     ? [{ symbol: contextSymbol, market: undefined as Market | undefined }]
     : await guessSymbolsFromText(question);
+  // 「建議買嗎」「可以買嗎」這種沒指名對象的買賣是非題：對話裡有正在談的個股就是在追問那一檔，
+  // 必須在 wantsMovers／全市場推薦判斷之前先找回來（2026-10-04 使用者回報的跳題）。
+  if (targets.length === 0 && history.length > 0 && isBareTradeYesNoQuestion(question)) {
+    targets = await resolveFollowupTargets(question, history);
+  }
   // A themed request ("AI概念股有哪些") only makes sense to check when the
   // question didn't already resolve to specific stock(s) — "台積電是不是
   // AI概念股" should still ground 台積電 itself, not switch over to the

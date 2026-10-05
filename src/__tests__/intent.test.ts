@@ -16,7 +16,14 @@ vi.mock("@/lib/ai/symbolResolve", () => ({
   guessSymbolsFromText: (text: string) => guessSymbolsFromText(text),
 }));
 
-import { detectHistoryPeriod, HISTORY_PERIOD_MAX_DAYS, resolveFollowupTargets } from "@/lib/ai/intent";
+import {
+  conversationWantsMovers,
+  detectHistoryPeriod,
+  HISTORY_PERIOD_MAX_DAYS,
+  isBareTradeYesNoQuestion,
+  resolveFollowupTargets,
+  wantsMarketWideBuyIdea,
+} from "@/lib/ai/intent";
 
 // 2026-10-04 是週日；10/3 週六；10/7 週三
 const SUNDAY = { year: 2026, month: 10, day: 4 };
@@ -136,5 +143,60 @@ describe("resolveFollowupTargets 觸發條件", () => {
       { role: "user", content: "好的謝謝" },
     ];
     expect(await resolveFollowupTargets("這檔呢", turns)).toEqual([{ symbol: "2330", market: "TW" }]);
+  });
+});
+
+// 2026-10-04 使用者回報：先問「2330 最近走勢如何？」再問「建議買嗎?」，AI 改推薦全市場其他股票。
+describe("沒指名對象的買賣是非題 vs 全市場推薦", () => {
+  beforeEach(() => {
+    guessSymbolsFromText.mockClear();
+  });
+
+  it("是非題不算全市場推薦；要清單的問法才算", () => {
+    for (const q of ["建議買嗎?", "建議買嗎", "可以買嗎", "要不要買", "值得買嗎？", "該賣嗎", "現在建議進場嗎"]) {
+      expect(wantsMarketWideBuyIdea(q), q).toBe(false);
+      expect(isBareTradeYesNoQuestion(q), q).toBe(true);
+    }
+    for (const q of ["建議買什麼", "下週開盤建議買入的股票。", "建議布局哪些標的", "有什麼可以買的", "建議挑幾檔買"]) {
+      expect(wantsMarketWideBuyIdea(q), q).toBe(true);
+      expect(isBareTradeYesNoQuestion(q), q).toBe(false);
+    }
+    expect(wantsMarketWideBuyIdea("我的關注清單裡建議買哪檔")).toBe(false);
+    expect(isBareTradeYesNoQuestion("還有別的可以買嗎")).toBe(false);
+    expect(isBareTradeYesNoQuestion("有沒有適合明天買的")).toBe(false);
+  });
+
+  it("追問「建議買嗎」→ 取使用者自己問過的那一檔，不取 AI 回答裡順帶提到的其他公司", async () => {
+    guessSymbolsFromText.mockImplementation(async (text: string) =>
+      text.includes("2330")
+        ? [{ symbol: "2330", market: "TW" as const }]
+        : text.includes("精材")
+          ? [{ symbol: "3374", market: "TW" as const }, { symbol: "2330", market: "TW" as const }]
+          : []
+    );
+    const history: ChatTurn[] = [
+      { role: "user", content: "2330 最近走勢如何？" },
+      { role: "assistant", content: "精材與台積電近期走勢偏強" },
+    ];
+    expect(await resolveFollowupTargets("建議買嗎?", history)).toEqual([{ symbol: "2330", market: "TW" }]);
+    guessSymbolsFromText.mockImplementation(async (text: string) =>
+      text.includes("AAA")
+        ? [
+            { symbol: "2330", market: "TW" as const },
+            { symbol: "2454", market: "TW" as const },
+          ]
+        : []
+    );
+  });
+
+  it("使用者沒講過個股、AI 剛列了好幾檔 → 不硬猜，回空（照原本流程）", async () => {
+    const history: ChatTurn[] = [
+      { role: "user", content: "今天強勢股" },
+      { role: "assistant", content: "AAA 強勢股有三檔" },
+    ];
+    expect(await resolveFollowupTargets("可以買嗎", history)).toEqual([]);
+    // 原本的全市場追問行為仍在（沒有個股可追問時）
+    expect(conversationWantsMovers("可以買嗎", history)).toBe(true);
+    expect(conversationWantsMovers("建議買什麼", [])).toBe(true);
   });
 });
