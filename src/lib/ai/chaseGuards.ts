@@ -10,7 +10,8 @@ import { computeIndicatorState } from "@/lib/signals";
  * 收盤出訊號、隔日開盤進場、超額＝減同日 60 檔平均）——每次調整這裡的門檻都要先跑
  * `npx tsx scripts/backtest/run.ts`，數字寫在各常數旁。
  *
- * 只有 ACTIVE_CHASE_GUARDS 裡的規則會真的影響評等；其他規則留著讓回測工具逐條比較。
+ * 只有 ACTIVE_CHASE_GUARDS 裡的規則會被評估（surge 自 2026-10-05 擴大回測後只當風險提示，見 siteRating.ts）；
+ * 其他規則留著讓回測工具逐條比較。
  *
  * 2026-10-05 檢討回測結果（960 筆；基準＝當時 siteRating「建議買進」33 筆，5日超額 -1.47%、跑贏 30%）：
  *  - ① RSI≥75：全樣本最一致的負向訊號（61 筆 -2.58%／跑贏 34%，未觸發 +0.18%），但「建議買進」組裡
@@ -126,7 +127,11 @@ const CHECKS: Record<ChaseGuardId, (m: ChaseMetrics) => string | null> = {
 
 export const ALL_CHASE_GUARDS: ChaseGuardId[] = ["rsi", "surge", "bias", "foreignSell"];
 
-/** 正式採用的規則（依回測結果決定，見 scripts/backtest/run.ts 的輸出）。 */
+/**
+ * 正式採用的規則（依回測結果決定，見 scripts/backtest/run.ts 的輸出）。
+ * 2026-10-05 擴大回測（docs/backtest/2026-10-wide-summary.md）後：surge 仍會評估並記進評等紀錄，
+ * 但在 siteRating.ts 只當「短線波動風險」提示、不再把結論改成等回檔（RISK_NOTE_ONLY_GUARDS）。
+ */
 export const ACTIVE_CHASE_GUARDS: ChaseGuardId[] = ["surge"];
 
 export function evaluateChaseGuards(m: ChaseMetrics, enabled: readonly ChaseGuardId[] = ACTIVE_CHASE_GUARDS): ChaseGuardHit[] {

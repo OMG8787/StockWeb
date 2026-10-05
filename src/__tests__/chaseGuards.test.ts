@@ -77,12 +77,28 @@ describe("evaluateChaseGuards", () => {
 });
 
 describe("computeSiteRating＋追高防護", () => {
-  it("體質過關、價位貼近區間，但近5日急漲 → 等回檔（現價不買），理由講急漲", () => {
+  it("體質過關、價位貼近區間，近5日急漲 → 結論維持建議買進，只附短線波動風險提示（2026-10-05 擴大回測）", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(100.5), chase: { ...calm, ret5: 18 } });
-    expect(r.code).toBe("buy-on-pullback");
-    expect(r.label).toBe("建議等回檔再買（現價不買，等回到 95～100）");
-    expect(r.reason).toContain("近5日已漲 18%");
+    expect(r.code).toBe("buy");
+    expect(r.label).toBe("建議買進");
+    expect(r.riskNote).toContain("短線波動風險：近5日已漲 18%");
+    expect(r.reason).toContain("若要買宜分批、降低部位");
+    // 評等紀錄仍記錄 surge 觸發（給學習循環用）
     expect(r.chaseHits.map((h) => h.id)).toEqual(["surge"]);
+  });
+
+  it("技術面不支持 → 一票否決為先不要買（即使其他面向支持、不支持只有 1 項）", () => {
+    const r = computeSiteRating({ ...facets(["不支持", "支持", "支持", "支持", "中性"]), signals: [], framework: frame(100.5), chase: calm });
+    expect(r.code).toBe("avoid");
+    expect(r.reason).toContain("技術面不支持");
+    expect(r.reason).toContain("一票否決");
+    expect(r.riskNote).toBeNull();
+  });
+
+  it("先不要買時不附追價風險提示", () => {
+    const r = computeSiteRating({ ...facets(["中性", "不支持", "支持", "中性", "中性"]), signals: [], framework: frame(100.5), chase: { ...calm, ret5: 18 } });
+    expect(r.code).toBe("avoid");
+    expect(r.riskNote).toBeNull();
   });
 
   it("沒觸發 → 維持建議買進；沒給 chase（回測基準）→ 不套防護", () => {

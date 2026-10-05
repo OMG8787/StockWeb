@@ -133,8 +133,9 @@ function getStockRatingCached(symbol: string, market?: Market): Promise<StockRat
   // key 刻意不含 market：同一檔從不同入口進來時有的知道市場、有的不知道（問AI關於只帶代號），
   // key 不同就會各算各的、結論可能不一致；台股代號是數字、美股是英文，不會撞。帶台北日期：跨日不沿用。
   return cachedWithDegradedNullTtl<StockRatingResult>(
+    // v3：2026-10-05 擴大回測後：技術面不支持一票否決、急漲改為風險提示不改結論（siteRating.ts）。
     // v2：2026-10-05 加追高防護（chaseGuards.ts）、等回檔字樣改「現價不買，等回到 A～B」。
-    `stock-rating:v2:${sym}:${taipeiDayKey()}`,
+    `stock-rating:v3:${sym}:${taipeiDayKey()}`,
     STOCK_RATING_TTL_MS,
     STOCK_RATING_DEGRADED_TTL_MS,
     () => loadStockRating(sym, market)

@@ -80,6 +80,7 @@ const baseRating: SiteRating = {
   noChase: 40,
   exit: 32.65,
   chaseHits: [],
+  riskNote: null,
 };
 
 describe("describeRatingForHolding（三條路徑共用的含成本評等）", () => {

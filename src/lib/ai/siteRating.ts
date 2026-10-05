@@ -14,6 +14,8 @@ import { ACTIVE_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardHit, type Chas
  * 規則：
  *  1. 體質門檻（跟今日建議原本的門檻同一組常數）：支持面向 ≥ QUALIFY_MIN_SUPPORT、
  *     不支持 ≤ QUALIFY_MAX_AGAINST，且籌碼面不是【不支持】（法人賣超）——沒過 → 建議先不要買。
+ *     技術面【不支持】一票否決（VETO_FACETS，2026-10-05 擴大回測唯一穩健訊號）。
+ *     急漲（surge）只附「短線波動風險」提示、不改結論（RISK_NOTE_ONLY_GUARDS，同一份回測）。
  *  2. 價位：現價下方沒有支撐（破底）→ 建議先不要買；有 RSI 超買／布林上緣這類漲多警訊，
  *     或現價高於買進區間上緣超過 NEAR_ZONE_PCT → 建議等回檔再買（附區間）；否則 → 建議買進。
  *  3. 持有中：買進→可分批加碼；等回檔→續抱；不要買→破底出場、不支持≥2 減碼、其餘續抱不加碼。
@@ -34,6 +36,22 @@ export const HOLDING_LABEL: Record<HoldingCode, string> = {
   reduce: "建議減碼",
   exit: "建議出場",
 };
+
+/**
+ * 一票否決的面向：這些面向是【不支持】就一律「建議先不要買」（不可為建議買進／等回檔），即使其他面向支持、
+ * 不支持總數 ≤ QUALIFY_MAX_AGAINST。
+ * 出處：擴大回測（docs/backtest/2026-10-wide-summary.md，198 檔×99 週、2024-10～2026-08、減同日同市值層級平均）——
+ * 技術面「不支持」10 日 −0.37%、20 日 −0.65%，全期、後半期、大型與小型分層都可靠為負，是唯一穩健的訊號。
+ */
+export const VETO_FACETS = ["技術面"] as const;
+
+/**
+ * 只當「短線波動風險提示」、不改結論的追高防護。
+ * 出處：同上擴大回測——追高組（5日>15% 或 RSI≥75）5 日 −0.23%（不顯著），但 20 日 +1.64%（t=1.90，
+ * 上漲市況與後半期可靠為正）；60 檔小樣本「追高最差」沒有重現，所以急漲不再自動改成等回檔，
+ * 改在理由附提示（評等紀錄的 chaseHits 仍記錄觸發，給學習循環用）。
+ */
+export const RISK_NOTE_ONLY_GUARDS: readonly ChaseGuardId[] = ["surge"];
 
 /** 漲多警訊（跟 actionScoring.ts 的 OVERHEAT_PATTERNS 同義：不是買進理由）。 */
 export const OVERHEAT_SIGNAL_PATTERNS = ["超買", "布林通道上緣"];
@@ -65,8 +83,10 @@ export interface SiteRating {
   zone: { low: number; high: number } | null;
   noChase: number | null;
   exit: number | null;
-  /** 觸發的追高防護（沒觸發是空陣列） */
+  /** 觸發的追高防護（沒觸發是空陣列；只當風險提示的也記在這裡） */
   chaseHits: ChaseGuardHit[];
+  /** 短線波動風險提示（急漲，不改結論）；沒有是 null */
+  riskNote: string | null;
 }
 
 function fmt(n: number): string {
@@ -77,11 +97,14 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   const { facets, supportCount, againstCount, signals, framework } = input;
   const chaseHits = input.chase ? evaluateChaseGuards(input.chase, input.guards ?? ACTIVE_CHASE_GUARDS) : [];
   const foreignSell = chaseHits.find((h) => h.id === "foreignSell");
-  const heatHits = chaseHits.filter((h) => h.id !== "foreignSell");
+  const heatHits = chaseHits.filter((h) => h.id !== "foreignSell" && !RISK_NOTE_ONLY_GUARDS.includes(h.id));
+  const riskHits = chaseHits.filter((h) => RISK_NOTE_ONLY_GUARDS.includes(h.id));
+  const vetoed = facets.filter((f) => f.verdict === "不支持" && VETO_FACETS.some((v) => f.name.startsWith(v)));
   const chipsAgainst = facets.some((f) => f.name === "籌碼面" && f.verdict === "不支持");
   const against = facets.filter((f) => f.verdict === "不支持").map((f) => f.name.replace(/（.*$/, ""));
   const support = facets.filter((f) => f.verdict === "支持").map((f) => f.name.replace(/（.*$/, ""));
-  const qualified = supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST && !chipsAgainst && !foreignSell;
+  const qualified =
+    supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST && !chipsAgainst && !foreignSell && vetoed.length === 0;
   const overheat = signals.filter((s) => s.tone === "up" && OVERHEAT_SIGNAL_PATTERNS.some((p) => s.label.includes(p)));
   const zone = framework?.zone ? { low: framework.zone.low, high: framework.zone.high } : null;
   const noChase = framework?.noChase.price ?? null;
@@ -93,7 +116,9 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   let reason: string;
   if (!qualified) {
     code = "avoid";
-    reason = chipsAgainst
+    reason = vetoed.length > 0
+      ? `${score}；${vetoed.map((f) => f.name.replace(/（.*$/, "")).join("、")}不支持（空方訊號多於多方），本站一票否決、不列為買進（擴大回測：技術面不支持的股票 10 日平均落後同類股約 0.4%）`
+      : chipsAgainst
       ? `${score}；三大法人賣超（籌碼面不支持），本站不列為買進`
       : foreignSell && supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST
         ? `${score}；但${foreignSell.message}，本站不列為買進`
@@ -135,7 +160,14 @@ export function computeSiteRating(input: RatingInput): SiteRating {
     code === "buy" ? "add" : code === "buy-on-pullback" ? "hold" : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
   const holdingLabel = holdingCode === "hold" && code === "avoid" ? "續抱觀察、不加碼" : HOLDING_LABEL[holdingCode];
 
-  return { code, label, holdingCode, holdingLabel, reason, supportCount, againstCount, zone, noChase, exit, chaseHits };
+  // 急漲只附風險提示、不改結論（見 RISK_NOTE_ONLY_GUARDS）；結論是先不要買時不用再提示追價風險。
+  const riskNote =
+    riskHits.length > 0 && code !== "avoid"
+      ? `短線波動風險：${riskHits.map((h) => h.message).join("、")}，5 日內常見回檔，若要買宜分批、降低部位`
+      : null;
+  if (riskNote) reason += `；${riskNote}`;
+
+  return { code, label, holdingCode, holdingLabel, reason, supportCount, againstCount, zone, noChase, exit, chaseHits, riskNote };
 }
 
 // ── 持有中停利提示（2026-10-05 檢討：使用者持股曾經獲利、沒有停利紀律又跌回成本） ──
