@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Facet, Verdict } from "@/lib/ai/actionScoring";
 import type { PriceFramework } from "@/lib/ai/grounding/priceLevels";
 import type { Signal } from "@/lib/signals";
-import { computeSiteRating, describeSiteRating, isRecommendable, SITE_RATING_TITLE } from "@/lib/ai/siteRating";
+import { computeSiteRating, describeSiteRating, isRecommendable, SITE_RATING_TITLE, stripRatingTags } from "@/lib/ai/siteRating";
 
 const NAMES = ["技術面", "籌碼面", "持股結構面（大戶／外資／融資／融券）", "基本面（估值）", "財報面"];
 
@@ -110,5 +110,13 @@ describe("computeSiteRating", () => {
     expect(text).toContain("已持有：「續抱」");
     expect(text).toContain("高於 113.5 不追價");
     expect(text).toContain("買進後跌破 90 出場");
+  });
+});
+
+describe("stripRatingTags", () => {
+  it("拿掉 AI 照抄的「未持有：」「已持有：」標籤，只留評等字樣", () => {
+    expect(stripRatingTags("台光電(2383)：未持有：「建議等回檔再買（區間 5,220～5,645）」")).toBe("台光電(2383)：建議等回檔再買（區間 5,220～5,645）");
+    expect(stripRatingTags("已持有：「續抱」，理由…")).toBe("續抱，理由…");
+    expect(stripRatingTags("沒有標籤的句子")).toBe("沒有標籤的句子");
   });
 });

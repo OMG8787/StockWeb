@@ -6,7 +6,7 @@ import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
-import { SITE_RATING_TITLE } from "./siteRating";
+import { SITE_RATING_TITLE, stripRatingTags } from "./siteRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
@@ -436,7 +436,7 @@ ${actionBriefText}` : "",
         await callAiProviders(system, messages, { timeoutMs: 30000, maxOutputTokens: 2500 })
       : await callAiProviders(system, messages);
   if (result.usedAi) {
-    return { answer: sanitizeLeakedMarkers(result.answer), groundedSymbol, usedAi: true };
+    return { answer: stripRatingTags(sanitizeLeakedMarkers(result.answer)), groundedSymbol, usedAi: true };
   }
 
   return {
