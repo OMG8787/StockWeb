@@ -192,3 +192,13 @@ describe("成績看板統計", () => {
     expect(cases.map((c) => c.kind).sort()).toEqual(["buy-drop", "miss-rise"]);
   });
 });
+
+describe("學習工作：平日數上限", () => {
+  it("盤後評等隔天收盤後算 1 天；今天未收盤不算", async () => {
+    const { weekdaysAfter } = await import("@/lib/ai/learning/learningStore");
+    expect(weekdaysAfter("2026-10-05", "2026-10-06", false, true)).toBe(1);
+    expect(weekdaysAfter("2026-10-05", "2026-10-06", false, false)).toBe(0);
+    expect(weekdaysAfter("2026-10-05", "2026-10-05", true, true)).toBe(1);
+    expect(weekdaysAfter("2026-10-09", "2026-10-12", false, true)).toBe(1); // 跨週末
+  });
+});

@@ -139,27 +139,42 @@ export async function runLearningUpdate(opts: { force?: boolean; now?: Date } = 
   if (!kvEnabled || !redis) return { status: "disabled", reason: "沒有 Redis" };
   const now = opts.now ?? new Date();
   const today = taipeiDayKey(now);
+  const phase = getTwTradingPhase(now);
   if (!opts.force) {
-    const phase = getTwTradingPhase(now);
     if (phase === "intraday" || phase === "after-hours-fixed") return { status: "skipped", reason: "台股交易時段，收盤後才算" };
     if (await redis.get(`${DONE_KEY_PREFIX}${today}`)) return { status: "skipped", reason: "今天已算過" };
   }
   const locked = await redis.set(LOCK_KEY, now.toISOString(), { nx: true, ex: 300 });
   if (!locked) return { status: "skipped", reason: "另一個執行中" };
   try {
+    // 今天還沒收盤（含手動 force）時，今天那根日K是盤中數字，不能拿來結算。
+    const todayClosed = !(phase === "pre-open" || phase === "intraday" || phase === "after-hours-fixed");
+    const settled = (bars: Candle[]) => (todayClosed ? bars : bars.filter((c) => c.time.slice(0, 10) < today));
     const from = addDays(today, -LEARNING_PENDING_LOOKBACK_DAYS);
     const logs = (await readRatingLog(from < LEARNING_START_DAY ? LEARNING_START_DAY : from, today)).filter((e) => e.market === "TW");
     const pendDays = [...new Set(logs.map((e) => e.day))];
     const existing = await readEvalDays(pendDays);
-    const pending = logs.filter((e) => !fullyDone(existing.get(e.day)?.[`${e.symbol}#${e.code}`]));
-    const symbols = [...new Set(pending.map((e) => e.symbol))];
+    // 只挑「下一個缺的期間已經可能滿期」的紀錄（平日數當上限，國定假日頂多多抓幾次），避免每次都重抓還沒滿期的。
+    const pending = logs.filter((e) => {
+      const prev = existing.get(e.day)?.[`${e.symbol}#${e.code}`];
+      const next = REWARD_HORIZONS.find((h) => !prev?.o[String(h) as "1"]);
+      return next != null && weekdaysAfter(e.day, today, e.session === "開盤前", todayClosed) >= next;
+    });
+    // 收盤後同一天前幾次已經抓過的代號（抓不到日K或還沒滿期）不再重抓，讓其他代號輪得到（盤中手動 force 不記）。
+    const triedKey = `${LEARNING_KEY_PREFIX}tried:${today}`;
+    const tried = new Set(todayClosed ? (((await redis.smembers(triedKey).catch(() => [])) as string[]) ?? []) : []);
+    const symbols = [...new Set(pending.map((e) => e.symbol))].filter((s) => !tried.has(s));
     const batch = new Set(symbols.slice(0, LEARNING_MAX_SYMBOLS_PER_RUN));
-    const index = await getTaiexCandles();
+    const index = settled(await getTaiexCandles());
     const writes = new Map<string, Record<string, string>>();
     let updated = 0;
     if (index.length > 0) {
       const candleMap = new Map<string, Candle[]>();
-      for (const sym of batch) candleMap.set(sym, await dailyCandles(sym).catch(() => [] as Candle[]));
+      for (const sym of batch) candleMap.set(sym, settled(await dailyCandles(sym).catch(() => [] as Candle[])));
+      if (todayClosed && batch.size > 0) {
+        await redis.sadd(triedKey, ...([...batch] as [string, ...string[]]));
+        await redis.expire(triedKey, 2 * 86_400);
+      }
       for (const e of pending) {
         const stock = candleMap.get(e.symbol);
         if (!stock || stock.length === 0) continue;
@@ -252,4 +267,15 @@ export function readSimilarTable(): Promise<SimilarTable> {
 /** 目前啟用的依據權重表（LEARNED_WEIGHTS_ENABLED 打開後評等才會讀）。 */
 export function readWeightTable(): Promise<WeightTable> {
   return memoized(WEIGHTS_KEY, () => readJson<WeightTable>(WEIGHTS_KEY, {}));
+}
+
+/** 評等日之後到今天（含今天收盤與否）有幾個平日——交易日數的上限（不扣國定假日）。 */
+export function weekdaysAfter(day: string, today: string, preOpen: boolean, todayClosed: boolean): number {
+  let n = 0;
+  for (let d = preOpen ? day : addDays(day, 1); d <= today; d = addDays(d, 1)) {
+    if (d === today && !todayClosed) break;
+    const wd = new Date(`${d}T00:00:00Z`).getUTCDay();
+    if (wd !== 0 && wd !== 6) n++;
+  }
+  return n;
 }
