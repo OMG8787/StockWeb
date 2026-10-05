@@ -115,9 +115,9 @@ export default async function StockDetailPage({ params, searchParams }: PageProp
         />
       </section>
 
-      <FundamentalsCard fundamentals={fundamentals} currency={quote.currency} />
+      <FundamentalsCard fundamentals={fundamentals} currency={quote.currency} price={quote.price} />
 
-      <EarningsCard earnings={earnings} currency={quote.currency} />
+      <EarningsCard earnings={earnings} currency={quote.currency} market={quote.market} />
 
       {/* 美股限定：Reddit／X／新聞社群情緒（額度極少，只讀批次快照，見 lib/data/sentiment.ts） */}
       {quote.market === "US" && (

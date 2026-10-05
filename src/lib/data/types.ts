@@ -179,9 +179,15 @@ export interface TaifexFuturesQuote {
 export interface Fundamentals {
   peRatio?: number;
   dividendYield?: number;
+  /** US：上游直接給的市值。TW 沒有這個欄位，市值要用 resolveMarketCap(現價×sharesOutstanding) 算。 */
   marketCap?: number;
   /** 股價淨值比 (P/B) */
   pbRatio?: number;
+  /**
+   * TW only：已發行普通股數（不含特別股），來源 TWSE／TPEx 公司基本資料（見 twCompanyProfile.ts）。
+   * 市值一律透過 marketCap.ts 的 resolveMarketCap() 取用，不要各呼叫端自己乘。
+   */
+  sharesOutstanding?: number;
 }
 
 /**
@@ -297,4 +303,9 @@ export interface Earnings {
   epsSurprisePercent?: number;
   /** US only：下次公布財報的日期（ISO 格式） */
   nextEarningsDate?: string;
+  /**
+   * TW only：下一份財報的「法定最晚公告期限」（不是公司公告的確切日期，台股沒有免費的
+   * 統一預定公布日資料），見 twReportDeadline.ts。date＝ISO，period 例如「115年Q3」「115年度年報」。
+   */
+  twReportDeadline?: { date: string; period: string };
 }

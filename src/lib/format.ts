@@ -53,7 +53,13 @@ export function formatVolume(value: number, market: "TW" | "US" = "US"): string 
 }
 
 export function formatMarketCap(value: number, currency: string): string {
-  const symbol = currency === "TWD" ? "NT$" : "$";
+  // 台股市值用在地慣用的兆／億（2026-10-05 台股才開始有市值；美股維持 T/B/M 不變）。
+  if (currency === "TWD") {
+    if (value >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(2)}兆元`;
+    if (value >= 100_000_000) return `${(value / 100_000_000).toFixed(value >= 10_000_000_000 ? 0 : 1)}億元`;
+    return `${(value / 10_000).toFixed(0)}萬元`;
+  }
+  const symbol = "$";
   if (value >= 1_000_000_000_000) return `${symbol}${(value / 1_000_000_000_000).toFixed(2)}T`;
   if (value >= 1_000_000_000) return `${symbol}${(value / 1_000_000_000).toFixed(2)}B`;
   if (value >= 1_000_000) return `${symbol}${(value / 1_000_000).toFixed(1)}M`;

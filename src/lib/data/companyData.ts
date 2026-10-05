@@ -21,6 +21,8 @@ import { fetchEmergingMonthlyRevenueAll, fetchEmergingQuarterlyEpsAll } from "./
 import { fetchUsEarnings, fetchUsFundamentals } from "./us";
 import { fetchFinnhubEarnings, fetchFinnhubFundamentals, isFinnhubConfigured } from "./finnhub";
 import { mergeTwMaps } from "./twMergedMaps";
+import { getTwCompanyProfile } from "./twCompanyProfile";
+import { nextTwReportDeadline } from "./twReportDeadline";
 import { detectMarket, normalizeSymbol } from "./symbols";
 
 // 2026-09-20：從 5 分鐘拉回 30 分鐘。這裡曾經從「1小時」改成「5分鐘」是為了
@@ -76,8 +78,15 @@ export async function getFundamentals(symbolInput: string, marketHint?: Market):
   const market = marketHint ?? detectMarket(symbol);
   try {
     if (market === "TW") {
-      const map = await getTwFundamentalsMap();
-      return map.get(symbol) ?? null;
+      // 股數（算市值用，見 marketCap.ts）另一份整包；任一份失敗不拖垮另一份。
+      const [map, profile] = await Promise.all([
+        getTwFundamentalsMap().catch(() => new Map<string, Fundamentals>()),
+        getTwCompanyProfile(symbol),
+      ]);
+      const base = map.get(symbol);
+      const sharesOutstanding = profile?.sharesOutstanding;
+      if (!base && sharesOutstanding == null) return null;
+      return { ...base, ...(sharesOutstanding != null ? { sharesOutstanding } : {}) };
     }
     return await cached(
       `fundamentals:US:${symbol}`,
@@ -108,7 +117,7 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
   const market = marketHint ?? detectMarket(symbol);
   try {
     if (market === "TW") {
-      const [revenueMap, epsMap] = await Promise.all([
+      const [revenueMap, epsMap, profile] = await Promise.all([
         cachedMap(
           "earnings:TW:revenue:v2",
           EARNINGS_TTL_MS,
@@ -121,11 +130,14 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
           () => mergeTwMaps(fetchTwseQuarterlyEpsAll, fetchTpexQuarterlyEpsAll, fetchEmergingQuarterlyEpsAll),
           { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
         ),
+        getTwCompanyProfile(symbol),
       ]);
       const revenue = revenueMap.get(symbol);
       const eps = epsMap.get(symbol);
-      if (!revenue && !eps) return null;
-      return { ...revenue, ...eps };
+      // 法定最晚公告期限：要知道公司類別（金控／金融保險／外國企業期限不同），取不到基本資料（ETF 等）就不給。
+      const twReportDeadline = profile ? nextTwReportDeadline(profile.reportCategory, eps?.quarterlyEpsPeriod) : undefined;
+      if (!revenue && !eps && !twReportDeadline) return null;
+      return { ...revenue, ...eps, ...(twReportDeadline ? { twReportDeadline } : {}) };
     }
     return await cached(
       `earnings:US:${symbol}`,

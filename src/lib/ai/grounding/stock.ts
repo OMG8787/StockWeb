@@ -19,6 +19,8 @@ async function fetchStockNews(quote: { symbol: string; market: Market }, newsQue
   return dedupeNews([...google, ...finnhub]);
 }
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
+import { resolveMarketCap } from "@/lib/data/marketCap";
+import { formatTwReportDeadline } from "@/lib/data/twReportDeadline";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState, describeRecentCrosses, RECENT_CROSSES_TITLE } from "./indicators";
 import { getMarketStatus } from "@/lib/marketStatus";
@@ -137,7 +139,9 @@ export async function buildStockGrounding(
     if (fundamentals.peRatio != null) parts.push(`本益比 ${fundamentals.peRatio}`);
     if (fundamentals.pbRatio != null) parts.push(`股價淨值比 ${fundamentals.pbRatio}`);
     if (fundamentals.dividendYield != null) parts.push(`殖利率 ${fundamentals.dividendYield}%`);
-    if (fundamentals.marketCap != null) parts.push(`市值 ${formatMarketCap(fundamentals.marketCap, quote.currency)}`);
+    // 美股＝上游市值；台股＝現價×已發行普通股數（見 data/marketCap.ts）。
+    const marketCap = resolveMarketCap(fundamentals, quote.price);
+    if (marketCap != null) parts.push(`市值 ${formatMarketCap(marketCap, quote.currency)}`);
     if (parts.length > 0) lines.push(`基本面：${parts.join("；")}`);
   }
 
@@ -158,6 +162,10 @@ export async function buildStockGrounding(
     }
     if (earnings.nextEarningsDate) {
       parts.push(`下次公布財報日期約 ${earnings.nextEarningsDate}`);
+    }
+    if (earnings.twReportDeadline) {
+      // 台股沒有公司公告的預定日，這是法定最晚期限，公司可能提早公布；台股也沒有分析師共識，不能談「較市場預期」。
+      parts.push(`下次財報${formatTwReportDeadline(earnings.twReportDeadline)}（法定期限，非公司公告日，可能提早公布）`);
     }
     if (parts.length > 0) lines.push(`財報：${parts.join("；")}`);
   }
