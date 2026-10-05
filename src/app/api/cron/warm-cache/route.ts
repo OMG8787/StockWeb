@@ -16,6 +16,7 @@ import { getMarketHistory } from "@/lib/data/marketHistory";
 import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
+import { runLearningUpdate } from "@/lib/ai/learning/learningStore";
 
 // Triggered every few minutes by an external scheduler (see
 // .github/workflows/warm-cache.yml — Vercel's own Cron is limited to once a
@@ -126,6 +127,9 @@ export async function GET(req: NextRequest) {
       warm("chips", getChips(WARM_PROBE_SYMBOL, "TW")),
       warm("earnings", getEarnings(WARM_PROBE_SYMBOL, "TW")),
       warm("announcements", getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW")),
+      // AI 學習循環的每日工作（評等紀錄算獎勵、更新權重／相似案例／成績看板）：盤中與當天已做完時立刻略過，
+      // 實際只有收盤後第一次預熱會跑（一天一次，見 learning/learningStore.ts）。
+      warm("learning (daily)", runLearningUpdate().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`)),
     ]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finishedInTime = await Promise.race([
