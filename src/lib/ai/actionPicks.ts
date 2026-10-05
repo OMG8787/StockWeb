@@ -151,11 +151,39 @@ export function parseActionBriefJson(answer: string): ActionBriefAiJson | null {
   }
 }
 
+/**
+ * 找 AI JSON 裡這一檔的理由／風險：key 可能是「2527」「宏璟」「宏璟(2527)」，picks 也可能被寫成陣列
+ * [{symbol, reason, risk}]（正式站實測 key 對不上時整段理由退回程式版）。
+ */
+function aiPickText(ai: ActionBriefAiJson | null, p: { symbol: string; name: string }): { reason?: string; risk?: string } | undefined {
+  const picks = ai?.picks as unknown;
+  if (!picks || typeof picks !== "object") return undefined;
+  const sym = p.symbol.toUpperCase();
+  const entries: Array<[string, unknown]> = Array.isArray(picks)
+    ? picks.map((x) => [String((x as Record<string, unknown>)?.symbol ?? (x as Record<string, unknown>)?.name ?? ""), x])
+    : Object.entries(picks as Record<string, unknown>);
+  const hit = entries.find(([k]) => k.trim().toUpperCase() === sym) ?? entries.find(([k]) => k.toUpperCase().includes(sym) || k.includes(p.name));
+  const v = hit?.[1];
+  return v && typeof v === "object" ? (v as { reason?: string; risk?: string }) : undefined;
+}
+
 /** 等回檔那組的小標（AI 版與 fallback 共用，畫面上要明講現價不買）。 */
 export const PULLBACK_GROUP_TITLE = "等回檔名單（現價不買，等回到區間再分批）";
 
 const str = (v: unknown, max = 160) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ").slice(0, max) : "");
 const sentence = (s: string) => s.replace(/[。.]+$/, "");
+
+/** AI 的「不建議追」一句：去掉開頭重複的名稱代號與「面向支持數為N」這種跟程式文字重複的片段。 */
+function notChaseText(ai: ActionBriefAiJson | null, nc: NotChasePick): string {
+  let t = str(ai?.notChase, 80);
+  for (const prefix of [`${nc.name}(${nc.symbol})`, `${nc.name}（${nc.symbol}）`, nc.name]) {
+    if (t.startsWith(prefix)) {
+      t = t.slice(prefix.length).replace(/^\s*[：:，,]?\s*/, "");
+      break;
+    }
+  }
+  return sentence(t.replace(/^[^，,。]*面向支持數(?:為|只有)?\s*\d+\s*[，,、]?/, "").trim());
+}
 
 export interface RenderInput {
   stance: Pick<TradingStance, "briefMode" | "nextOpenLabel">;
@@ -184,7 +212,7 @@ export function groupedPickLines(
   const buy = applyAiOrder(picks.filter((p) => p.code === "buy").slice(0, PICK_GROUP_LIMIT), ai?.order);
   const pullback = applyAiOrder(picks.filter((p) => p.code === "buy-on-pullback").slice(0, PICK_GROUP_LIMIT), ai?.order);
   const pickLine = (p: ActionBriefPick) => {
-    const t = ai?.picks?.[p.symbol] ?? ai?.picks?.[p.symbol.toUpperCase()];
+    const t = aiPickText(ai, p);
     const reason = str(t?.reason) || p.reason;
     const risk = str(t?.risk);
     // AI 看法接在同一個條列尾端（MarkdownLite 不支援巢狀清單，另起一行會被當成另一檔）。
@@ -228,7 +256,7 @@ export function renderActionBrief(input: RenderInput): string {
   out.push(
     nc
       ? `**不建議追**：${nc.name}(${nc.symbol}) 今日 ${nc.changePercent >= 0 ? "+" : ""}${nc.changePercent}%，但面向支持數只有 ${nc.supportCount}${
-          str(ai?.notChase) ? `，${sentence(str(ai?.notChase))}` : nc.weakFacets.length ? `（${nc.weakFacets.join("、")}沒跟上）` : ""
+          notChaseText(ai, nc) ? `，${notChaseText(ai, nc)}` : nc.weakFacets.length ? `（${nc.weakFacets.join("、")}沒跟上）` : ""
         }。`
       : input.gainersAvailable
         ? "**不建議追**：漲幅榜前段體質大多說得過去。"

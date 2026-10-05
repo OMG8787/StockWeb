@@ -121,3 +121,19 @@ describe("renderActionBrief", () => {
     );
   });
 });
+
+describe("AI JSON 容錯", () => {
+  it("picks 的 key 寫成「名稱(代號)」或陣列也對得上；不建議追去掉重複名稱", () => {
+    const base = { stance, marketLine: "x", buy: [pick("8", "buy")], pullback: [], gainersAvailable: true };
+    const t1 = renderActionBrief({ ...base, notChase: null, ai: { picks: { "股8(8)": { reason: "AI理由甲" } } } as never });
+    expect(t1).toContain("理由：AI理由甲");
+    const t2 = renderActionBrief({ ...base, notChase: null, ai: { picks: [{ symbol: "8", reason: "AI理由乙" }] } as never });
+    expect(t2).toContain("理由：AI理由乙");
+    const t3 = renderActionBrief({
+      ...base,
+      notChase: { symbol: "4174", name: "浩鼎", changePercent: 10, supportCount: 0, weakFacets: [] },
+      ai: { notChase: "浩鼎(4174)面向支持數為0，技術面、籌碼面皆未跟上" },
+    });
+    expect(t3).toContain("**不建議追**：浩鼎(4174) 今日 +10%，但面向支持數只有 0，技術面、籌碼面皆未跟上。");
+  });
+});

@@ -133,8 +133,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
     // v8：2026-10-05 名單分「建議買進／等回檔（現價不買）」兩組，picks 多了 code。
     // v9：2026-10-05 加「我的看法」排序與把握程度、措辭不暗示贏大盤。
     // v10：14:30 後改「明日操作建議」（開盤＋盤中操作計畫）。
-    // v11：2026-10-05 名單（分組上限、互斥）改由程式決定、AI 回 JSON 只寫解說，加 AI 看法行。
-    `action-brief:v11:${taipeiDayKey()}:${stance.briefMode}`,
+    // v12：AI JSON picks key 容錯。v11：2026-10-05 名單（分組上限、互斥）改由程式決定、AI 回 JSON 只寫解說，加 AI 看法行。
+    `action-brief:v12:${taipeiDayKey()}:${stance.briefMode}`,
     ACTION_BRIEF_TTL_MS,
     async () => {
       const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable } = await buildActionGrounding();
