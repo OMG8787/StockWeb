@@ -1,5 +1,6 @@
-import { cached } from "@/lib/data/cache";
-import { AI_SWR_MS } from "@/lib/data/swrPolicy";
+import { slotCached } from "./slotCache";
+import { dailyBriefSlot } from "./aiSchedule";
+import { premiumFellBack } from "./gemini";
 import { getIndices, getTaifexNightFutures, searchStocks, getMultiSignalStocks, getChips, getChipsRatiosBatch, getMacroSnapshot } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
 import { RULE_MACRO_DATA_COMPACT, RULE_COPY_NUMBERS_EXACTLY, RULE_ZH_TW_ONLY, RULE_CLOSED_DAY_WORDING } from "./compactRules";
@@ -27,6 +28,8 @@ export interface DailyBrief {
   generatedAt: string;
   /** 產生這份快報的模型（AI 失敗走資料整理時沒有） */
   model?: ModelInfo;
+  /** 要用較強模型、但額度用完或暫時無法使用而改用其他模型（卡片標示用） */
+  fellBackToLite?: boolean;
 }
 
 // Originally date-keyed and cached for ~25h (generated once each morning by
@@ -50,14 +53,15 @@ export interface DailyBrief {
 // 外部AI（成本、延遲都不小），5分鐘的 warm-cache 排程若每次都重算，是 Vercel
 // 用量吃緊後盤點出來的浪費源頭之一，理由同 lib/data/index.ts 的 FUNDAMENTALS_TTL_MS
 // 說明；30分鐘仍然遠比3小時的舊版本新鮮很多。
-// 2026-10-04：使用者要求縮短為10分鐘（輸出改精簡格式後單次AI成本也較低）。
-const BRIEF_TTL_MS = 10 * 60_000;
+// 2026-10-04：使用者要求縮短為10分鐘。
+// 2026-10-05：改成只在 aiSchedule.ts 的關鍵時點重寫（較強模型每日額度有限），不再用滾動 TTL。
 // v2: dropped the per-date key when this moved to a rolling TTL；v3：參考資料新增大戶／外資／融資比例區塊
 // v4：2026-10-04 輸出改成精簡格式（一句總結＋台美分開條列＋一句風險），作廢舊的長篇快取
 // v5：持股結構資訊行加上券資比；v6：第四項改成融券使用率（融券÷融券限額）
 // v7：2026-10-05 補「同一個數字只寫一次」規則（BRIEF_RULE_NO_REPEAT_NUMBER），作廢舊快取
 // v8：2026-10-05 快報改成「今日重點＋現象→原因→後續＋明天要留意」600~900字（使用者嫌太簡短、沒因果）
-const BRIEF_CACHE_KEY = "daily-brief:v8";
+// v9：2026-10-05 改成依時點重寫（slotCache.ts）
+const BRIEF_CACHE_KEY = "daily-brief:v9";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -176,7 +180,8 @@ const BRIEF_SYSTEM_PROMPT = [
 ].join("\n");
 
 export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
-  return cached(BRIEF_CACHE_KEY, BRIEF_TTL_MS, async () => {
+  // 2026-10-05：只在 aiSchedule.ts 的時點用較強模型重寫（slotCache.ts），其間沿用最近一次版本。
+  return slotCached(BRIEF_CACHE_KEY, dailyBriefSlot(), async (): Promise<DailyBrief> => {
     const [indices, taifexFutures, macro, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews] =
       await Promise.all([
         getIndices(),
@@ -249,6 +254,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       maxOutputTokens: 6000,
       // 每天少量、價值高：Gemini 用非 lite 思考模型（每日配額、思考模型最多用 65% 時間，逾時／額度用完退回 lite，見 gemini.ts）。
       geminiTier: "premium",
+      geminiPurpose: "brief",
     });
 
     if (result.usedAi) {
@@ -256,7 +262,7 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       // 存檔作為 AI 學習資料（不等待、失敗不影響快報；一天最多寫 2 次，見 briefArchive.ts）
       const regime = await getMarketRegime().catch(() => null);
       archiveBrief({ text: result.answer, generatedAt, model: result.model ?? null, regime: regime ? REGIME_LABEL[regime] : null, grounding });
-      return { text: result.answer, usedAi: true, generatedAt, model: modelInfo(result.model) };
+      return { text: result.answer, usedAi: true, generatedAt, model: modelInfo(result.model), fellBackToLite: premiumFellBack(result.model) };
     }
 
     // AI 掛掉時的資料整理，跟 AI 版同一種骨架（今日重點／台股／美股／明天要留意），只放客觀數字。
@@ -284,5 +290,5 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
     ].join("\n");
 
     return { text: fallback, usedAi: false, generatedAt: new Date().toISOString() };
-  }, { forceRefresh, staleWhileRevalidateMs: AI_SWR_MS });
+  }, { forceRefresh });
 }

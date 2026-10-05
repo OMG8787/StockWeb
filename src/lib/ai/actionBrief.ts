@@ -1,5 +1,6 @@
-import { cached } from "@/lib/data/cache";
-import { AI_SWR_MS } from "@/lib/data/swrPolicy";
+import { slotCached } from "./slotCache";
+import { actionBriefSlot } from "./aiSchedule";
+import { premiumFellBack } from "./gemini";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { buildPlan, parseActionBriefJson, renderActionBrief, type ActionBriefPick } from "./actionPicks";
@@ -8,7 +9,6 @@ import { describeAiView, type AiJudgment } from "./learning/aiAdjust";
 import { guardAnswerNumbers } from "./numberGuard";
 import { modelInfo, type ModelInfo } from "./modelName";
 import { getTradingStance, type BriefMode, type TradingStance } from "./tradingStance";
-import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { HOLDING_STRUCTURE_FACET_NAME } from "./actionScoring";
 import { RULE_MACRO_DATA_COMPACT, RULE_COPY_NUMBERS_EXACTLY, RULE_ZH_TW_ONLY, RULE_CLOSED_DAY_WORDING } from "./compactRules";
 import {
@@ -31,6 +31,8 @@ export interface ActionBrief {
   model?: ModelInfo;
   /** 名單（程式依本站綜合評等決定，AI 問答全市場推薦也讀這份） */
   picks: ActionBriefPick[];
+  /** 要用較強模型、但額度用完或暫時無法使用而改用其他模型（卡片標示用） */
+  fellBackToLite?: boolean;
 }
 
 // 2026-09-20：拉長回 30 分鐘——這是一段給人「一天看幾次」的摘要性建議文字，
@@ -38,8 +40,8 @@ export interface ActionBrief {
 // 抓K線、還要呼叫一次外部AI），5分鐘的 warm-cache 排程若每次都重算整段（含
 // AI呼叫），是 Vercel 用量吃緊後盤點出來的浪費源頭之一，理由同
 // lib/data/index.ts 的 FUNDAMENTALS_TTL_MS 說明。
-// 2026-10-04：使用者要求縮短為 10 分鐘（輸出改精簡格式後單次 AI 成本也較低）。
-const ACTION_BRIEF_TTL_MS = 10 * 60_000;
+// 2026-10-04：使用者要求縮短為 10 分鐘。
+// 2026-10-05：改成只在 aiSchedule.ts 的關鍵時點重寫（較強模型每日額度有限），不再用滾動 TTL。
 
 // ── 今日建議系統提示詞（具名常數，見 CLAUDE.md 規則九）──
 // 2026-10-04 使用者要求「更精簡且明確」：輸出從 350-550 字（實測常到 1,100-1,250 字、每檔一大段）
@@ -122,7 +124,7 @@ export { NOT_CHASE_TITLE, groupedPickLines, type ActionBriefPick } from "./actio
 
 export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {
   const stance = getTradingStance();
-  return cached(
+  return slotCached(
     // v2：輸出格式從「3-5條值得留意的重點」改成「多面向驗證過的今日建議買進清單」，
     // 舊格式的快取內容跟新的頁面說明對不起來，換 key 直接作廢舊結果。
     // v3：體檢表新增「持股結構面（大戶／外資／融資）」，作廢舊快取。
@@ -135,8 +137,9 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
     // v10：14:30 後改「明日操作建議」（開盤＋盤中操作計畫）。
     // v13：2026-10-05 果斷二分：只剩「建議買進」（最多 5 檔）與「先不要買／不建議追」、弱市況頁首提示。
     // v12：AI JSON picks key 容錯。v11：2026-10-05 名單（分組上限、互斥）改由程式決定、AI 回 JSON 只寫解說，加 AI 看法行。
-    `action-brief:v13:${taipeiDayKey()}:${stance.briefMode}`,
-    ACTION_BRIEF_TTL_MS,
+    // v14：2026-10-05 改成只在 aiSchedule.ts 的時點用較強模型重寫（slotCache.ts），其間沿用最近一次版本。
+    "action-brief:v14",
+    actionBriefSlot(),
     async () => {
       const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote } = await buildActionGrounding();
       const sysPrompt = buildActionSystemPrompt(stance);
@@ -149,6 +152,7 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
           maxOutputTokens: 1600,
           // 每天少量、價值高：用非 lite 思考模型（有每日配額，用完自動退回 lite，見 gemini.ts）。
           geminiTier: "premium",
+          geminiPurpose: "action",
         }),
         getAiJudgments(
           ratedPicks.map((p) => p.rating),
@@ -181,9 +185,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
       // AI 寫的理由裡若有價位數字，跟程式價位比對（見 numberGuard.ts）。
       const guarded = guardAnswerNumbers(text, grounding);
       if (guarded.fixes.length > 0) console.warn("[action-brief] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-      return { ...base, text: guarded.text, usedAi: !!ai, generatedAt: new Date().toISOString(), ...(ai ? { model: modelInfo(result.model) } : {}) };
+      return { ...base, text: guarded.text, usedAi: !!ai, generatedAt: new Date().toISOString(), ...(ai ? { model: modelInfo(result.model), fellBackToLite: premiumFellBack(result.model) } : {}) };
     },
-    // 過期先回舊建議、背景重算（寬限期見 swrPolicy.ts），訪客不用現場等 AI。
-    { forceRefresh, staleWhileRevalidateMs: AI_SWR_MS }
+    { forceRefresh }
   );
 }

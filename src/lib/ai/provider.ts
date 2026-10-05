@@ -40,6 +40,8 @@ export interface CallAiProvidersOptions {
   /** Gemini 模型等級（見 gemini.ts）：只有每天少量、價值高的工作（今日快報、今日建議、AI 判斷層）設 "premium"，
    *  其餘預設 standard（lite，量大穩定）。2026-10-05 實測非 lite 模型免費層每模型每天只有 20 次。 */
   geminiTier?: "standard" | "premium";
+  /** premium 的用途（配額優先順序：action 今日建議＞brief 快報＞judge AI 判斷，見 gemini.ts GEMINI_PURPOSE_CAP）。 */
+  geminiPurpose?: "action" | "brief" | "judge";
   /** 預設 true：輸出做繁中把關（簡體／日文新字體一對一轉回繁體，成段日文
    *  假名視為不合格改用下一家）。要求模型「原封不動抄回原文」的呼叫端要設
    *  false，否則原文裡的簡體字被轉掉會對不上。 */
@@ -139,6 +141,7 @@ export async function callAiProviders(
   const deadline = Date.now() + (options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS);
   const simpleTask = options.simpleTask ?? false;
   const geminiTier = options.geminiTier;
+  const geminiPurpose = options.geminiPurpose;
   const chain = options.forceProvider
     ? [ADAPTERS[options.forceProvider]].filter(
         (a) => a.isConfigured() && (options.ignoreSizeLimit || a.canHandle(system, turns, maxOutputTokens))
@@ -155,7 +158,7 @@ export async function callAiProviders(
     const timeoutMs = Math.min(adapter.preferredTimeoutMs(callerTimeoutMs), remaining);
     const startedAt = Date.now();
     try {
-      const { text: raw, model } = await adapter.call(system, turns, { timeoutMs, maxOutputTokens, simpleTask, geminiTier });
+      const { text: raw, model } = await adapter.call(system, turns, { timeoutMs, maxOutputTokens, simpleTask, geminiTier, geminiPurpose });
       const checked = options.normalizeZhTw === false ? { text: raw, fixedCount: 0 } : normalizeZhTw(raw);
       if ("rejectReason" in checked && checked.rejectReason) {
         console.error(`[ai] ${adapter.label} output rejected:`, checked.rejectReason);

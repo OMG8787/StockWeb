@@ -55,6 +55,13 @@ export const GEMINI_STANDARD_PREFERRED = [
 export const GEMINI_PREMIUM_PREFERRED = ["gemini-flash-latest", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"] as const;
 /** 免費層每個非 lite 模型每天 20 次；留 2 次安全邊際。計數日以太平洋時間為準（Google 配額在太平洋時間午夜重置）。 */
 export const GEMINI_PREMIUM_DAILY_CAP = 18;
+/**
+ * 配額不足時的優先順序（2026-10-05 使用者確認）：今日建議 ＞ 快報 ＞ AI 判斷。
+ * 每個模型當天已用次數超過該用途的上限就不再給它用（留給優先的用途），改試下一個模型、最後退回 lite。
+ * 排程估算：今日建議交易日約 14 次（aiSchedule.ts）、快報 6 次、AI 判斷 ≤ 10 次，3 個非 lite 模型共 54 次夠用。
+ */
+export type GeminiPremiumPurpose = "action" | "brief" | "judge";
+export const GEMINI_PURPOSE_CAP: Record<GeminiPremiumPurpose, number> = { action: 18, brief: 14, judge: 8 };
 /** 思考模型的思考等級（Gemini 3 系列 generationConfig.thinkingConfig.thinkingLevel）。 */
 export const GEMINI_THINKING_LEVEL = "low";
 /** Gemini 2.5 系列用 thinkingBudget（token）。 */
@@ -73,6 +80,11 @@ const GEMINI_MIN_ATTEMPT_MS = 4000;
 export const GEMINI_EXCLUDED_MODEL_PATTERN =
   /tts|image|embedding|vision|audio|live|aqa|robotics|computer-use|omni|transcribe|lyria|nano-banana|deep-research|antigravity/i;
 export const GEMINI_LITE_PATTERN = /lite/i;
+
+/** 要求較強模型（premium）時，實際回答的不是非 lite 思考模型＝退回了（卡片標示用）。 */
+export function premiumFellBack(modelId: string | null | undefined): boolean {
+  return !!modelId && !isGeminiThinkingModel(modelId);
+}
 
 /** 非 lite 的 flash＝思考模型（要加 thinkingConfig、受每日配額限制）。 */
 export function isGeminiThinkingModel(model: string): boolean {
@@ -130,20 +142,31 @@ function pacificDay(now = new Date()): string {
 const quotaKey = (model: string) => `gemini:calls:${pacificDay()}:${model}`;
 const memQuota = new Map<string, number>();
 
-/** 非 lite 模型先佔一次名額（INCR 原子操作）；超過上限回 false。Redis 失敗時退回記憶體計數。 */
-async function reserveThinkingCall(model: string): Promise<boolean> {
+/** 依用途的優先順序決定能不能再用（純函式，有測試）：已用次數（含這次）≤ 該用途上限。 */
+export function premiumCallAllowed(countIncludingThis: number, purpose: GeminiPremiumPurpose = "action"): boolean {
+  return countIncludingThis <= Math.min(GEMINI_PREMIUM_DAILY_CAP, GEMINI_PURPOSE_CAP[purpose]);
+}
+
+/** 非 lite 模型先佔一次名額（INCR 原子操作）；超過該用途上限就退還名額並回 false。Redis 失敗時退回記憶體計數。 */
+async function reserveThinkingCall(model: string, purpose: GeminiPremiumPurpose): Promise<boolean> {
   const key = quotaKey(model);
   if ((memQuota.get(key) ?? 0) > GEMINI_PREMIUM_DAILY_CAP) return false;
   let n: number;
+  let viaRedis = false;
   try {
     if (!kvEnabled || !redis) throw new Error("no kv");
     n = await redis.incr(key);
+    viaRedis = true;
     if (n === 1) await redis.expire(key, 2 * 86400);
   } catch {
     n = (memQuota.get(key) ?? 0) + 1;
     memQuota.set(key, n);
   }
-  return n <= GEMINI_PREMIUM_DAILY_CAP;
+  if (premiumCallAllowed(n, purpose)) return true;
+  // 沒用到就退還，免得低優先用途把計數灌高、擋到高優先用途。
+  if (viaRedis && redis) await redis.decr(key).catch(() => {});
+  else memQuota.set(key, n - 1);
+  return false;
 }
 
 /** 收到 429（今天額度用完）：把計數直接設滿，其他執行個體也不再嘗試。 */
@@ -198,6 +221,8 @@ export interface GeminiCallOptions {
   maxOutputTokens?: number;
   /** 模型等級（見上方說明），預設 standard（lite）。 */
   tier?: GeminiTier;
+  /** premium 的用途（配額優先順序，見 GEMINI_PURPOSE_CAP），預設 action。 */
+  purpose?: GeminiPremiumPurpose;
 }
 
 /** generationConfig（純函式，有測試）：思考模型加 thinkingConfig，maxOutputTokens 另加思考預算。 */
@@ -285,7 +310,7 @@ export async function askGeminiWithModel(
     const thinking = isGeminiThinkingModel(model);
     const remaining = (thinking ? thinkingDeadline : deadline) - Date.now();
     if (remaining < GEMINI_MIN_ATTEMPT_MS) continue;
-    if (thinking && !process.env.GEMINI_MODEL && !(await reserveThinkingCall(model))) {
+    if (thinking && !process.env.GEMINI_MODEL && !(await reserveThinkingCall(model, options.purpose ?? "action"))) {
       lastError = new Error(`Gemini（${model}）今日免費額度已用到上限 ${GEMINI_PREMIUM_DAILY_CAP} 次`);
       continue;
     }

@@ -10,6 +10,7 @@ import type { StockRatingResult } from "./stockRating";
 import { describeExperience } from "./learning/experienceText";
 import { REGIME_LABEL } from "./learning/regime";
 import { parseAiJudgments, type AiJudgment } from "./learning/aiAdjust";
+import { AI_JUDGE_DAILY_CALL_LIMIT } from "./aiSchedule";
 
 /**
  * AI 判斷層（學習循環第二階段，有 I/O）：程式評等產生後，讓 AI 依新聞、產業、大盤情緒、相似案例、教訓，
@@ -118,6 +119,7 @@ async function judgeBatch(rs: StockRatingResult[], day: string): Promise<Map<str
     simpleTask: true,
     // 每日批次、價值高：非 lite 思考模型（每日配額，用完退回 lite，見 gemini.ts）。
     geminiTier: "premium",
+    geminiPurpose: "judge",
   });
   const bases = new Map<string, RatingCode>(rs.map((r) => [r.symbol.toUpperCase(), r.rating.code]));
   const parsed = result.usedAi ? parseAiJudgments(result.answer, bases, new Date(), result.model ?? result.provider) : new Map<string, AiJudgment>();
@@ -156,6 +158,8 @@ export async function getAiJudgments(rs: StockRatingResult[], source: RatingSour
   const flightKey = `${day}|${batch.map((r) => r.symbol).sort().join(",")}`;
   let p = inflight.get(flightKey);
   if (!p) {
+    // 每天最多 AI_JUDGE_DAILY_CALL_LIMIT 次（較強模型配額優先留給今日建議與快報，見 aiSchedule.ts／gemini.ts）。
+    if (!(await reserveJudgeCall(day))) return out;
     p = judgeBatch(batch, day).finally(() => inflight.delete(flightKey));
     inflight.set(flightKey, p);
     const byS = new Map(batch.map((r) => [r.symbol.toUpperCase(), r]));
@@ -169,6 +173,22 @@ export async function getAiJudgments(rs: StockRatingResult[], source: RatingSour
   const fresh = await p.catch(() => new Map<string, AiJudgment>());
   for (const [k, v] of fresh) out.set(k, v);
   return out;
+}
+
+const judgeCallMem = new Map<string, number>();
+/** 先佔一次當天的 AI 判斷呼叫名額（Redis INCR，失敗退回記憶體計數）。 */
+async function reserveJudgeCall(day: string): Promise<boolean> {
+  const key = `ai-judge:calls:${day}`;
+  let n: number;
+  try {
+    if (!kvEnabled || !redis) throw new Error("no kv");
+    n = await redis.incr(key);
+    if (n === 1) await redis.expire(key, 2 * 86400);
+  } catch {
+    n = (judgeCallMem.get(key) ?? 0) + 1;
+    judgeCallMem.set(key, n);
+  }
+  return n <= AI_JUDGE_DAILY_CALL_LIMIT;
 }
 
 /** 單檔版本（個股問答用），等不到 `waitMs` 就先回 null，判斷照樣在背景完成並快取。 */
