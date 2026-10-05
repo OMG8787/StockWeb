@@ -91,7 +91,7 @@ function StockRow({
           {item.name}
           <span className="ml-1.5 text-(--text-muted) tabular-nums">{item.symbol}</span>
         </Link>
-        <span className="ml-2 rounded bg-(--page-plane) px-1.5 py-0.5 text-[12px] text-(--text-muted)">
+        <span className="ml-2 rounded bg-(--page-plane) px-1.5 py-0.5 text-[12px] whitespace-nowrap text-(--text-muted)">
           {item.market === "TW" ? "台股" : "美股"}
         </span>
       </td>
