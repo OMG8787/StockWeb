@@ -412,6 +412,10 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-06（續）：評等果斷化整批完成
+
+- 二分評等（`0e01390`，stock-rating v4、action-brief v13、ratingConsistencyGuard 擋先不要買的區間／出場價、弱市況提示、今日建議最多5檔）；Gemini 分級與時點重寫（`343b247`、`64e6383`、`2322d34`，問答 lite、今日建議／快報／AI 判斷非 lite＋思考預算、每模型每天18次配額）；今日建議兩層（`f4f4d9f`，名單價位即時跟 stockRating、AI 解說依時點、不跨日）；篩選誤判（`fdce118`）；錯字近似（`055bf70`，fuzzyName.ts）；教訓依擴大回測更新（`52255ee`）；AI 判斷層不顯示（`28a6750`，AI_VIEW_VISIBLE_TO_USERS=false）；評等變動說明 ratingChange.ts（`70035aa`、`e3460bd`，接線待主題新聞 agent 一併提交）。正式站 curl 4 題通過；今日建議由 Gemini 3.6 Flash 撰寫。
+
 ### 2026-10-06：跨模型評測框架與第一份基準
 
 - scripts/eval（`4beccdb`…`50806d7`）：題庫 33 題（含使用者真實回報）、程式評分器、三家同輸入執行器（forceProvider、假時鐘、--judge、--regrade、--compare），報告 docs/eval/（先看 2026-10-06-baseline-analysis.md）。改前 722a9c6→改後 0e01390：Lite 97%→96%、NVIDIA 94%→95%（持平，二分化沒讓模型變差）；Groq 免費 TPM 8000 接不住個股題（約1萬token）。Lite 守規則最高但深度不足（評審 3.1 vs NVIDIA 4.3）。
