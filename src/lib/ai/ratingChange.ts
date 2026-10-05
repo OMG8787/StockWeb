@@ -1,6 +1,6 @@
 import { kvEnabled, redis } from "@/lib/data/kv";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
-import { RATING_LOG_KEY_PREFIX, type RatingLogEntry } from "./ratingLog";
+import { ratingLogField, ratingLogKey, type RatingLogEntry } from "./ratingLog";
 import type { RatingCode, SiteRating } from "./siteRating";
 
 /**
@@ -64,9 +64,9 @@ export async function readPreviousRatings(symbols: string[], now: Date = new Dat
   for (let i = 1; i <= LOOKBACK_DAYS; i++) days.push(taipeiDayKey(new Date(now.getTime() - i * 86400_000)));
   try {
     const syms = symbols.map((s) => s.toUpperCase());
-    const fields = syms.flatMap((s) => CODES.map((c) => `${s}#${c}`));
+    const fields = syms.flatMap((s) => CODES.map((c) => ratingLogField(s, c)));
     const p = redis.pipeline();
-    for (const day of days) p.hmget(`${RATING_LOG_KEY_PREFIX}${day}`, ...fields);
+    for (const day of days) p.hmget(ratingLogKey(day), ...fields);
     const results = (await p.exec()) as Array<Record<string, unknown> | null>;
     results.forEach((h) => {
       if (!h) return;
