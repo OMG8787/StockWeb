@@ -30,7 +30,12 @@ interface GeminiResponse {
 
 // Per-key cache of the last model confirmed to actually work, so most
 // requests skip straight to a single call instead of re-probing.
-const knownGoodModel = new Map<string, string>();
+const knownGoodModel = new Map<string, { model: string; at: number }>();
+/**
+ * 備援模型（不是排序第一的偏好模型，例如偏好模型暫時 503 才落到 lite）只記這麼久，之後重新探測，
+ * 免得一次暫時性忙碌就讓整個執行個體一直用最弱的模型（2026-10-05 正式站實際用到 gemini-flash-lite-latest）。
+ */
+export const GEMINI_FALLBACK_MODEL_TTL_MS = 10 * 60 * 1000;
 const MAX_CANDIDATES = 4;
 
 async function listCandidateModels(apiKey: string): Promise<string[]> {
@@ -46,11 +51,32 @@ async function listCandidateModels(apiKey: string): Promise<string[]> {
     throw new Error("這組 Gemini API 金鑰目前沒有任何可用的生成模型");
   }
 
-  // Try "flash" models first (fast/cheap, free-tier friendly), skip
-  // embedding/vision-only variants, then fall back to whatever else exists.
-  const flash = usable.filter((n) => /flash/i.test(n) && !/embedding|vision/i.test(n));
-  const rest = usable.filter((n) => !flash.includes(n));
-  return [...flash, ...rest].slice(0, MAX_CANDIDATES);
+  return rankGeminiModels(usable).slice(0, MAX_CANDIDATES);
+}
+
+/**
+ * 明確偏好的 Gemini 模型（依序）。2026-10-05 正式站回饋顯示實際用到 gemini-flash-lite-latest（最弱）：
+ * 原本照 ListModels 回傳順序挑第一個含 flash 的，lite 剛好排前面。改成具名偏好順序。
+ */
+export const GEMINI_PREFERRED_MODELS = ["gemini-2.5-flash", "gemini-flash-latest"] as const;
+/** 不是一般文字生成用的模型（語音、圖片、向量、即時串流等），一律排除。 */
+export const GEMINI_EXCLUDED_MODEL_PATTERN = /tts|image|embedding|vision|audio|live|aqa|robotics|computer-use|omni|transcribe|lyria|nano-banana|deep-research|antigravity/i;
+/** lite 版只當最後備援。 */
+export const GEMINI_LITE_PATTERN = /lite/i;
+
+/**
+ * 排序候選模型（純函式，有測試）：偏好清單 → 其他非 lite 的 flash → lite 的 flash → 其他（例如 pro／gemma）。
+ * 同一層維持 ListModels 原順序。
+ */
+export function rankGeminiModels(names: string[]): string[] {
+  const usable = [...new Set(names)].filter((n) => !GEMINI_EXCLUDED_MODEL_PATTERN.test(n));
+  const preferred = GEMINI_PREFERRED_MODELS.filter((m) => usable.includes(m));
+  const rest = usable.filter((n) => !(preferred as string[]).includes(n));
+  const flash = rest.filter((n) => /flash/i.test(n));
+  const flashFull = flash.filter((n) => !GEMINI_LITE_PATTERN.test(n));
+  const flashLite = flash.filter((n) => GEMINI_LITE_PATTERN.test(n));
+  const others = rest.filter((n) => !flash.includes(n));
+  return [...preferred, ...flashFull, ...flashLite, ...others];
 }
 
 export interface GeminiCallOptions {
@@ -121,7 +147,11 @@ export async function askGeminiWithModel(
   options: GeminiCallOptions = {}
 ): Promise<{ text: string; model: string }> {
   const keyId = apiKey.slice(-8);
-  const known = knownGoodModel.get(keyId);
+  const cached = knownGoodModel.get(keyId);
+  const known =
+    cached && (!GEMINI_LITE_PATTERN.test(cached.model) || Date.now() - cached.at < GEMINI_FALLBACK_MODEL_TTL_MS)
+      ? cached.model
+      : undefined;
 
   if (known) {
     try {
@@ -137,7 +167,7 @@ export async function askGeminiWithModel(
     if (model === known) continue; // already just failed above
     try {
       const text = await callGemini(model, system, messages, apiKey, options);
-      knownGoodModel.set(keyId, model);
+      knownGoodModel.set(keyId, { model, at: Date.now() });
       return { text, model };
     } catch (err) {
       lastError = err;
