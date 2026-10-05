@@ -10,7 +10,7 @@ import {
   type ChaseMetrics,
 } from "@/lib/ai/chaseGuards";
 import { applyHoldingCost, checkTakeProfit, computeSiteRating, TAKE_PROFIT_PEAK_GAIN_PCT } from "@/lib/ai/siteRating";
-import { groupedPickLines, PULLBACK_GROUP_TITLE, type ActionBriefPick } from "@/lib/ai/actionBrief";
+import { groupedPickLines, type ActionBriefPick } from "@/lib/ai/actionBrief";
 
 function candles(closes: number[], startDay = 1): Candle[] {
   return closes.map((c, i) => ({
@@ -81,8 +81,8 @@ describe("computeSiteRating＋追高防護", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(100.5), chase: { ...calm, ret5: 18 } });
     expect(r.code).toBe("buy");
     expect(r.label).toBe("建議買進");
-    expect(r.riskNote).toContain("短線波動風險：近5日已漲 18%");
-    expect(r.reason).toContain("若要買宜分批、降低部位");
+    expect(r.riskNote).toContain("短線風險：近5日已漲 18%");
+    expect(r.reason).toContain("宜分批、不要一次買滿");
     // 評等紀錄仍記錄 surge 觸發（給學習循環用）
     expect(r.chaseHits.map((h) => h.id)).toEqual(["surge"]);
   });
@@ -155,33 +155,21 @@ describe("groupedPickLines（今日建議 fallback 分組）", () => {
   });
   const stance = { briefMode: "today" as const, nextOpenLabel: "10/6（二）" };
 
-  it("建議買進與等回檔分兩組，等回檔組標題明講現價不買", () => {
-    const lines = groupedPickLines(
-      [pick("1111", "buy-on-pullback", "建議等回檔再買（現價不買，等回到 95～100）"), pick("2222", "buy", "建議買進")],
-      stance
-    );
+  it("只有建議買進一組（不再有等回檔組）", () => {
+    const lines = groupedPickLines([pick("2222", "buy", "建議買進"), pick("3333", "avoid", "建議先不要買")], stance);
     expect(lines[0]).toBe("**建議買進（現價可分批買）**");
+    expect(lines).toHaveLength(2);
     expect(lines[1]).toContain("股2222");
-    expect(lines[2]).toBe(`**${PULLBACK_GROUP_TITLE}**`);
-    expect(lines[3]).toContain("現價不買");
   });
 
-  it("只有等回檔 → 建議買進那塊寫「目前沒有現價可直接買的」", () => {
-    const lines = groupedPickLines([pick("1111", "buy-on-pullback", "建議等回檔再買（現價不買，等回到 95～100）")], stance);
-    expect(lines[1]).toContain("目前沒有現價可直接買的");
-    expect(lines).toContain(`**${PULLBACK_GROUP_TITLE}**`);
+  it("沒有建議買進 → 果斷寫今天先不買與門檻", () => {
+    expect(groupedPickLines([], stance)[1]).toContain("今天先不買");
   });
 
-  it("兩組都沒有 → 觀望", () => {
-    expect(groupedPickLines([], stance)[1]).toContain("今天觀望");
-  });
-
-  it("14:30 後（明日操作建議）：等回檔寫成盤中回到區間可分批買，不寫「開盤沒有可直接買的」", () => {
+  it("14:30 後（明日操作建議）：標題寫開盤或盤中可買", () => {
     const next = { briefMode: "next-open" as const, nextOpenLabel: "10/6（週二）" };
-    const lines = groupedPickLines([pick("1111", "buy-on-pullback", "建議等回檔再買（現價不買，等回到 95～100）")], next);
-    expect(lines[0]).toBe("**10/6（週二） 可買（建議買進）**");
-    expect(lines.join("\n")).not.toContain("開盤沒有可直接買的");
-    expect(lines[1]).toContain("盤中回到區間可分批買");
-    expect(groupedPickLines([], next)[1]).toContain("10/6（週二） 先觀望");
+    const lines = groupedPickLines([pick("2222", "buy", "建議買進")], next);
+    expect(lines[0]).toBe("**10/6（週二） 建議買進（開盤或盤中可買）**");
+    expect(groupedPickLines([], next)[1]).toContain("10/6（週二） 先不買");
   });
 });

@@ -153,27 +153,28 @@ export function describePriceFramework(f: PriceFramework | null, opts: { avoid?:
   if (!f) return "";
   const list = (ls: PriceLevel[]) => (ls.length ? ls.slice(0, 4).map((l) => `${fmt(l.price)}（${l.labels.join("、")}）`).join("、") : "無");
   const lines = [
-    `${PRICE_LEVELS_TITLE}程式依日K算好；要給買進區間／出場價／不追價時一律直接採用下面『建議框架』的數字，不可自己另編或改變大小關係）：`,
+    `${PRICE_LEVELS_TITLE}程式依日K算好；要給加碼參考價／出場價時一律直接採用下面『建議框架』的數字，不可自己另編或改變大小關係）：`,
     `- 現價 ${fmt(f.price)}`,
     `- 下方支撐（由近到遠）：${list(f.supports)}`,
     `- 上方壓力（由近到遠）：${list(f.resistances)}`,
   ];
   if (opts.avoid && f.zone) {
-    // 2026-10-05 正式站：聯電評等「建議先不要買」，AI 仍照這裡的『分批買進區間』寫「等回到 A～B 再分批買」＋操作計畫。
-    // 評等為先不要買時這個區塊不再出現「買進區間／買進後出場」，只給觀察用支撐與轉為可考慮買進的條件。
+    // 2026-10-05 正式站：聯電評等「建議先不要買」，AI 仍照這裡的『分批買進區間』寫「等回到 A～B 再分批買」＋操作計畫；
+    // 之後又把觀察用支撐 134.5 寫成「買進後跌破 134.5 出場」。先不要買時這裡不給任何買進區間／出場價，只給改判條件。
     lines.push(
-      `- 本站綜合評等為「建議先不要買」：不給買進區間、也不給買進後出場價。下方支撐 ${fmt(f.zone.low)}～${fmt(f.zone.high)} 只是觀察用支撐（不是買進區間）；` +
-        `轉為可考慮買進的條件＝評等改變（例如籌碼轉為法人買超、技術面不再轉弱），或重新站回 ${fmt(f.noChase.price)}（${f.noChase.label}）以上。`
+      `- 本站綜合評等為「建議先不要買」：不給買進區間、不給買進後出場價（上面的支撐只是走勢觀察，不可寫成買進區間或出場價）；` +
+        `只說明什麼條件出現才會改判建議買進：評等改變（例如籌碼轉為法人買超、技術面轉為支持），或重新站回 ${fmt(f.noChase.price)}（${f.noChase.label}）以上。`
     );
   } else if (f.zone && f.exit) {
-    const gap = pctFrom(f.price, f.zone.high);
+    // 2026-10-05 使用者：「給購買區間、到了區間反而說不建議買」——不再寫「現價不在區間、要等回檔才買」。
+    // 現價可買（照本站綜合評等），區間上緣只當「拉回加碼參考價」。
+    const extended = (f.price - f.zone.high) / f.zone.high >= NEAR_ZONE_PCT;
     lines.push(
-      `- 建議框架：分批買進區間 ${fmt(f.zone.low)}～${fmt(f.zone.high)}（上緣＝${f.zone.highLabel}、下緣＝${f.zone.lowLabel}）；` +
-        `現價 ${fmt(f.price)} 高於區間上緣 ${gap}，現價『不在』區間內，${
-          (f.price - f.zone.high) / f.zone.high < NEAR_ZONE_PCT ? "但已很接近上緣，回到上緣附近可先小量試單" : "要等回檔到區間才分批買"
-        }；` +
-        `買進後跌破 ${fmt(f.exit.price)}（${f.exit.label}，比區間下緣低 ${(((f.zone.low - f.exit.price) / f.zone.low) * 100).toFixed(1)}%）建議出場；` +
-        `若直接漲過 ${fmt(f.noChase.price)}（${f.noChase.label}）就不追價。`
+      `- 建議框架：支撐區 ${fmt(f.zone.low)}～${fmt(f.zone.high)}（上緣＝${f.zone.highLabel}、下緣＝${f.zone.lowLabel}）；` +
+        (extended
+          ? `現價 ${fmt(f.price)} 高於支撐區上緣 ${pctFrom(f.price, f.zone.high)}：若評等是建議買進，現價可分批買，拉回到 ${fmt(f.zone.high)} 附近可加碼（只給這一個參考價，不可寫成「現價不買、等回到區間」）；`
+          : `現價 ${fmt(f.price)} 接近支撐區上緣，若評等是建議買進可直接分批買；`) +
+        `買進後跌破 ${fmt(f.exit.price)}（${f.exit.label}，比支撐區下緣低 ${(((f.zone.low - f.exit.price) / f.zone.low) * 100).toFixed(1)}%）建議出場。`
     );
   } else {
     lines.push(

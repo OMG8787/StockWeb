@@ -21,7 +21,8 @@ import { getNewsFeed, type NewsFeed } from "@/lib/ai/newsfeed";
 import { formatSharesWithLots } from "@/lib/format";
 import { buildMarketOverviewText } from "./marketOverview";
 import { getStockRatings, type StockRatingResult } from "./stockRating";
-import { describeSiteRating, isRecommendable } from "./siteRating";
+import { describeSiteRating, isRecommendable, WEAK_MARKET_RET60_PCT, weakMarketNote } from "./siteRating";
+import { getTaiexRet60Pct } from "./learning/regimeData";
 import { PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
 import {
   pct,
@@ -216,6 +217,8 @@ export interface ActionGrounding {
   /** 「不建議追」程式選定的一檔（已排除建議名單；沒有合適的是 null） */
   notChase: NotChasePick | null;
   gainersAvailable: boolean;
+  /** 大盤偏弱提示（加權 60 日報酬 < WEAK_MARKET_RET60_PCT；不弱或抓不到是 null） */
+  marketNote: string | null;
 }
 
 /**
@@ -278,9 +281,9 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     .map((p) => ({ ...p, symbol: p.rating.symbol, name: p.rating.name, rating: p.rating }));
   // 2026-10-05：分組、每組上限、排序、去重由程式決定（actionPicks.ts），AI 只寫解說——AI 曾在等回檔列 7 檔。
   const groups = selectPickGroups(allPicks.map((p) => ({ symbol: p.symbol, name: p.name, rating: p.rating.rating, pick: p })));
-  const buyPicks: RatedPick[] = groups.buy.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
-  const pullbackPicks: RatedPick[] = groups.pullback.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
-  const picks: RatedPick[] = [...buyPicks, ...pullbackPicks];
+  const picks: RatedPick[] = groups.buy.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
+  const ret60 = await getTaiexRet60Pct().catch(() => null);
+  const marketNote = ret60 != null && ret60 < WEAK_MARKET_RET60_PCT ? weakMarketNote(ret60) : null;
   // 「不建議追」也由程式挑，並且一定排除建議名單裡的代號（互斥）。
   const notChase = selectNotChase(liquidGainers, candidates, picks.map((p) => p.rating.symbol));
   const notRecommended = qualified
@@ -305,18 +308,16 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     `【本站已先幫你篩過的結果】今日候選股中，面向支持數 ≥${QUALIFY_MIN_SUPPORT} 且明確不支持面向 ≤${QUALIFY_MAX_AGAINST} 的共 ${qualified.length} 檔：${
       qualified.length > 0 ? qualified.map((c) => `${c.name}(${c.symbol})`).join("、") : "無"
     }`,
-    `【建議名單（程式已決定，共 ${picks.length} 檔，每組最多 ${PICK_GROUP_LIMIT} 檔；不可增減、不可換組別，跟個股頁「問AI關於」同一份評等）】`,
-    // 2026-10-05 檢討：使用者看到名單就直接買，但「等回檔」那幾檔現價其實不該買——兩組分開列。
-    `【A組：建議買進（現價可分批買），共 ${buyPicks.length} 檔】`,
-    buyPicks.length > 0 ? buyPicks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
-    `【B組：等回檔（現價不買，等回到區間才買），共 ${pullbackPicks.length} 檔】`,
-    pullbackPicks.length > 0 ? pullbackPicks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
+    // 2026-10-05 使用者：「明日操作建議都沒有建議買的，是太保守嗎？」——評等改果斷二分，只剩建議買進一組（最多 PICK_GROUP_LIMIT 檔）。
+    `【建議買進名單（程式已決定，共 ${picks.length} 檔，最多 ${PICK_GROUP_LIMIT} 檔；不可增減，跟個股頁「問AI關於」同一份評等；每一檔都是現價可分批買）】`,
+    picks.length > 0 ? picks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
+    marketNote ? `【${marketNote}】` : "",
     notRecommended.length > 0
       ? `【體質過門檻、但本站綜合評等為「建議先不要買」的（不可列進建議）】\n${notRecommended.map((r) => describeSiteRating(r.name, r.symbol, r.rating)).join("\n")}`
       : "",
     notChase
-      ? `【不建議追（程式已選定，只寫這一檔）】${notChase.name}(${notChase.symbol})：今日${pct(notChase.changePercent)}，面向支持數 ${notChase.supportCount}，沒跟上的面向：${notChase.weakFacets.join("、") || "無"}`
-      : `【不建議追（程式已選定）】${liquidGainers.length > 0 ? "漲幅榜前段體質大多說得過去，沒有要點名的" : "今日漲幅榜無資料"}`,
+      ? `【先不要買／不建議追（程式已選定，只寫這一檔）】${notChase.name}(${notChase.symbol})：今日${pct(notChase.changePercent)}，面向支持數 ${notChase.supportCount}，沒跟上的面向：${notChase.weakFacets.join("、") || "無"}`
+      : `【先不要買／不建議追（程式已選定）】${liquidGainers.length > 0 ? "漲幅榜前段體質大多說得過去，沒有要點名的" : "今日漲幅榜無資料"}`,
     "",
     "【今日台股漲幅榜前10（純價格表現，已濾掉成交金額不足3000萬的冷門股）——漲最多不等於值得買，務必回體檢表對照其他面向】",
     liquidGainers.length > 0
@@ -358,5 +359,5 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       : "（目前沒有夠格的重大消息）",
   ].join("\n");
 
-  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0 };
+  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0, marketNote };
 }

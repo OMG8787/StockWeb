@@ -16,17 +16,24 @@ import { ACTIVE_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardHit, type Chas
  *     不支持 ≤ QUALIFY_MAX_AGAINST，且籌碼面不是【不支持】（法人賣超）——沒過 → 建議先不要買。
  *     技術面【不支持】一票否決（VETO_FACETS，2026-10-05 擴大回測唯一穩健訊號）。
  *     急漲（surge）只附「短線波動風險」提示、不改結論（RISK_NOTE_ONLY_GUARDS，同一份回測）。
- *  2. 價位：現價下方沒有支撐（破底）→ 建議先不要買；有 RSI 超買／布林上緣這類漲多警訊，
- *     或現價高於買進區間上緣超過 NEAR_ZONE_PCT → 建議等回檔再買（附區間）；否則 → 建議買進。
- *  3. 持有中：買進→可分批加碼；等回檔→續抱；不要買→破底出場、不支持≥2 減碼、其餘續抱不加碼。
+ *  2. 價位：現價下方沒有支撐（破底）→ 建議先不要買；其餘 → 建議買進（果斷二分，2026-10-05 起不再有「等回檔」）。
+ *     有 RSI 超買／布林上緣這類漲多警訊、急漲，或現價高於支撐區上緣超過 NEAR_ZONE_PCT 時，結論仍是建議買進，
+ *     只附「單一個」拉回加碼參考價（支撐區上緣）與短線風險，例如「建議買進（現價 557 可分批買；若拉回到 534 附近可加碼）」。
+ *  3. 持有中：買進→可分批加碼（現價偏高時續抱、拉回加碼）；不要買→破底出場、不支持≥2 減碼、其餘續抱不加碼。
+ *  4. 大盤偏弱（加權 60 日報酬 < WEAK_MARKET_RET60_PCT）時，建議買進附弱市況提示，不改結論。
+ *  5. 先不要買：不給買進區間、不給出場價，只給「什麼條件出現才會改判建議買進」（upgradeCondition）。
  */
 
+/**
+ * "buy-on-pullback"（等回檔）只為了讀舊的評等紀錄／學習資料而保留在型別裡：2026-10-05 起 computeSiteRating
+ * 不再產生（見規則 2），新程式不要再依賴它。
+ */
 export type RatingCode = "buy" | "buy-on-pullback" | "avoid";
 export type HoldingCode = "add" | "hold" | "reduce" | "exit";
 
 export const RATING_LABEL: Record<RatingCode, string> = {
   buy: "建議買進",
-  "buy-on-pullback": "建議等回檔再買",
+  "buy-on-pullback": "建議等回檔再買（舊紀錄）",
   avoid: "建議先不要買",
 };
 
@@ -56,6 +63,19 @@ export const RISK_NOTE_ONLY_GUARDS: readonly ChaseGuardId[] = ["surge"];
 /** 漲多警訊（跟 actionScoring.ts 的 OVERHEAT_PATTERNS 同義：不是買進理由）。 */
 export const OVERHEAT_SIGNAL_PATTERNS = ["超買", "布林通道上緣"];
 
+/**
+ * 弱市況提示門檻：加權指數近 60 個交易日報酬 < 這個百分比＝大盤偏弱（＝報告的市況定義 A 的「弱」）。
+ * 出處：docs/backtest/2026-10-regime.md（研究 C，commit 82c78bd）——技術面支持組在樣本外（2022-01～2024-09）弱市況
+ * 10 日超額 −0.56%、20 日 −0.98%（t −3.92）可靠為負；本站「建議買進」弱市況方向為負但未達可靠標準，
+ * 且 2025 年 V 型反彈時硬開關會整段錯過——所以只提示、不改結論。
+ */
+export const WEAK_MARKET_RET60_PCT = 5;
+
+export function weakMarketNote(ret60Pct: number): string {
+  const r = Math.round(ret60Pct * 10) / 10;
+  return `大盤偏弱提示：近60日加權報酬 ${r > 0 ? "+" : ""}${r}%，歷史上此時技術強勢股常落後（之後 10～20 日平均落後同類股約 0.5～1%），宜降低部位或分批`;
+}
+
 export interface RatingInput {
   facets: Facet[];
   supportCount: number;
@@ -67,11 +87,13 @@ export interface RatingInput {
   chase?: ChaseMetrics | null;
   /** 要套用哪些追高防護，預設 ACTIVE_CHASE_GUARDS（回測工具逐條比較時才會指定） */
   guards?: readonly ChaseGuardId[];
+  /** 加權指數近 60 個交易日報酬（%）；有給且 < WEAK_MARKET_RET60_PCT 時，建議買進附弱市況提示（不改結論） */
+  marketRet60Pct?: number | null;
 }
 
 export interface SiteRating {
   code: RatingCode;
-  /** 未持有的結論，例如「建議等回檔再買（現價不買，等回到 120～125）」——三個入口一律照抄這串 */
+  /** 未持有的結論，例如「建議買進（現價 557 可分批買；若拉回到 534 附近可加碼）」——三個入口一律照抄這串 */
   label: string;
   holdingCode: HoldingCode;
   /** 持有中的結論，例如「續抱」 */
@@ -85,8 +107,14 @@ export interface SiteRating {
   exit: number | null;
   /** 觸發的追高防護（沒觸發是空陣列；只當風險提示的也記在這裡） */
   chaseHits: ChaseGuardHit[];
-  /** 短線波動風險提示（急漲，不改結論）；沒有是 null */
+  /** 短線風險提示（急漲／漲多警訊／高於支撐區，不改結論）；沒有是 null */
   riskNote: string | null;
+  /** 建議買進但現價偏高時的單一拉回加碼參考價；沒有是 null（舊快取沒有這欄） */
+  pullbackAdd?: number | null;
+  /** 弱市況提示（不改結論）；沒有是 null（舊快取沒有這欄） */
+  marketNote?: string | null;
+  /** 先不要買時，什麼條件出現才會改判建議買進（不給買進區間、不給出場價）；買進時 null */
+  upgradeCondition?: string | null;
 }
 
 function fmt(n: number): string {
@@ -114,6 +142,9 @@ export function computeSiteRating(input: RatingInput): SiteRating {
 
   let code: RatingCode;
   let reason: string;
+  /** 建議買進但現價偏高時，單一個拉回加碼參考價（支撐區上緣）；不是買進前提 */
+  let pullbackAdd: number | null = null;
+  const shortRisks: string[] = [];
   if (!qualified) {
     code = "avoid";
     reason = vetoed.length > 0
@@ -128,46 +159,87 @@ export function computeSiteRating(input: RatingInput): SiteRating {
     code = "avoid";
     const trigger = framework!.resistances[0]?.price ?? framework!.noChase.price;
     reason = `${score}，但現價已跌破所有均線與近期低點（破底），要等重新站回 ${fmt(trigger)} 以上再考慮`;
-  } else if (
-    heatHits.length > 0 ||
-    (zone && framework && (overheat.length > 0 || (framework.price - zone.high) / zone.high >= NEAR_ZONE_PCT))
-  ) {
-    code = "buy-on-pullback";
-    const why = [
-      heatHits.length > 0 ? `已經急漲／過熱（${heatHits.map((h) => h.message).join("、")}）` : "",
-      overheat.length > 0 ? `技術面出現漲多警訊（${overheat.map((s) => s.label).join("、")}）` : "",
-      zone && framework && framework.price > zone.high ? `現價 ${fmt(framework.price)} 高於買進區間上緣 ${fmt(zone.high)}` : "",
-    ]
-      .filter(Boolean)
-      .join("、");
-    reason = zone
-      ? `${score}，體質達買進門檻；但${why}，現價不買，等回檔到 ${fmt(zone.low)}～${fmt(zone.high)} 再分批買`
-      : `${score}，體質達買進門檻；但${why}，現價不買，等回檔整理後再評估`;
   } else {
+    // 2026-10-05 使用者：「每次都給購買區間，到了區間反而說不建議買、一直漲就一直觀望，該買的都沒買到——改掉優柔寡斷」。
+    // 擴大回測：原本的「等回檔」組 10 日 +0.32%／20 日 +0.76%，點估計不比「建議買進」差（追高組 20 日 +1.64%），
+    // 把體質過關的股票推到「現價不買」沒有證據支持。改為果斷二分：體質過關就是建議買進，
+    // 現價偏高時只附「單一個」拉回加碼參考價與短線風險，不再寫「現價不買」。
     code = "buy";
-    reason = zone
-      ? `${score}，體質達買進門檻，且現價已接近買進區間上緣 ${fmt(zone.high)}，可分批買進`
-      : `${score}，體質達買進門檻（日K資料不足、未算出買進區間，宜小量分批）`;
+    const extended =
+      heatHits.length > 0 ||
+      (!!zone && !!framework && (overheat.length > 0 || (framework.price - zone.high) / zone.high >= NEAR_ZONE_PCT));
+    if (extended) {
+      pullbackAdd = zone ? zone.high : null;
+      shortRisks.push(
+        ...heatHits.map((h) => h.message),
+        ...(overheat.length > 0 ? [`技術面出現漲多警訊（${overheat.map((s) => s.label).join("、")}）`] : []),
+        ...(zone && framework && framework.price > zone.high
+          ? [`現價高於支撐區上緣 ${fmt(zone.high)} 約 ${fmt(Math.round(((framework.price - zone.high) / zone.high) * 1000) / 10)}%`]
+          : [])
+      );
+    }
+    reason = !zone
+      ? `${score}，體質達買進門檻（日K資料不足、未算出參考價位，宜小量分批）`
+      : pullbackAdd != null && framework
+        ? `${score}，體質達買進門檻，現價 ${fmt(framework.price)} 可分批買；若拉回到 ${fmt(pullbackAdd)} 附近可加碼`
+        : `${score}，體質達買進門檻，且現價接近支撐區上緣 ${fmt(zone.high)}，可分批買進`;
   }
 
-  const label =
-    code === "buy-on-pullback"
-      ? zone
-        ? `${RATING_LABEL[code]}（現價不買，等回到 ${fmt(zone.low)}～${fmt(zone.high)}）`
-        : `${RATING_LABEL[code]}（現價不買）`
-      : RATING_LABEL[code];
-  const holdingCode: HoldingCode =
-    code === "buy" ? "add" : code === "buy-on-pullback" ? "hold" : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
-  const holdingLabel = holdingCode === "hold" && code === "avoid" ? "續抱觀察、不加碼" : HOLDING_LABEL[holdingCode];
-
   // 急漲只附風險提示、不改結論（見 RISK_NOTE_ONLY_GUARDS）；結論是先不要買時不用再提示追價風險。
-  const riskNote =
-    riskHits.length > 0 && code !== "avoid"
-      ? `短線波動風險：${riskHits.map((h) => h.message).join("、")}，5 日內常見回檔，若要買宜分批、降低部位`
-      : null;
+  if (code === "buy") shortRisks.push(...riskHits.map((h) => h.message));
+  const riskNote = shortRisks.length > 0 ? `短線風險：${shortRisks.join("、")}，宜分批、不要一次買滿` : null;
   if (riskNote) reason += `；${riskNote}`;
 
-  return { code, label, holdingCode, holdingLabel, reason, supportCount, againstCount, zone, noChase, exit, chaseHits, riskNote };
+  const label =
+    code === "buy" && pullbackAdd != null && framework
+      ? `${RATING_LABEL.buy}（現價 ${fmt(framework.price)} 可分批買；若拉回到 ${fmt(pullbackAdd)} 附近可加碼）`
+      : RATING_LABEL[code];
+  const holdingCode: HoldingCode =
+    code === "buy" ? (pullbackAdd != null ? "hold" : "add") : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
+  const holdingLabel =
+    code === "buy" && pullbackAdd != null
+      ? `續抱（拉回到 ${fmt(pullbackAdd)} 附近可加碼）`
+      : holdingCode === "hold" && code === "avoid"
+        ? "續抱觀察、不加碼"
+        : HOLDING_LABEL[holdingCode];
+
+  // 弱市況提示（不改結論）：見 WEAK_MARKET_RET60_PCT。
+  const marketNote =
+    code === "buy" && input.marketRet60Pct != null && input.marketRet60Pct < WEAK_MARKET_RET60_PCT
+      ? weakMarketNote(input.marketRet60Pct)
+      : null;
+  if (marketNote) reason += `；${marketNote}`;
+
+  const upgradeCondition =
+    code === "avoid"
+      ? [
+          brokeDown ? `重新站回 ${fmt(framework!.resistances[0]?.price ?? framework!.noChase.price)} 以上` : "",
+          vetoed.length > 0 ? "技術面轉為支持（例如站回 20 日均線、空方訊號消失）" : "",
+          chipsAgainst || foreignSell ? "三大法人轉為買超" : "",
+          supportCount < QUALIFY_MIN_SUPPORT ? `支持面向增加到至少 ${QUALIFY_MIN_SUPPORT} 項` : "",
+          againstCount > QUALIFY_MAX_AGAINST ? `不支持面向減少到 ${QUALIFY_MAX_AGAINST} 項以內` : "",
+        ]
+          .filter(Boolean)
+          .join("且") || "評等條件轉好"
+      : null;
+
+  return {
+    code,
+    label,
+    holdingCode,
+    holdingLabel,
+    reason,
+    supportCount,
+    againstCount,
+    zone,
+    noChase,
+    exit,
+    chaseHits,
+    riskNote,
+    pullbackAdd,
+    marketNote,
+    upgradeCondition,
+  };
 }
 
 // ── 持有中停利提示（2026-10-05 檢討：使用者持股曾經獲利、沒有停利紀律又跌回成本） ──
@@ -218,7 +290,7 @@ export function applyHoldingCost(r: SiteRating, check: TakeProfitCheck | null): 
   return { ...r, holdingCode: "reduce", holdingLabel: "建議減碼或出場（獲利已吐回）", reason: `${r.reason}；持有中：${check.message}` };
 }
 
-/** 是否應列進今日建議／全市場推薦名單（買進或等回檔）。 */
+/** 是否應列進今日建議／全市場推薦名單（建議買進；舊快取的等回檔也算，過渡用）。 */
 export function isRecommendable(r: SiteRating): boolean {
   return r.code === "buy" || r.code === "buy-on-pullback";
 }
@@ -227,19 +299,22 @@ export const SITE_RATING_TITLE = "【本站綜合評等】";
 
 /** 給 AI 的一行評等（個股資料最上面、全市場名單每檔都用同一格式）。 */
 export function describeSiteRating(name: string, symbol: string, r: SiteRating): string {
-  const levels = [
-    r.zone
-      ? r.code === "avoid"
-        ? // 2026-10-05 正式站：仁寶評等先不要買，AI 仍寫「等回檔到 A～B 再分批買」，跟結論矛盾。先不要買不給買進區間。
-          `下方支撐 ${fmt(r.zone.low)}～${fmt(r.zone.high)}（只是觀察用支撐、不是買進區間；先不要買，要等轉為可考慮買進的條件出現）`
-        : `買進區間 ${fmt(r.zone.low)}～${fmt(r.zone.high)}`
-      : "",
-    r.noChase != null ? `高於 ${fmt(r.noChase)} 不追價` : "",
-    r.exit != null && r.code !== "avoid" ? `買進後跌破 ${fmt(r.exit)} 出場` : "",
-  ].filter(Boolean);
-  return `${SITE_RATING_TITLE}${name}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${
-    levels.length > 0 ? `價位：${levels.join("；")}。` : ""
-  }`;
+  // 2026-10-05：先不要買時不給任何價位（AI 曾把觀察用支撐 134.5 寫成「買進後跌破 134.5 出場」），只給改判條件；
+  // 建議買進不給「高於 X 不追價」（跟「現價可買」矛盾），只給單一拉回加碼參考價與買進後出場價。
+  const levels =
+    r.code === "avoid"
+      ? []
+      : [
+          r.pullbackAdd != null ? `拉回加碼參考價 ${fmt(r.pullbackAdd)}` : r.zone ? `支撐區 ${fmt(r.zone.low)}～${fmt(r.zone.high)}` : "",
+          r.exit != null ? `買進後跌破 ${fmt(r.exit)} 出場` : "",
+        ].filter(Boolean);
+  const tail =
+    r.code === "avoid"
+      ? `改判建議買進的條件：${r.upgradeCondition ?? "評等條件轉好"}（先不要買時不提任何買進或出場價位）。`
+      : levels.length > 0
+        ? `價位：${levels.join("；")}。`
+        : "";
+  return `${SITE_RATING_TITLE}${name}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${tail}`;
 }
 
 /** 模型偶爾把評等標籤原樣抄出（「未持有：「建議買進」」），回答送出前拿掉標籤、只留字樣。 */

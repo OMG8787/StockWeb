@@ -41,7 +41,9 @@ describe("computePriceFramework", () => {
     checkInvariants(f);
     const text = describePriceFramework(f);
     expect(text).toContain(PRICE_LEVELS_TITLE);
-    expect(text).toContain("現價『不在』區間內");
+    expect(text).toContain("高於支撐區上緣");
+    expect(text).toContain("現價可分批買");
+    expect(text).not.toMatch(/要等回檔到區間才分批買|不追價/);
     // 1000 元以上台股升降單位 5 元
     expect(f.zone!.high % 5).toBe(0);
     expect(f.exit!.price % 5).toBe(0);
@@ -112,7 +114,9 @@ describe("describePriceFramework 先不要買", () => {
     const t = describePriceFramework(f, { avoid: true });
     expect(t).not.toContain("分批買進區間");
     expect(t).not.toContain("買進後跌破");
-    expect(t).toContain("觀察用支撐");
-    expect(describePriceFramework(f)).toContain("分批買進區間 134.5～148.5");
+    expect(t).not.toContain("134.5");
+    expect(t).toContain("改判建議買進");
+    expect(describePriceFramework(f)).toContain("支撐區 134.5～148.5");
+    expect(describePriceFramework(f)).toContain("拉回到 148.5 附近可加碼");
   });
 });

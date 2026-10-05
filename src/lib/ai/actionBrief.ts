@@ -53,17 +53,17 @@ const ACTION_ROLE_TODAY =
 // 2026-10-05 使用者要求：14:30 後到隔天開盤前（含週末）改成「明日操作建議」，內容要寫明天整個交易時段（開盤＋盤中）的操作計畫，
 // 不能只看開盤那一刻（使用者：「我不是指開盤就直接買，盤中也可以買」）。
 function actionRoleNextOpen(stance: TradingStance): string {
-  return `你是股票研究網站的「${stance.briefTitle}」撰稿人，讀者沒有金融背景、要30秒看完做決定。台股今天已收盤（或週末休市），下一次開盤是 ${stance.nextOpenLabel} 09:00。任務只有一個：用最新收盤後的資料，直接講「${stance.nextOpenLabel}」整個交易時段（開盤與盤中）可以買哪幾檔、怎麼操作。不可寫「今天可以買」「現在盤中」。每檔的操作計畫（開盤跳空不追價、盤中回到區間分批買、買進後出場價）由程式依評等寫好附在每檔後面，你不用寫價位；等回檔的股票是「${stance.nextOpenLabel}盤中回到區間可分批買」，不可寫「開盤沒有可直接買的」這種讓人以為那天都不能買的句子。`;
+  return `你是股票研究網站的「${stance.briefTitle}」撰稿人，讀者沒有金融背景、要30秒看完做決定。台股今天已收盤（或週末休市），下一次開盤是 ${stance.nextOpenLabel} 09:00。任務只有一個：用最新收盤後的資料，直接講「${stance.nextOpenLabel}」整個交易時段（開盤與盤中）可以買哪幾檔、怎麼操作。不可寫「今天可以買」「現在盤中」。名單裡每一檔都是「建議買進」＝${stance.nextOpenLabel}開盤或盤中可買（分批）；操作計畫（拉回加碼參考價、買進後出場價）由程式依評等寫好附在每檔後面，你不用寫價位。不可寫「現價不買」「等回到區間再買」「先觀望」這類跟建議買進矛盾的話（2026-10-05 使用者：給了區間、到了又說不建議，優柔寡斷錯失機會）。`;
 }
 
 // 2026-10-05 結構性修正：名單（分組、每組上限、排序、去重、不建議追）全部由程式決定（actionPicks.ts），
 // AI 只回 JSON 寫解說；畫面文字由 renderActionBrief 組出來，價位也由程式寫（AI 不寫價位，就不會抄錯）。
 // 以前的門檻規則（不可放寬也不可加嚴、技術面沒訊號照樣列、0 檔才觀望…）改由程式保證，提示詞只留寫作規則。
 const ACTION_RULE_LIST_FIXED = [
-  "【名單由程式決定（硬性）】【建議名單】A組（建議買進）、B組（等回檔，現價不買）、【不建議追】都已由程式依本站綜合評等選好。你不可增減股票、不可把股票換組、不可另外推薦名單外的股票；只能為名單裡每一檔寫理由與風險，並給你自己的排序偏好與看法。",
+  "【名單由程式決定（硬性）】【建議買進名單】與【先不要買／不建議追】都已由程式依本站綜合評等選好。你不可增減股票、不可另外推薦名單外的股票；只能為名單裡每一檔寫理由與風險，並給你自己的排序偏好與看法。",
+  "- 名單裡每一檔結論都是『建議買進』（現價可分批買）：理由要果斷說明為什麼可以買，不可寫「現價不買」「等回檔再買」「先觀望」。評等理由有「短線風險」（近幾日急漲、漲多警訊、高於支撐區）時寫在 risk：宜分批、不要一次買滿；有「大盤偏弱提示」時 risk 可提宜降低部位。",
   "- 籌碼面【不支持】、RSI超買、觸及布林通道上緣是『漲多警訊』，不可當買進理由；技術面沒訊號的照樣寫理由，誠實說技術面今天沒有夠強的訊號。",
-  "- B組（等回檔）的理由要講為什麼現價不買（漲多警訊／急漲／高於區間），不可寫成現在可以買。",
-  "- 不要在 JSON 任何欄位寫價位數字（買進區間、出場價、不追價由程式附在每檔後面）；理由與風險只用體檢表裡的數字（張數、%、倍數）。",
+  "- 不要在 JSON 任何欄位寫價位數字（加碼參考價、出場價由程式附在每檔後面）；理由與風險只用體檢表裡的數字（張數、%、倍數）。",
 ].join("\n");
 
 function actionFormat(stance: TradingStance): string {
@@ -74,11 +74,11 @@ function actionFormat(stance: TradingStance): string {
     nextOpen
       ? "- market：一句白話講最近一個交易日收盤後的氣氛與下個交易日要留意的方向（≤30字，不要堆指數數字；大盤概況沒有台股加權指數報價時，不可說台股漲跌或創新高）。"
       : "- market：一句白話講今天氣氛（≤30字，不要堆指數數字；大盤概況沒有台股加權指數當日報價時，不可說台股漲跌或創新高）。",
-    "- order：A、B 兩組所有代號依你看好程度由高到低（只能用名單裡的代號）。",
-    "- picks：名單裡每一檔都要有。reason＝2~3個最關鍵的數字（≤60字，術語第一次出現帶括號白話，例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）；risk＝一句風險，只能根據體檢表裡的數字（評等理由有「短線波動風險」（急漲）時就寫這句：短線常回檔、宜分批）。",
-    "- view：1~2句表達你自己的排序與把握（2026-10-05 使用者：AI 變太保守、不敢表達）：兩組合起來最看好哪一檔、其次哪一檔、各為什麼（一個關鍵數字），等回檔的寫觸發條件（回到區間或站穩壓力，不寫價位數字）。不可推翻評等的動作結論（等回檔不可講成現在可買）。名單 0 檔時給空字串。",
+    "- order：建議買進名單所有代號依你看好程度由高到低（只能用名單裡的代號）。",
+    "- picks：名單裡每一檔都要有。reason＝2~3個最關鍵的數字（≤60字，術語第一次出現帶括號白話，例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）；risk＝一句風險，只能根據體檢表裡的數字（評等理由有「短線風險」時就寫這句：短線常回檔、宜分批）。",
+    "- view：1~2句表達你自己的排序與把握（2026-10-05 使用者：AI 變太保守、不敢表達）：最看好哪一檔、其次哪一檔、各為什麼（一個關鍵數字），語氣果斷。名單 0 檔時給空字串。",
     "- confidence＋confidenceReason：把握程度與一句原因。",
-    "- notChase：只針對【不建議追（程式已選定）】那一檔寫一句（≤40字）講它哪些面向沒跟上；程式寫沒有要點名的就給空字串。",
+    "- notChase：只針對【先不要買／不建議追（程式已選定）】那一檔寫一句（≤40字）講它哪些面向沒跟上；程式寫沒有要點名的就給空字串。",
     "- watch：一句要注意的風險（不是利多），取材只能來自【近期重大消息】或體檢結果，參考資料沒提到的總經事件一律不可寫。",
     "措辭不可暗示「照建議買會贏大盤」；網站頁首已說明本站評等回測未顯示穩定超越大盤，內文不用重複。不要開場白、客套或免責聲明。",
   ].join("\n");
@@ -118,7 +118,7 @@ function buildActionSystemPrompt(stance: TradingStance): string {
   ].join("\n");
 }
 
-export { PULLBACK_GROUP_TITLE, groupedPickLines, type ActionBriefPick } from "./actionPicks";
+export { NOT_CHASE_TITLE, groupedPickLines, type ActionBriefPick } from "./actionPicks";
 
 export async function getActionBrief(forceRefresh = false): Promise<ActionBrief> {
   const stance = getTradingStance();
@@ -133,11 +133,12 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
     // v8：2026-10-05 名單分「建議買進／等回檔（現價不買）」兩組，picks 多了 code。
     // v9：2026-10-05 加「我的看法」排序與把握程度、措辭不暗示贏大盤。
     // v10：14:30 後改「明日操作建議」（開盤＋盤中操作計畫）。
+    // v13：2026-10-05 果斷二分：只剩「建議買進」（最多 5 檔）與「先不要買／不建議追」、弱市況頁首提示。
     // v12：AI JSON picks key 容錯。v11：2026-10-05 名單（分組上限、互斥）改由程式決定、AI 回 JSON 只寫解說，加 AI 看法行。
-    `action-brief:v12:${taipeiDayKey()}:${stance.briefMode}`,
+    `action-brief:v13:${taipeiDayKey()}:${stance.briefMode}`,
     ACTION_BRIEF_TTL_MS,
     async () => {
-      const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable } = await buildActionGrounding();
+      const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote } = await buildActionGrounding();
       const sysPrompt = buildActionSystemPrompt(stance);
       // 主文 AI 與 AI 判斷層（每檔每天最多一次、快取）平行跑；判斷層失敗就沒有 AI 看法行，不影響名單。
       const [result, judgments] = await Promise.all([
@@ -170,9 +171,9 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
       const text = renderActionBrief({
         stance,
         marketLine: indexSummary.replace(/^大盤：/, ""),
-        buy: picks.filter((p) => p.code === "buy"),
-        pullback: picks.filter((p) => p.code === "buy-on-pullback"),
+        buy: picks.filter((p) => p.code !== "avoid"),
         notChase,
+        marketNote,
         gainersAvailable,
         ai,
         failureNote: result.usedAi ? "AI 回傳格式錯誤" : result.failureReason ?? "未知原因",

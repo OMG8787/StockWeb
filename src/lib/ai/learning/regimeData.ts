@@ -2,7 +2,7 @@ import { cachedListWithDegradedEmptyTtl } from "@/lib/data/degradedCache";
 import { fetchUsCandles } from "@/lib/data/us";
 import type { Candle } from "@/lib/data/types";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
-import { classifyRegime, type MarketRegime } from "./regime";
+import { classifyRegime, marketReturnPct, type MarketRegime } from "./regime";
 
 /** 加權指數在 Yahoo 的代號（marketHistory.ts 也用這個）。 */
 export const TAIEX_YAHOO_SYMBOL = "^TWII";
@@ -18,6 +18,12 @@ export function getTaiexCandles(): Promise<Candle[]> {
       return [];
     }
   });
+}
+
+/** 加權指數近 60 個交易日報酬（%，弱市況提示用）；抓不到回 null（fail open，不提示）。 */
+export async function getTaiexRet60Pct(): Promise<number | null> {
+  const candles = await getTaiexCandles().catch(() => [] as Candle[]);
+  return marketReturnPct(candles.map((c) => c.close));
 }
 
 /** 目前台股市況（多頭／空頭／盤整）；指數日K抓不到時 null（fail open，不影響評等）。 */

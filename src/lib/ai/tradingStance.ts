@@ -48,7 +48,7 @@ export function getTradingStance(now: Date = new Date()): TradingStance {
   const nextOpenWord = next.isTomorrow ? `明天 ${next.label}` : `下一個交易日 ${next.label}`;
   const nextDayWord = next.isTomorrow ? "明天" : "下一個交易日";
   // 收盤後／週末共用：明天整個交易時段（開盤＋盤中）的操作計畫。
-  const sessionPlan = `進場要寫成${nextDayWord}整個交易時段（開盤與盤中）的操作計畫：開盤怎麼做（例如「開盤若跳空高於不追價那個價位就不追」）＋盤中掛單計畫（「盤中回到買進區間 A～B 可分批買，掛單可參考區間下緣或中間」）＋買進後出場價；等回檔的股票要寫成「${nextDayWord}盤中回到 A～B 可分批買」，不可寫成「開盤沒有可直接買的」這種讓人以為${nextDayWord}都不能買的句子；不可說「現在盤中」或「現在掛單可成交」。`;
+  const sessionPlan = `進場要寫成${nextDayWord}整個交易時段（開盤與盤中）的操作計畫：建議買進的寫「${nextDayWord}開盤或盤中可分批買」＋拉回加碼參考價（評等有附時）＋買進後出場價；不可寫成「盤中回到 A～B 才買」「開盤沒有可直接買的」這種讓人以為${nextDayWord}都不能買的句子（2026-10-05 使用者：給了區間到了又說不建議，優柔寡斷）；不可說「現在盤中」或「現在掛單可成交」。`;
   switch (phase) {
     case "pre-open":
       return {

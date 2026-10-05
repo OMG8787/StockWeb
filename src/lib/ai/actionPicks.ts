@@ -10,8 +10,11 @@ import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_LABEL } from "./
  * AI 只回 JSON（每檔理由／風險、排序偏好、我的看法、留意），畫面文字由 renderActionBrief 組出來。
  */
 
-/** 每組最多幾檔。 */
-export const PICK_GROUP_LIMIT = 3;
+/**
+ * 「建議買進」最多幾檔。2026-10-05 使用者：「明日操作建議都沒有建議買的，是太保守嗎？不要為了勝率錯失機會」——
+ * 評等改為果斷二分（不再有等回檔組），建議買進最多列 5 檔、排序由程式決定（selectPickGroups）。
+ */
+export const PICK_GROUP_LIMIT = 5;
 /** 「不建議追」只從面向支持數 ≤ 這個值的漲幅榜股票挑。 */
 export const NOT_CHASE_MAX_SUPPORT = 1;
 /** 「不建議追」只看漲幅榜前幾名。 */
@@ -26,9 +29,9 @@ export interface PickInput {
 export interface ActionBriefPick {
   symbol: string;
   name: string;
-  /** 本站綜合評等字樣（未持有），例如「建議等回檔再買（現價不買，等回到 120～125）」 */
+  /** 本站綜合評等字樣（未持有），例如「建議買進（現價 557 可分批買；若拉回到 534 附近可加碼）」 */
   label: string;
-  /** buy＝建議買進（A組）；buy-on-pullback＝等回檔（B組，現價不買） */
+  /** buy＝建議買進（今日建議只列這種；buy-on-pullback 只會出現在舊快取，視同建議買進） */
   code: RatingCode;
   holdingLabel: string;
   reason: string;
@@ -39,10 +42,10 @@ export interface ActionBriefPick {
 }
 
 /**
- * 分組＋排序＋去重＋上限：建議買進在前、等回檔在後；組內依面向支持數多→少、不支持少→多，同分維持原順序
- * （原順序＝候選名單順序）。同一代號只留第一次出現。
+ * 排序＋去重＋上限（只有「建議買進」一組）：面向支持數多→少、不支持少→多、現價貼近支撐（沒有拉回加碼價）
+ * 優先於已漲離支撐的、同分維持原順序（原順序＝候選名單順序）。同一代號只留第一次出現。
  */
-export function selectPickGroups<T extends PickInput>(picks: T[], limit = PICK_GROUP_LIMIT): { buy: T[]; pullback: T[] } {
+export function selectPickGroups<T extends PickInput>(picks: T[], limit = PICK_GROUP_LIMIT): { buy: T[] } {
   const seen = new Set<string>();
   const uniq = picks.filter((p) => {
     const k = p.symbol.toUpperCase();
@@ -52,12 +55,15 @@ export function selectPickGroups<T extends PickInput>(picks: T[], limit = PICK_G
   });
   const sorted = uniq
     .map((p, i) => ({ p, i }))
-    .sort((a, b) => b.p.rating.supportCount - a.p.rating.supportCount || a.p.rating.againstCount - b.p.rating.againstCount || a.i - b.i)
+    .sort(
+      (a, b) =>
+        b.p.rating.supportCount - a.p.rating.supportCount ||
+        a.p.rating.againstCount - b.p.rating.againstCount ||
+        Number(a.p.rating.pullbackAdd != null) - Number(b.p.rating.pullbackAdd != null) ||
+        a.i - b.i
+    )
     .map((x) => x.p);
-  return {
-    buy: sorted.filter((p) => p.rating.code === "buy").slice(0, limit),
-    pullback: sorted.filter((p) => p.rating.code === "buy-on-pullback").slice(0, limit),
-  };
+  return { buy: sorted.filter((p) => p.rating.code === "buy" || p.rating.code === "buy-on-pullback").slice(0, limit) };
 }
 
 /** 依 AI 給的排序偏好重排（只動程式給的名單；AI 沒提到的照原順序接在後面、AI 多寫的代號忽略）。 */
@@ -110,20 +116,13 @@ export function selectNotChase(
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-/** 程式組的操作計畫（價位全部來自評等，AI 不寫價位）。 */
+/** 程式組的操作計畫（價位全部來自評等，AI 不寫價位）。先不要買不給計畫（沒有買進價位與出場價）。 */
 export function buildPlan(r: SiteRating, stance: Pick<TradingStance, "briefMode" | "nextOpenLabel">): string {
+  if (r.code === "avoid") return r.upgradeCondition ? `先不買；改判建議買進的條件：${r.upgradeCondition}` : "先不買";
   const nextOpen = stance.briefMode === "next-open";
   const exit = r.exit != null ? `買進後跌破 ${fmt(r.exit)} 出場` : "";
-  const noChase = r.noChase != null ? `高於 ${fmt(r.noChase)} 不追` : "";
-  const zone = r.zone ? `${fmt(r.zone.low)}～${fmt(r.zone.high)}` : "";
-  const parts =
-    r.code === "buy"
-      ? nextOpen
-        ? [`${stance.nextOpenLabel}開盤或盤中可分批買${noChase ? `，跳空${noChase}` : ""}`, exit]
-        : ["現價可分批買", noChase, exit]
-      : nextOpen
-        ? [`開盤不追；${stance.nextOpenLabel}盤中回到 ${zone || "買進區間"} 可分批買（掛單可參考區間下緣或中間）`, exit]
-        : [`現價不買，等回到 ${zone || "買進區間"} 再分批`, exit];
+  const add = r.pullbackAdd != null ? `拉回到 ${fmt(r.pullbackAdd)} 附近可加碼` : "";
+  const parts = nextOpen ? [`${stance.nextOpenLabel}開盤或盤中可買（分批）`, add, exit] : ["現價可分批買", add, exit];
   return parts.filter(Boolean).join("；");
 }
 
@@ -167,8 +166,8 @@ function aiPickText(ai: ActionBriefAiJson | null, p: { symbol: string; name: str
   return v && typeof v === "object" ? (v as { reason?: string; risk?: string }) : undefined;
 }
 
-/** 等回檔那組的小標（AI 版與 fallback 共用，畫面上要明講現價不買）。 */
-export const PULLBACK_GROUP_TITLE = "等回檔名單（現價不買，等回到區間再分批）";
+/** 「先不要買／不建議追」那段的小標。 */
+export const NOT_CHASE_TITLE = "先不要買／不建議追";
 
 const str = (v: unknown, max = 160) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ").slice(0, max) : "");
 const sentence = (s: string) => s.replace(/[。.]+$/, "");
@@ -189,8 +188,9 @@ export interface RenderInput {
   stance: Pick<TradingStance, "briefMode" | "nextOpenLabel">;
   marketLine: string;
   buy: ActionBriefPick[];
-  pullback: ActionBriefPick[];
   notChase: NotChasePick | null;
+  /** 大盤偏弱提示（siteRating.ts weakMarketNote；大盤不弱是 null），頁首提示一次 */
+  marketNote?: string | null;
   /** 今天有沒有漲幅榜資料（沒有就寫「今日漲幅榜無資料」） */
   gainersAvailable: boolean;
   /** AI 回的 JSON；null＝AI 失敗（fallback，只用程式文字） */
@@ -200,8 +200,8 @@ export interface RenderInput {
 }
 
 /**
- * 建議買進／等回檔兩組的條列（AI 版與 fallback 共用）。名單只取 picks 裡 code 為 buy／buy-on-pullback 的、
- * 每組最多 PICK_GROUP_LIMIT 檔；AI JSON 只提供每檔理由／風險與排序偏好，多寫的代號一律忽略。
+ * 「建議買進」的條列（AI 版與 fallback 共用）。名單只取 picks 裡建議買進的、最多 PICK_GROUP_LIMIT 檔；
+ * AI JSON 只提供每檔理由／風險與排序偏好，多寫的代號一律忽略。
  */
 export function groupedPickLines(
   picks: ActionBriefPick[],
@@ -209,8 +209,7 @@ export function groupedPickLines(
   ai: ActionBriefAiJson | null = null
 ): string[] {
   const nextOpen = stance.briefMode === "next-open";
-  const buy = applyAiOrder(picks.filter((p) => p.code === "buy").slice(0, PICK_GROUP_LIMIT), ai?.order);
-  const pullback = applyAiOrder(picks.filter((p) => p.code === "buy-on-pullback").slice(0, PICK_GROUP_LIMIT), ai?.order);
+  const buy = applyAiOrder(picks.filter((p) => p.code !== "avoid").slice(0, PICK_GROUP_LIMIT), ai?.order);
   const pickLine = (p: ActionBriefPick) => {
     const t = aiPickText(ai, p);
     const reason = str(t?.reason) || p.reason;
@@ -220,23 +219,14 @@ export function groupedPickLines(
       `- **${p.name}(${p.symbol})**：${p.label}。${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}${p.aiView ? `${p.aiView}。` : ""}`,
     ];
   };
-  const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 可買（建議買進）**` : "**建議買進（現價可分批買）**";
-  if (buy.length === 0 && pullback.length === 0) {
+  const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 建議買進（開盤或盤中可買）**` : "**建議買進（現價可分批買）**";
+  if (buy.length === 0) {
     return [
       buyTitle,
-      `- ${nextOpen ? `${stance.nextOpenLabel} 先觀望` : "今天觀望"}：沒有個股同時通過${SCORED_FACET_LABEL}的體質門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）且本站綜合評等為買進或等回檔。`,
+      `- ${nextOpen ? `${stance.nextOpenLabel} 先不買` : "今天先不買"}：沒有個股同時通過${SCORED_FACET_LABEL}的體質門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項、技術面不能是不支持）。`,
     ];
   }
-  const out = [buyTitle];
-  if (buy.length > 0) out.push(...buy.flatMap(pickLine));
-  else
-    out.push(
-      nextOpen
-        ? `- 現價沒有可直接買的：體質過關的都已漲離買進區間，下方等回檔名單 ${stance.nextOpenLabel} 盤中回到區間可分批買。`
-        : "- 目前沒有現價可直接買的：體質過關的都已漲離買進區間，見下方等回檔名單。"
-    );
-  if (pullback.length > 0) out.push(`**${PULLBACK_GROUP_TITLE}**`, ...pullback.flatMap(pickLine));
-  return out;
+  return [buyTitle, ...buy.flatMap(pickLine)];
 }
 
 /**
@@ -244,8 +234,10 @@ export function groupedPickLines(
  */
 export function renderActionBrief(input: RenderInput): string {
   const { stance, ai } = input;
-  const picks = [...input.buy, ...input.pullback];
-  const out: string[] = [`**大盤**：${sentence(str(ai?.market, 80) || input.marketLine)}。`, ...groupedPickLines(picks, stance, ai)];
+  const picks = input.buy;
+  const out: string[] = [`**大盤**：${sentence(str(ai?.market, 80) || input.marketLine)}。`];
+  if (input.marketNote && picks.length > 0) out.push(`**${sentence(input.marketNote).replace(/^大盤偏弱提示：/, "大盤偏弱提示**：")}。`);
+  out.push(...groupedPickLines(picks, stance, ai));
   const view = str(ai?.view, 220);
   if (view && picks.length > 0) {
     const conf = ["高", "中", "低"].includes(str(ai?.confidence)) ? str(ai?.confidence) : "";
@@ -255,12 +247,12 @@ export function renderActionBrief(input: RenderInput): string {
   const nc = input.notChase;
   out.push(
     nc
-      ? `**不建議追**：${nc.name}(${nc.symbol}) 今日 ${nc.changePercent >= 0 ? "+" : ""}${nc.changePercent}%，但面向支持數只有 ${nc.supportCount}${
+      ? `**${NOT_CHASE_TITLE}**：${nc.name}(${nc.symbol}) 今日 ${nc.changePercent >= 0 ? "+" : ""}${nc.changePercent}%，但面向支持數只有 ${nc.supportCount}${
           notChaseText(ai, nc) ? `，${notChaseText(ai, nc)}` : nc.weakFacets.length ? `（${nc.weakFacets.join("、")}沒跟上）` : ""
         }。`
       : input.gainersAvailable
-        ? "**不建議追**：漲幅榜前段體質大多說得過去。"
-        : "**不建議追**：今日漲幅榜無資料。"
+        ? `**${NOT_CHASE_TITLE}**：漲幅榜前段體質大多說得過去。`
+        : `**${NOT_CHASE_TITLE}**：今日漲幅榜無資料。`
   );
   const watch = str(ai?.watch, 120);
   if (ai && watch) out.push(`**留意**：${sentence(watch)}。`);

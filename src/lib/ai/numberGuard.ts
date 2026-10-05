@@ -65,10 +65,11 @@ export function extractKeyLevels(grounding: string): { levels: KeyLevel[]; names
     if (value > 0 && !levels.some((l) => l.symbol === symbol && l.kind === kind && approx(l.value, value))) levels.push({ symbol, kind, value });
   };
   for (const seg of segments) {
-    for (const m of seg.text.matchAll(new RegExp(String.raw`(?:買進區間|下方支撐|回到)\s*(${NUM_SRC})\s*[～~至到\-]\s*(${NUM_SRC})`, "g"))) {
+    for (const m of seg.text.matchAll(new RegExp(String.raw`(?:買進區間|下方支撐|支撐區|回到)\s*(${NUM_SRC})\s*[～~至到\-]\s*(${NUM_SRC})`, "g"))) {
       push(seg.symbol, "zone", m[1]);
       push(seg.symbol, "zone", m[2]);
     }
+    for (const m of seg.text.matchAll(new RegExp(String.raw`(?:拉回加碼參考價|拉回到)\s*(${NUM_SRC})`, "g"))) push(seg.symbol, "zone", m[1]);
     for (const m of seg.text.matchAll(new RegExp(String.raw`(?:跌破|停損價|移動停利價|出場參考價)\s*(${NUM_SRC})`, "g"))) push(seg.symbol, "exit", m[1]);
     for (const m of seg.text.matchAll(new RegExp(String.raw`高於\s*(${NUM_SRC})\s*不追|漲過\s*(${NUM_SRC})`, "g"))) push(seg.symbol, "noChase", m[1] ?? m[2]);
   }
@@ -85,11 +86,11 @@ export function groundingNumberSet(grounding: string): number[] {
 function kindOfKeyword(k: string): LevelKind | null {
   if (/跌破|停損|停利|出場/.test(k)) return "exit";
   if (/不追/.test(k)) return "noChase";
-  if (/區間|掛單|回到|回檔到/.test(k)) return "zone";
+  if (/區間|掛單|回到|回檔到|加碼/.test(k)) return "zone";
   return null;
 }
 
-const KEYWORD_RE = /跌破|停損|停利|出場|區間|不追|掛單|回檔到|回到/g;
+const KEYWORD_RE = /跌破|停損|停利|出場|區間|不追|掛單|回檔到|回到|加碼/g;
 const UNIT_AFTER = /^\s*(?:%|％|張|倍|日|天|個|年|月|季|檔|筆|週|次|成|億|萬|股|分)/;
 
 /** 回答中這個位置之前最後提到的是哪一檔。 */

@@ -37,6 +37,7 @@ import { buildCannedAnswer, sanitizeLeakedMarkers } from "./askFallback";
 import { composeAskSystemPrompt } from "./askSystemCompose";
 import { getMarketStatus } from "@/lib/marketStatus";
 import { guardAnswerNumbers } from "./numberGuard";
+import { guardAvoidPriceAdvice } from "./ratingConsistencyGuard";
 import { modelInfo } from "./modelName";
 
 // `@/lib/ai/ask` 的公開介面刻意保持不變：這兩個型別原本就宣告在這個檔案裡，
@@ -199,18 +200,15 @@ export async function answerQuestion(
   const actionBrief = await actionBriefPromise;
   const actionBriefText = actionBrief?.usedAi ? actionBrief.text : "";
   // 名單與結論是程式依本站綜合評等算好的（跟個股頁問AI同一份），AI 掛掉時也照樣附。
-  // 2026-10-05：分「建議買進」與「等回檔（現價不買）」兩組，避免使用者把等回檔的當成現在可買。
+  // 2026-10-05：評等改果斷二分，名單只有「建議買進」（現價可分批買）。
   const ratingLine = (p: { name: string; symbol: string; label: string; holdingLabel: string; reason: string }) =>
     `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有：「${p.label}」／已持有：「${p.holdingLabel}」。理由：${p.reason}。`;
   const ratingGroup = (title: string, list: NonNullable<typeof actionBrief>["picks"]) =>
     `${title}\n${list.length > 0 ? list.map(ratingLine).join("\n") : "（無）"}`;
   const ratingListText = actionBrief
     ? actionBrief.picks.length > 0
-      ? [
-          ratingGroup("【A組：建議買進（現價可分批買）】", actionBrief.picks.filter((p) => p.code === "buy")),
-          ratingGroup("【B組：等回檔（現價不買，等回到區間才買）】", actionBrief.picks.filter((p) => p.code === "buy-on-pullback")),
-        ].join("\n")
-      : "（本站綜合評等目前沒有任何一檔是「建議買進」或「建議等回檔再買」）"
+      ? ratingGroup("【建議買進（現價可分批買）】", actionBrief.picks.filter((p) => p.code !== "avoid"))
+      : "（本站綜合評等目前沒有任何一檔是「建議買進」）"
     : "";
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
@@ -463,7 +461,10 @@ ${actionBriefText}` : "",
     // 回答後檢查關鍵價位（停損／出場／區間／不追價）有沒有抄錯，抄錯自動更正為程式值（見 numberGuard.ts）。
     const guarded = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(result.answer)), grounding);
     if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
-    return { answer: guarded.text, groundedSymbol, usedAi: true, model: modelInfo(result.model) };
+    // 先不要買的股票不可出現出場價／買進區間（見 ratingConsistencyGuard.ts）。
+    const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
+    if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
+    return { answer: consistent.text, groundedSymbol, usedAi: true, model: modelInfo(result.model) };
   }
 
   return {

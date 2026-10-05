@@ -20,6 +20,16 @@ export const REGIME_BAND_PCT = 2;
 /** MA60 的方向：跟幾個交易日前的 MA60 比。 */
 export const REGIME_SLOPE_LOOKBACK = 20;
 
+/** 弱市況提示用的回看天數（docs/backtest/2026-10-regime.md 市況定義 A：近 60 個交易日報酬）。 */
+export const MARKET_RET_LOOKBACK = 60;
+
+/** 加權指數近 MARKET_RET_LOOKBACK 個交易日報酬（%）；日K不足回 null。門檻見 siteRating.ts WEAK_MARKET_RET60_PCT。 */
+export function marketReturnPct(closes: number[], lookback = MARKET_RET_LOOKBACK): number | null {
+  const n = closes.length;
+  if (n <= lookback || !(closes[n - 1 - lookback] > 0)) return null;
+  return (closes[n - 1] / closes[n - 1 - lookback] - 1) * 100;
+}
+
 export function classifyRegime(closes: number[]): MarketRegime | null {
   const n = closes.length;
   if (n < REGIME_MA_DAYS + REGIME_SLOPE_LOOKBACK) return null;

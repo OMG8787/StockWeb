@@ -39,19 +39,34 @@ describe("computeSiteRating", () => {
     expect(isRecommendable(r)).toBe(true);
   });
 
-  it("體質過門檻但現價高於區間上緣 ≥1% → 建議等回檔再買（附區間）、持有續抱", () => {
+  it("體質過門檻但現價高於區間上緣 ≥1% → 果斷建議買進（現價可分批買＋單一拉回加碼價），不再出現「現價不買」", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100]) });
-    expect(r.code).toBe("buy-on-pullback");
-    expect(r.label).toBe("建議等回檔再買（現價不買，等回到 95～100）");
-    expect(r.holdingLabel).toBe("續抱");
-    expect(r.reason).toContain("高於買進區間上緣 100");
+    expect(r.code).toBe("buy");
+    expect(r.label).toBe("建議買進（現價 110 可分批買；若拉回到 100 附近可加碼）");
+    expect(r.pullbackAdd).toBe(100);
+    expect(r.holdingLabel).toBe("續抱（拉回到 100 附近可加碼）");
+    expect(r.riskNote).toContain("高於支撐區上緣 100 約 10%");
+    expect(`${r.label}${r.reason}`).not.toMatch(/現價不買|等回到|等回檔/);
     expect(isRecommendable(r)).toBe(true);
   });
 
-  it("貼近上緣但有 RSI 超買漲多警訊 → 仍是等回檔，理由講出警訊", () => {
+  it("貼近上緣但有 RSI 超買漲多警訊 → 仍建議買進，風險提示講出警訊", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [sig("RSI 82 超買")], framework: frame(100.5, [95, 100]) });
-    expect(r.code).toBe("buy-on-pullback");
-    expect(r.reason).toContain("RSI 82 超買");
+    expect(r.code).toBe("buy");
+    expect(r.riskNote).toContain("RSI 82 超買");
+  });
+
+  it("大盤偏弱（60 日報酬 < 5%）→ 結論不變，附弱市況提示；大盤強時不附", () => {
+    const weak = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(100.5, [95, 100]), marketRet60Pct: 2.34 });
+    expect(weak.code).toBe("buy");
+    expect(weak.marketNote).toBe(
+      "大盤偏弱提示：近60日加權報酬 +2.3%，歷史上此時技術強勢股常落後（之後 10～20 日平均落後同類股約 0.5～1%），宜降低部位或分批"
+    );
+    expect(weak.reason).toContain("大盤偏弱提示");
+    const strong = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(100.5, [95, 100]), marketRet60Pct: 8 });
+    expect(strong.marketNote).toBeNull();
+    const avoid = computeSiteRating({ ...facets(["支持", "中性", "中性", "中性", "中性"]), signals: [], framework: frame(100.5, [95, 100]), marketRet60Pct: -3 });
+    expect(avoid.marketNote).toBeNull();
   });
 
   it("支持面向不足 → 建議先不要買", () => {
@@ -84,17 +99,17 @@ describe("computeSiteRating", () => {
   it("日K不足（沒有價位框架）但體質過門檻 → 建議買進，理由註明未算出區間", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: null });
     expect(r.code).toBe("buy");
-    expect(r.reason).toContain("未算出買進區間");
+    expect(r.reason).toContain("未算出參考價位");
     expect(r.zone).toBeNull();
   });
 
-  it("雙黃金交叉（多方訊號）不會讓價位過高的股票變成建議買進", () => {
-    const r = computeSiteRating({
-      ...facets(GOOD),
-      signals: [sig("MACD黃金交叉"), sig("KD黃金交叉")],
-      framework: frame(120, [95, 100]),
-    });
-    expect(r.code).toBe("buy-on-pullback");
+  it("新評等不會再產生等回檔（二分：建議買進／先不要買）", () => {
+    for (const price of [96, 100.5, 110, 150]) {
+      for (const signals of [[], [sig("RSI 82 超買")], [sig("MACD黃金交叉"), sig("KD黃金交叉")]]) {
+        const r = computeSiteRating({ ...facets(GOOD), signals, framework: frame(price, [95, 100]) });
+        expect(["buy", "avoid"]).toContain(r.code);
+      }
+    }
   });
 
   it("同樣輸入結果完全相同（純函式、無隨機）", () => {
@@ -102,22 +117,23 @@ describe("computeSiteRating", () => {
     expect(computeSiteRating(input)).toEqual(computeSiteRating(input));
   });
 
-  it("describeSiteRating：先不要買不給買進區間與買進後出場價（只列觀察用支撐）", () => {
+  it("describeSiteRating：先不要買不給任何價位，只給改判建議買進的條件", () => {
     const r = computeSiteRating({ ...facets(["不支持", "支持", "支持", "中性", "中性"]), signals: [], framework: frame(110, [95, 100]) });
     expect(r.code).toBe("avoid");
     const text = describeSiteRating("仁寶", "2324", r);
-    expect(text).not.toContain("買進區間 95");
-    expect(text).not.toContain("買進後跌破");
-    expect(text).toContain("不是買進區間");
+    expect(text).not.toMatch(/95|買進區間|跌破|出場 ?\d/);
+    expect(text).toContain("改判建議買進的條件：技術面轉為支持");
+    expect(r.upgradeCondition).toContain("技術面轉為支持");
   });
 
   it("describeSiteRating 帶標題、未持有／已持有字樣與價位", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100], 90, 113.5) });
     const text = describeSiteRating("健鼎", "3044", r);
     expect(text.startsWith(SITE_RATING_TITLE)).toBe(true);
-    expect(text).toContain("未持有：「建議等回檔再買（現價不買，等回到 95～100）」");
-    expect(text).toContain("已持有：「續抱」");
-    expect(text).toContain("高於 113.5 不追價");
+    expect(text).toContain("未持有：「建議買進（現價 110 可分批買；若拉回到 100 附近可加碼）」");
+    expect(text).toContain("已持有：「續抱（拉回到 100 附近可加碼）」");
+    expect(text).toContain("拉回加碼參考價 100");
+    expect(text).not.toContain("不追價");
     expect(text).toContain("買進後跌破 90 出場");
   });
 });

@@ -12,7 +12,7 @@ import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { sectorFactorDirection } from "./grounding/sectorFactors";
 import { computeRatingFeatures, type RatingFeatures } from "./learning/features";
 import type { MarketRegime } from "./learning/regime";
-import { getMarketRegime } from "./learning/regimeData";
+import { getMarketRegime, getTaiexRet60Pct } from "./learning/regimeData";
 
 /**
  * 單一個股的「本站綜合評等」唯一入口（有 I/O、有快取）。今日建議、AI 問答全市場推薦、
@@ -51,6 +51,8 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
   // 價位框架只用到 MA60／近60日高低，3 個月日K（約 60 根）就夠。
   // 市況＋產業外部因子方向：評等紀錄的特徵用，不影響評等結論；都 fail open。
   const regimePromise = quote.market === "TW" ? getMarketRegime().catch(() => null) : Promise.resolve(null);
+  // 弱市況提示（只附提示、不改結論，見 siteRating.ts WEAK_MARKET_RET60_PCT）；美股不套。
+  const marketRetPromise = quote.market === "TW" ? getTaiexRet60Pct().catch(() => null) : Promise.resolve(null);
   const sectorDirPromise = ensureTwUniverseWarm()
     .then(() =>
       sectorFactorDirection({ symbol: quote.symbol, market: quote.market, sector: findInUniverse(quote.symbol, quote.market)?.sector ?? "" })
@@ -92,6 +94,7 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     signals,
     framework,
     chase,
+    marketRet60Pct: await marketRetPromise,
   });
   const [regime, sectorDirection] = await Promise.all([regimePromise, sectorDirPromise]);
   const features = computeRatingFeatures({
@@ -133,9 +136,10 @@ function getStockRatingCached(symbol: string, market?: Market): Promise<StockRat
   // key 刻意不含 market：同一檔從不同入口進來時有的知道市場、有的不知道（問AI關於只帶代號），
   // key 不同就會各算各的、結論可能不一致；台股代號是數字、美股是英文，不會撞。帶台北日期：跨日不沿用。
   return cachedWithDegradedNullTtl<StockRatingResult>(
+    // v4：2026-10-05 果斷二分（不再有等回檔，偏高時附單一拉回加碼價）、弱市況提示、先不要買給改判條件。
     // v3：2026-10-05 擴大回測後：技術面不支持一票否決、急漲改為風險提示不改結論（siteRating.ts）。
     // v2：2026-10-05 加追高防護（chaseGuards.ts）、等回檔字樣改「現價不買，等回到 A～B」。
-    `stock-rating:v3:${sym}:${taipeiDayKey()}`,
+    `stock-rating:v4:${sym}:${taipeiDayKey()}`,
     STOCK_RATING_TTL_MS,
     STOCK_RATING_DEGRADED_TTL_MS,
     () => loadStockRating(sym, market)

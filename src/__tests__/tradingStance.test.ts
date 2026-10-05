@@ -42,8 +42,8 @@ describe("getTwTradingPhase／getTradingStance（假時鐘）", () => {
     expect(s.briefTitle).toBe("明日操作建議");
     expect(s.nextOpenLabel).toBe("10/6（週二）");
     expect(s.stanceLine).toContain("明天交易時段（開盤與盤中）要不要買");
-    expect(s.stanceLine).toContain("明天盤中回到 A～B 可分批買");
-    expect(s.stanceLine).toContain("不可寫成「開盤沒有可直接買的」");
+    expect(s.stanceLine).toContain("明天開盤或盤中可分批買");
+    expect(s.stanceLine).toContain("「開盤沒有可直接買的」");
   });
 
   it("週五 15:00 → 下個交易日操作建議（10/12 週一）", () => {

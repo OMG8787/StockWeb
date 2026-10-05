@@ -37,11 +37,12 @@ export interface AiJudgment {
   at: string;
 }
 
-/** 等級由低到高。 */
-const LADDER: RatingCode[] = ["avoid", "buy-on-pullback", "buy"];
+/** 等級由低到高（2026-10-05 評等改果斷二分，不再有等回檔；舊紀錄的等回檔見 shiftCode）。 */
+const LADDER: RatingCode[] = ["avoid", "buy"];
 
-/** 程式評等調升／調降一級（到頂／到底就停在原級）。 */
+/** 程式評等調升／調降一級（到頂／到底就停在原級）。舊紀錄的「等回檔」介於兩者之間：調升＝買進、調降＝先不要買。 */
 export function shiftCode(code: RatingCode, delta: AiDelta): RatingCode {
+  if (code === "buy-on-pullback") return delta > 0 ? "buy" : delta < 0 ? "avoid" : code;
   const i = LADDER.indexOf(code);
   return LADDER[Math.max(0, Math.min(LADDER.length - 1, i + delta))];
 }
