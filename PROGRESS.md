@@ -412,6 +412,11 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-06（續2）：主題新聞搜尋＋國際新聞池＋整合稽核
+
+- 主題新聞（`7e06386`）：根因是 AI 問答只餵台股／美股市場新聞池，沒有依問句主題搜尋，所以「美國 伊朗」答成資料裡沒有。新增 topicNews.ts（Google 新聞 RSS 近3天8則、15分鐘快取、失敗與0則分開標示）、intent.extractTopicNewsQuery、RULE_TOPIC_NEWS、BLOCK_MARKERS.topicNews；市場新聞池與快報補國際／地緣政治／Fed 查詢。正式站 curl 3 題通過（美伊、Fed、台積電仍走個股流程）；Lite 偶有標題混述，待跨模型評測。同 commit 含 ratingChange 接線（RULE_RATING_CHANGE），正式站驗證待獨立驗證 agent。
+- 整合稽核（進行中）：`8c2ced0` ratingCore 正式站與回測共用（3,777 組逐值相同）、`b9ca0ec`、`38311a1`、`cd91895`、`a822292` 跨入口整合測試 15 項（全套 331 過）。
+
 ### 2026-10-06（續）：評等果斷化整批完成
 
 - 二分評等（`0e01390`，stock-rating v4、action-brief v13、ratingConsistencyGuard 擋先不要買的區間／出場價、弱市況提示、今日建議最多5檔）；Gemini 分級與時點重寫（`343b247`、`64e6383`、`2322d34`，問答 lite、今日建議／快報／AI 判斷非 lite＋思考預算、每模型每天18次配額）；今日建議兩層（`f4f4d9f`，名單價位即時跟 stockRating、AI 解說依時點、不跨日）；篩選誤判（`fdce118`）；錯字近似（`055bf70`，fuzzyName.ts）；教訓依擴大回測更新（`52255ee`）；AI 判斷層不顯示（`28a6750`，AI_VIEW_VISIBLE_TO_USERS=false）；評等變動說明 ratingChange.ts（`70035aa`、`e3460bd`，接線待主題新聞 agent 一併提交）。正式站 curl 4 題通過；今日建議由 Gemini 3.6 Flash 撰寫。
