@@ -161,17 +161,31 @@ const TECH_SCREEN_VERB_PATTERN =
 export const TECH_NEAR_CROSS_PATTERN =
   /(快要?|即將|即将|將要|将要|就要|準備|准备|接近|逼近)\s*(KD|MACD|K值|D值)?(線|线|指標|指标)?\s*的?\s*(黃金交叉|黄金交叉|死亡交叉|交叉|金叉|死叉)|要交叉了/i;
 
+// 「有…的嗎」這種存在問句、「都黃金交叉」這種多條件同時成立的說法，本身就是在找股票（2026-10-05 使用者回報：
+// 對話中問「那有MACD與KD線都黃金交叉的嗎?」，沒有「有沒有／哪些」找股動詞而接不住，這輪沒附篩選清單，
+// AI 只好回答「加權指數今天沒有同時出現 MACD 與 KD 黃金交叉」；當天其實有波若威、台光電）。
+// 排除「有什麼用／有效嗎」這類在問指標本身的句子。
+export const TECH_EXISTENCE_QUESTION_PATTERN =
+  /有(?!什麼|甚麼|什么|用|效|意義|意义|差|關|关|沒有|没有).{0,24}(的嗎|的吗|的呢|嗎|吗)\s*[?？]?\s*$/;
+export const TECH_ALL_CONDITIONS_PATTERN =
+  /都\s*(呈現|呈|出現|出现|有|是|已)?\s*(黃金交叉|黄金交叉|金叉|死亡交叉|死叉|多頭排列|多头排列|空頭排列|空头排列)/;
+
+/** 這句話本身是不是「用技術指標篩股票」（不看對話脈絡）。 */
+function isTechScreenQuestion(q: string): boolean {
+  if (TECH_NEAR_CROSS_PATTERN.test(q)) return true;
+  if (!TECH_INDICATOR_PATTERN.test(q)) return false;
+  return TECH_SCREEN_VERB_PATTERN.test(q) || TECH_EXISTENCE_QUESTION_PATTERN.test(q) || TECH_ALL_CONDITIONS_PATTERN.test(q);
+}
+
 export function conversationWantsTechScreen(question: string, history: ChatTurn[]): boolean {
-  if (TECH_NEAR_CROSS_PATTERN.test(question)) return true;
-  if (TECH_INDICATOR_PATTERN.test(question) && TECH_SCREEN_VERB_PATTERN.test(question)) return true;
+  if (isTechScreenQuestion(question)) return true;
   // 極短的接續追問（「那KD呢」「其他呢」）本身不成句，靠對話脈絡判斷——
   // 跟 conversationWantsMovers 完全同一套邏輯，理由見那裡的註解。
   if (!isFollowupShape(question)) return false;
   return history.some(
     (turn) =>
       turn.role === "user" &&
-      (TECH_NEAR_CROSS_PATTERN.test(turn.content) ||
-        (TECH_INDICATOR_PATTERN.test(turn.content) && TECH_SCREEN_VERB_PATTERN.test(turn.content)))
+      isTechScreenQuestion(turn.content)
   );
 }
 

@@ -229,6 +229,21 @@ describe("conversationWantsTechScreen：快要／即將交叉的問法", () => {
   it("純名詞解釋不觸發", () => {
     expect(conversationWantsTechScreen("黃金交叉是什麼意思", [])).toBe(false);
   });
+
+  it("「有…的嗎」「都黃金交叉」這類存在問句走全市場篩選（2026-10-05 誤答成加權指數）", () => {
+    const history: ChatTurn[] = [
+      { role: "user", content: "明天有建議買入甚麼股票嗎?" },
+      { role: "assistant", content: "加權指數今天上漲，台光電(2383)建議買進。" },
+      { role: "user", content: "那有建議現價可買的嗎?" },
+      { role: "assistant", content: "……" },
+    ];
+    for (const q of ["那有MACD與KD線都黃金交叉的嗎?", "有MACD黃金交叉的嗎", "KD跟MACD都金叉", "有RSI超賣的股票嗎？"]) {
+      expect(conversationWantsTechScreen(q, history), q).toBe(true);
+    }
+    for (const q of ["MACD有什麼用嗎?", "KD有效嗎", "黃金交叉是什麼意思"]) {
+      expect(conversationWantsTechScreen(q, []), q).toBe(false);
+    }
+  });
 });
 
 describe("「這幾檔／這些」指代上一則回答的整份清單（2026-10-05 使用者回報跑出清單外的台積電）", () => {
