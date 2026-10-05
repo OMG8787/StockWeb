@@ -25,7 +25,7 @@ export function ChipsRatioHeaderCells({ compact = false }: { compact?: boolean }
   const weekNote = majorDate
     ? `目前為 ${shortDate(majorDate)} 那週${majorPrevDate ? `，比較 ${shortDate(majorPrevDate)} 那週` : ""}。`
     : "";
-  const th = compact ? "py-2 pr-2 font-medium text-right leading-tight" : "py-2 pr-4 font-medium text-right whitespace-nowrap";
+  const th = compact ? "py-2 pr-1.5 font-medium text-right leading-tight text-balance" : "py-2 pr-4 font-medium text-right whitespace-nowrap";
   return (
     <>
       <th
@@ -69,7 +69,7 @@ function Delta({ pair, prevLabel, pendingPrev, missingPrev }: { pair: RatioPair;
 }
 
 const TD_DEFAULT = "py-2.5 pr-4 text-right tabular-nums whitespace-nowrap";
-const TD_COMPACT = "py-2 pr-2 text-right tabular-nums whitespace-nowrap";
+const TD_COMPACT = "py-2 pr-1.5 text-right tabular-nums whitespace-nowrap";
 
 function Cell({
   entry,
