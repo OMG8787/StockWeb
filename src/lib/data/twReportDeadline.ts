@@ -9,7 +9,8 @@
  * - 一般上市櫃公司：Q1 5/15、Q2 8/14、Q3 11/14、年報 次年 3/31
  * - 金融保險業（產業別 17）及第一上市（外國企業，KY）公司：Q2 延到 8/31，其餘同一般
  * - 金融控股公司（13 家）：Q1 5/30、Q2 8/31、Q3 11/29、年報 3/31
- * 期限遇假日順延到下一個上班日，這裡不另外推算假日（畫面註明「遇假日順延」）。
+ * 期限遇假日順延到下一個上班日：這裡只處理週末（落在週六、日就順延到下一個週一，見 rollWeekendToMonday）；
+ * 國定假日沒有免費、穩定的資料源可查，所以不推算（畫面仍註明「遇假日順延」涵蓋這部分）。
  */
 
 export type TwReportCategory = "general" | "financial" | "foreign" | "financialHolding";
@@ -53,10 +54,19 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-/** 西元會計年度 fiscalYear 第 quarter 季（4＝年報）的期限。 */
+/** 法定期限落在週六／週日 → 順延到下一個週一（國定假日不處理，見檔頭說明）。 */
+export function rollWeekendToMonday(y: number, m: number, d: number): { y: number; m: number; d: number } {
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const dow = dt.getUTCDay();
+  const add = dow === 6 ? 2 : dow === 0 ? 1 : 0;
+  if (add) dt.setUTCDate(dt.getUTCDate() + add);
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
+/** 西元會計年度 fiscalYear 第 quarter 季（4＝年報）的期限（已做週末順延）。 */
 function deadlineFor(set: DeadlineSet, fiscalYear: number, quarter: 1 | 2 | 3 | 4): Candidate {
-  const [m, d] = quarter === 1 ? set.q1 : quarter === 2 ? set.q2 : quarter === 3 ? set.q3 : set.annual;
-  const y = quarter === 4 ? fiscalYear + 1 : fiscalYear;
+  const [m0, d0] = quarter === 1 ? set.q1 : quarter === 2 ? set.q2 : quarter === 3 ? set.q3 : set.annual;
+  const { y, m, d } = rollWeekendToMonday(quarter === 4 ? fiscalYear + 1 : fiscalYear, m0, d0);
   const roc = fiscalYear - 1911;
   return {
     date: `${y}-${pad(m)}-${pad(d)}`,
@@ -112,7 +122,7 @@ export function nextTwReportDeadline(
   return { date: hit.date, period: hit.period };
 }
 
-/** 畫面／AI 共用的誠實寫法：「依法最晚 2026/11/14 前公布（115年Q3）」。 */
+/** 畫面／AI 共用的誠實寫法：「依法最晚 2026/11/16 前公布（115年Q3）」。 */
 export function formatTwReportDeadline(d: TwReportDeadline): string {
   return `依法最晚 ${d.date.replaceAll("-", "/")} 前公布（${d.period}）`;
 }

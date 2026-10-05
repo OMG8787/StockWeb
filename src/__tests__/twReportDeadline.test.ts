@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTwReportDeadline, nextTwReportDeadline, parseTwEpsPeriod } from "@/lib/data/twReportDeadline";
+import { formatTwReportDeadline, nextTwReportDeadline, parseTwEpsPeriod, rollWeekendToMonday } from "@/lib/data/twReportDeadline";
 import { classifyTwReportCategory } from "@/lib/data/twCompanyProfile";
 import { resolveMarketCap } from "@/lib/data/marketCap";
 import { formatMarketCap } from "@/lib/format";
@@ -17,32 +17,39 @@ describe("parseTwEpsPeriod", () => {
 });
 
 describe("nextTwReportDeadline", () => {
-  it("一般公司：已公布 Q2，10/5 → Q3 11/14", () => {
-    expect(nextTwReportDeadline("general", "115年Q1～Q2累計", at("2026-10-05"))).toEqual({ date: "2026-11-14", period: "115年Q3" });
+  it("一般公司：已公布 Q2，10/5 → Q3 11/14（週六）順延 11/16", () => {
+    expect(nextTwReportDeadline("general", "115年Q1～Q2累計", at("2026-10-05"))).toEqual({ date: "2026-11-16", period: "115年Q3" });
   });
   it("提早公布完 Q3 → 下一份是年報（次年 3/31）", () => {
     expect(nextTwReportDeadline("general", "115年Q1～Q3累計", at("2026-11-01"))).toEqual({ date: "2027-03-31", period: "115年度年報" });
   });
   it("年報之後 → 次年 Q1", () => {
-    expect(nextTwReportDeadline("general", "115年Q1～Q4累計", at("2027-04-02"))).toEqual({ date: "2027-05-15", period: "116年Q1" });
+    expect(nextTwReportDeadline("general", "115年Q1～Q4累計", at("2027-04-02"))).toEqual({ date: "2027-05-17", period: "116年Q1" }); // 5/15 週六 → 5/17
   });
   it("推出來的期限已過（資料未更新）→ 改用今天以後最近的期限", () => {
-    expect(nextTwReportDeadline("general", "115年Q1", at("2026-08-20"))).toEqual({ date: "2026-11-14", period: "115年Q3" });
+    expect(nextTwReportDeadline("general", "115年Q1", at("2026-08-20"))).toEqual({ date: "2026-11-16", period: "115年Q3" });
   });
   it("沒有 EPS 季別 → 依日期", () => {
     expect(nextTwReportDeadline("general", undefined, at("2026-01-10"))).toEqual({ date: "2026-03-31", period: "114年度年報" });
-    expect(nextTwReportDeadline("general", undefined, at("2026-11-14"))).toEqual({ date: "2026-11-14", period: "115年Q3" });
-    expect(nextTwReportDeadline("general", undefined, at("2026-11-15"))).toEqual({ date: "2027-03-31", period: "115年度年報" });
+    expect(nextTwReportDeadline("general", undefined, at("2026-11-14"))).toEqual({ date: "2026-11-16", period: "115年Q3" });
+    expect(nextTwReportDeadline("general", undefined, at("2026-11-16"))).toEqual({ date: "2026-11-16", period: "115年Q3" });
+    expect(nextTwReportDeadline("general", undefined, at("2026-11-17"))).toEqual({ date: "2027-03-31", period: "115年度年報" });
   });
-  it("金控 Q1 5/30、Q2 8/31、Q3 11/29", () => {
-    expect(nextTwReportDeadline("financialHolding", "114年Q1～Q4累計", at("2026-04-10")).date).toBe("2026-05-30");
+  it("金控 Q1 5/30、Q2 8/31、Q3 11/29（2026 年 5/30 週六、11/29 週日 → 順延週一）", () => {
+    expect(nextTwReportDeadline("financialHolding", "114年Q1～Q4累計", at("2026-04-10")).date).toBe("2026-06-01");
     expect(nextTwReportDeadline("financialHolding", "115年Q1", at("2026-06-10")).date).toBe("2026-08-31");
-    expect(nextTwReportDeadline("financialHolding", "115年Q1～Q2累計", at("2026-10-05")).date).toBe("2026-11-29");
+    expect(nextTwReportDeadline("financialHolding", "115年Q1～Q2累計", at("2026-10-05")).date).toBe("2026-11-30");
   });
   it("金融保險業／外國企業：Q2 8/31，Q3 仍 11/14", () => {
     expect(nextTwReportDeadline("financial", "115年Q1", at("2026-06-10")).date).toBe("2026-08-31");
     expect(nextTwReportDeadline("foreign", "115年Q1", at("2026-06-10")).date).toBe("2026-08-31");
-    expect(nextTwReportDeadline("foreign", "115年Q1～Q2累計", at("2026-10-05")).date).toBe("2026-11-14");
+    expect(nextTwReportDeadline("foreign", "115年Q1～Q2累計", at("2026-10-05")).date).toBe("2026-11-16");
+  });
+  it("週末順延：週六→週一、週日→週一、平日不動、跨月", () => {
+    expect(rollWeekendToMonday(2026, 11, 14)).toEqual({ y: 2026, m: 11, d: 16 });
+    expect(rollWeekendToMonday(2026, 11, 29)).toEqual({ y: 2026, m: 11, d: 30 });
+    expect(rollWeekendToMonday(2026, 8, 31)).toEqual({ y: 2026, m: 8, d: 31 });
+    expect(rollWeekendToMonday(2026, 5, 30)).toEqual({ y: 2026, m: 6, d: 1 });
   });
   it("顯示寫法", () => {
     expect(formatTwReportDeadline({ date: "2026-11-14", period: "115年Q3" })).toBe("依法最晚 2026/11/14 前公布（115年Q3）");
