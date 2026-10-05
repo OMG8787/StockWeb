@@ -41,11 +41,12 @@ export default function StockTable({ items, emptyLabel }: { items: SearchItem[];
             <th className="py-2 pr-4 font-medium" title={FINE_INDUSTRY_HINT}>
               產業
             </th>
-            <th className="py-2 pr-4 font-medium text-right">股價</th>
-            <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
-            <th className="py-2 pr-4 font-medium text-right">成交量</th>
             <th className="py-2 pr-4 font-medium text-right">成交金額</th>
             {showChips && <ChipsRatioHeaderCells />}
+            {/* 2026-10-05 使用者要求：成交量→股價→漲跌幅 依序放在最右邊（漲跌幅在最右）。 */}
+            <th className="py-2 pr-4 font-medium text-right">成交量</th>
+            <th className="py-2 pr-4 font-medium text-right">股價</th>
+            <th className="py-2 pr-4 font-medium text-right">漲跌幅</th>
           </tr>
         </thead>
         <tbody>
@@ -95,10 +96,8 @@ function StockRow({
         </span>
       </td>
       <td className="py-2.5 pr-4 text-(--text-secondary)">{fineIndustryOf(item)}</td>
-      <td className="py-2.5 pr-4 text-right tabular-nums">{formatPrice(item.price, item.market === "TW" ? "TWD" : "USD")}</td>
-      <td className={`py-2.5 pr-4 text-right font-medium tabular-nums ${priceDirectionClass(item.changePercent)}`}>
-        {formatPercent(item.changePercent)}
-      </td>
+      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">{formatTurnover(item.turnover, item.market)}</td>
+      {showChips && <ChipsRatioCells entry={entry} isTw={item.market === "TW"} />}
       <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">
         {formatVolume(item.volume, item.market)}
         {item.volumeTrend !== "neutral" && (
@@ -116,8 +115,10 @@ function StockRow({
           </span>
         )}
       </td>
-      <td className="py-2.5 pr-4 text-right tabular-nums text-(--text-secondary)">{formatTurnover(item.turnover, item.market)}</td>
-      {showChips && <ChipsRatioCells entry={entry} isTw={item.market === "TW"} />}
+      <td className="py-2.5 pr-4 text-right tabular-nums">{formatPrice(item.price, item.market === "TW" ? "TWD" : "USD")}</td>
+      <td className={`py-2.5 pr-4 text-right font-medium tabular-nums ${priceDirectionClass(item.changePercent)}`}>
+        {formatPercent(item.changePercent)}
+      </td>
     </tr>
   );
 }

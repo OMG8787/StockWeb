@@ -489,10 +489,11 @@ function DraggableGroup({
               <th className="py-2 pr-1.5 font-medium" title={FINE_INDUSTRY_HINT}>
                 產業
               </th>
+              {showChips && <ChipsRatioHeaderCells compact />}
+              {/* 2026-10-05 使用者要求：成交量→股價→漲跌幅 依序放在籌碼四欄之後、持有股數之前。 */}
+              <th className="py-2 pr-1.5 font-medium text-right text-balance">成交量</th>
               <th className="py-2 pr-1.5 font-medium text-right text-balance">股價</th>
               <th className="py-2 pr-1.5 font-medium text-right text-balance">漲跌幅</th>
-              <th className="py-2 pr-1.5 font-medium text-right text-balance">成交量</th>
-              {showChips && <ChipsRatioHeaderCells compact />}
               <th className="py-2 pr-1.5 font-medium text-right text-balance">持有股數</th>
               <th className="py-2 pr-1.5 font-medium text-right text-balance">購買價格</th>
               {sortable && (
@@ -675,6 +676,10 @@ function HoldingRow({
           {fineIndustryOf(item)}
         </div>
       </td>
+      {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} compact />}
+      <td className="py-2 pr-1.5 text-right tabular-nums text-(--text-secondary)">
+        {item.volume != null ? formatVolume(item.volume, item.market) : "—"}
+      </td>
       <td className="py-2 pr-1.5 text-right tabular-nums">
         {item.price != null ? (
           formatPrice(item.price, currency)
@@ -691,10 +696,6 @@ function HoldingRow({
       >
         {item.changePercent != null ? formatPercent(item.changePercent) : "—"}
       </td>
-      <td className="py-2 pr-1.5 text-right tabular-nums text-(--text-secondary)">
-        {item.volume != null ? formatVolume(item.volume, item.market) : "—"}
-      </td>
-      {showChips && <ChipsRatioCells entry={chipsEntry} isTw={item.market === "TW"} compact />}
       <td className="py-2 pr-1.5 text-right">
         <input
           type="number"
