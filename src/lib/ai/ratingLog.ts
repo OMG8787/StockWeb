@@ -74,8 +74,8 @@ export interface RatingLogEntry {
   /** 評等當下市況（多頭／空頭／盤整；2026-10-05 起才有，抓不到加權指數時 null） */
   rg?: MarketRegime | null;
   /**
-   * 第二階段預留：AI 判斷層在程式評等之上調整後的結論（最多 ±1 級）與理由。
-   * 第一階段一律不寫（undefined）；冠軍／挑戰者比較時「程式評等 code」與「ai.code」各算各的獎勵。
+   * AI 判斷層在程式評等之上調整後的結論（最多 ±1 級）與理由（aiJudge.ts，2026-10-05 第二階段起寫入；
+   * 只有評等實際被今日建議／個股問答使用、且 AI 判斷成功時才有）；冠軍／挑戰者比較時「程式評等 code」與「ai.code」各算各的獎勵。
    */
   ai?: AiAdjustment;
 }
@@ -86,6 +86,8 @@ export interface AiAdjustment {
   /** 相對程式評等調整幾級（-1／0／+1；buy 為最高級） */
   delta: -1 | 0 | 1;
   reason: string;
+  /** AI 自評把握程度（第二階段起才有） */
+  confidence?: "高" | "中" | "低";
   /** 哪個模型做的調整（例如 gemini） */
   model?: string;
 }

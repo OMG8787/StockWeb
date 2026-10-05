@@ -22,6 +22,7 @@ import { formatSharesWithLots } from "@/lib/format";
 import { buildMarketOverviewText } from "./marketOverview";
 import { getStockRatings, type StockRatingResult } from "./stockRating";
 import { describeSiteRating, isRecommendable } from "./siteRating";
+import { PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
 import {
   pct,
   score,
@@ -212,6 +213,9 @@ export interface ActionGrounding {
   /** qualified 再經本站綜合評等（stockRating.ts）後，評等為「建議買進／建議等回檔再買」的——今日建議只能列這些。 */
   picks: RatedPick[];
   indexSummary: string;
+  /** 「不建議追」程式選定的一檔（已排除建議名單；沒有合適的是 null） */
+  notChase: NotChasePick | null;
+  gainersAvailable: boolean;
 }
 
 /**
@@ -267,12 +271,18 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     undefined,
     "today-brief"
   ).catch(() => new Map<string, StockRatingResult>());
-  const picks: RatedPick[] = qualified
+  const allPicks = qualified
     .slice(0, RATED_PICK_LIMIT)
     .map((c) => ({ candidate: c, rating: ratings.get(c.symbol.toUpperCase()) }))
-    .filter((p): p is RatedPick => !!p.rating && isRecommendable(p.rating.rating));
-  const buyPicks = picks.filter((p) => p.rating.rating.code === "buy");
-  const pullbackPicks = picks.filter((p) => p.rating.rating.code === "buy-on-pullback");
+    .filter((p): p is RatedPick => !!p.rating && isRecommendable(p.rating.rating))
+    .map((p) => ({ ...p, symbol: p.rating.symbol, name: p.rating.name, rating: p.rating }));
+  // 2026-10-05：分組、每組上限、排序、去重由程式決定（actionPicks.ts），AI 只寫解說——AI 曾在等回檔列 7 檔。
+  const groups = selectPickGroups(allPicks.map((p) => ({ symbol: p.symbol, name: p.name, rating: p.rating.rating, pick: p })));
+  const buyPicks: RatedPick[] = groups.buy.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
+  const pullbackPicks: RatedPick[] = groups.pullback.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
+  const picks: RatedPick[] = [...buyPicks, ...pullbackPicks];
+  // 「不建議追」也由程式挑，並且一定排除建議名單裡的代號（互斥）。
+  const notChase = selectNotChase(liquidGainers, candidates, picks.map((p) => p.rating.symbol));
   const notRecommended = qualified
     .slice(0, RATED_PICK_LIMIT)
     .map((c) => ratings.get(c.symbol.toUpperCase()))
@@ -295,7 +305,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     `【本站已先幫你篩過的結果】今日候選股中，面向支持數 ≥${QUALIFY_MIN_SUPPORT} 且明確不支持面向 ≤${QUALIFY_MAX_AGAINST} 的共 ${qualified.length} 檔：${
       qualified.length > 0 ? qualified.map((c) => `${c.name}(${c.symbol})`).join("、") : "無"
     }`,
-    `【建議名單＝本站綜合評等為「建議買進」或「建議等回檔再買」的，共 ${picks.length} 檔（只能從這裡挑，結論字樣照抄，跟個股頁「問AI關於」同一份評等）】`,
+    `【建議名單（程式已決定，共 ${picks.length} 檔，每組最多 ${PICK_GROUP_LIMIT} 檔；不可增減、不可換組別，跟個股頁「問AI關於」同一份評等）】`,
     // 2026-10-05 檢討：使用者看到名單就直接買，但「等回檔」那幾檔現價其實不該買——兩組分開列。
     `【A組：建議買進（現價可分批買），共 ${buyPicks.length} 檔】`,
     buyPicks.length > 0 ? buyPicks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
@@ -304,6 +314,9 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     notRecommended.length > 0
       ? `【體質過門檻、但本站綜合評等為「建議先不要買」的（不可列進建議）】\n${notRecommended.map((r) => describeSiteRating(r.name, r.symbol, r.rating)).join("\n")}`
       : "",
+    notChase
+      ? `【不建議追（程式已選定，只寫這一檔）】${notChase.name}(${notChase.symbol})：今日${pct(notChase.changePercent)}，面向支持數 ${notChase.supportCount}，沒跟上的面向：${notChase.weakFacets.join("、") || "無"}`
+      : `【不建議追（程式已選定）】${liquidGainers.length > 0 ? "漲幅榜前段體質大多說得過去，沒有要點名的" : "今日漲幅榜無資料"}`,
     "",
     "【今日台股漲幅榜前10（純價格表現，已濾掉成交金額不足3000萬的冷門股）——漲最多不等於值得買，務必回體檢表對照其他面向】",
     liquidGainers.length > 0
@@ -345,5 +358,5 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       : "（目前沒有夠格的重大消息）",
   ].join("\n");
 
-  return { text, qualified, picks, indexSummary };
+  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0 };
 }
