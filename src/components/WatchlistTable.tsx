@@ -204,7 +204,7 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
           quick glance) makes the swipe discoverable without redesigning the
           table into a stacked mobile layout. sm: hides it once the table
           actually fits without scrolling. */}
-      <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看持有股數／購買價格／損益 →</p>
+      <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看持有股數／購買價格／損益，表頭與名稱欄會固定 →</p>
       {held.length > 0 && (
         <DraggableGroup title={`持有中（${held.length}）`} items={held} sortable market={held[0].market} group="held" />
       )}
@@ -309,6 +309,14 @@ function DraggableGroup({
   function handlePointerMove(y: number) {
     const dragKey = draggingKeyRef.current;
     if (!dragKey) return;
+    // 手機／平板表格在有上限高度的捲動容器裡（見 globals.css .watchlist-scroll）：把手被按住時
+    // 瀏覽器不會捲動（touch-action:none），所以指標靠近容器上下緣時手動捲一小段，才拖得到容器外的列。
+    const container = rowRefs.current.get(dragKey)?.closest<HTMLElement>(".watchlist-scroll");
+    if (container && container.scrollHeight > container.clientHeight + 1) {
+      const cr = container.getBoundingClientRect();
+      if (y > cr.bottom - 48) container.scrollTop += 12;
+      else if (y < cr.top + 48) container.scrollTop -= 12;
+    }
     let overIndex = order.length - 1;
     for (let i = 0; i < order.length; i++) {
       const el = rowRefs.current.get(order[i]);
@@ -472,7 +480,7 @@ function DraggableGroup({
         )}
       </div>
       )}
-      <div className="overflow-x-auto xl:overflow-visible">
+      <div className="watchlist-scroll">
         {/* 台股表多了籌碼比例四欄（大戶持股(週)／外資持股／融資使用率／融券使用率），最小寬度跟著
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
@@ -485,7 +493,7 @@ function DraggableGroup({
               <th className="w-8 pr-1 text-right font-medium">#</th>
               <th className="w-6" />
               <th className="w-8" />
-              <th className="py-2 pr-1.5 font-medium whitespace-nowrap">代碼 / 名稱</th>
+              <th className="wl-sticky-name py-2 pr-1.5 font-medium whitespace-nowrap">代碼 / 名稱</th>
               <th className="py-2 pr-1.5 font-medium" title={FINE_INDUSTRY_HINT}>
                 產業
               </th>
@@ -656,7 +664,7 @@ function HoldingRow({
       <td className="py-2 pl-1">
         <WatchlistButton symbol={item.symbol} market={item.market} name={item.name} />
       </td>
-      <td className="py-2 pr-1.5">
+      <td className="wl-sticky-name py-2 pr-1.5">
         {/* 名稱一行、代碼＋市場小字在下一行：比原本「名稱 代碼 [台股]」同一行省約 80px，桌機才塞得下不橫向捲動。 */}
         <Link
           href={`/stock/${item.symbol}?market=${item.market}`}
