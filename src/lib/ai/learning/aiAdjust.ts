@@ -90,6 +90,9 @@ export function parseAiJudgments(
   return out;
 }
 
+/** 個股資料裡 AI 看法那一行的標題（askSystemCompose.ts 依這個標題帶 RULE_AI_VIEW）。 */
+export const AI_VIEW_TITLE = "【AI 判斷層（只是看法，不改結論）】";
+
 /** 使用者看得到的一行；AI 沒調整（或判斷是針對另一個程式評等）回 null。 */
 export function describeAiView(j: AiJudgment | null | undefined, programCode: RatingCode): string | null {
   if (!j || j.baseCode !== programCode || j.delta === 0) return null;

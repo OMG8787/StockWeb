@@ -13,6 +13,7 @@ import { computeOutcome, REWARD_HORIZONS } from "./reward";
 import { buildSimilarTable, type SimilarTable } from "./similar";
 import { reviewCases, summarizeByCode, type CodeHorizonStat, type ReviewCase } from "./summary";
 import type { EvalRecord } from "./types";
+import { aiOutcomes, summarizeChampionChallenger, type ChampionChallenger } from "./championChallenger";
 import { computeBasisStats, LEARNED_WEIGHTS_ENABLED, toWeightTable, WEIGHT_MIN_SAMPLES, type BasisStat, type WeightTable } from "./weights";
 
 /**
@@ -53,6 +54,8 @@ export interface LearningSummary {
   basisStats: BasisStat[];
   reviewCases: ReviewCase[];
   lessons: LessonValidation[];
+  /** 冠軍（程式評等）／挑戰者（AI 調整後）比較；舊彙總沒有 */
+  championChallenger?: ChampionChallenger;
   weightsEnabled: boolean;
   weightMinSamples: number;
 }
@@ -190,6 +193,12 @@ export async function runLearningUpdate(opts: { force?: boolean; now?: Date } = 
             changed = true;
           }
         }
+        // 冠軍／挑戰者：AI 調整後結論用同一份報酬算自己的結論獎勵（championChallenger.ts）。
+        const prevAi = existing.get(e.day)?.[field]?.ai;
+        if (rec.ai) {
+          rec.ai.o = aiOutcomes(rec);
+          if (!prevAi) changed = true;
+        }
         if (!changed) continue;
         updated++;
         const w = writes.get(e.day) ?? {};
@@ -227,6 +236,7 @@ async function rebuildAggregates(today: string): Promise<number> {
     basisStats,
     reviewCases: reviewCases(records),
     lessons: validateLessons(records, LESSONS),
+    championChallenger: summarizeChampionChallenger(records, basisStats),
     weightsEnabled: LEARNED_WEIGHTS_ENABLED,
     weightMinSamples: WEIGHT_MIN_SAMPLES,
   };

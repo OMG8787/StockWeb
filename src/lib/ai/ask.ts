@@ -170,6 +170,8 @@ export async function answerQuestion(
             compact: targets.length > 1,
             // 評等紀錄的來源入口：個股頁「問AI關於」會帶 contextSymbol。
             source: contextSymbol && contextSymbol.toUpperCase() === t.symbol.toUpperCase() ? "stock-button" : "ai-ask",
+            // AI 判斷層只在問 1～2 檔個股時呼叫（關注清單深度分析不走這裡，避免一次十幾檔吃免費額度）。
+            aiJudge: targets.length <= 2,
             costBasis: holdings.find((h) => h.symbol.toUpperCase() === t.symbol.toUpperCase() && (h.shares ?? 0) > 0)?.costBasis,
           })
         )

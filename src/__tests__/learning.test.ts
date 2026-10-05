@@ -165,7 +165,7 @@ describe("教訓比對與驗證", () => {
     expect(ls.length).toBe(LESSONS_MAX_PER_STOCK);
     expect(ls.map((l) => l.id)).toContain("rsi-75");
     expect(ls.every((l) => l.status === "有效")).toBe(true);
-    expect(describeLessons(ls)).toContain("樣本 61 筆");
+    expect(describeLessons(ls)).toContain("「RSI ≥ 75：回測 61 筆、5 日平均超額 −2.58%、跑贏大盤 34%——");
   });
   it("一般情況的先不要買：不附條件型教訓", () => {
     expect(matchLessons(feat(), "avoid")).toEqual([]);

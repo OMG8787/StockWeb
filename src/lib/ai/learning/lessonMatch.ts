@@ -47,20 +47,29 @@ export function matchLessons(f: RatingFeatures | undefined, code: RatingCode, le
     .slice(0, LESSONS_MAX_PER_STOCK);
 }
 
-function evidenceText(l: Lesson): string {
+/** 證據數字（樣本數、5 日超額、跑贏比例）；都沒有時寫「個案」。 */
+function evidenceNumbers(l: Lesson): string {
   const e = l.evidence;
   const nums = [
-    e.n != null ? `樣本 ${e.n} 筆` : "",
-    e.excessPct != null ? `5日超額 ${e.excessPct >= 0 ? "+" : ""}${e.excessPct}%` : "",
-    e.winRatePct != null ? `跑贏 ${e.winRatePct}%` : "",
+    e.n != null ? `回測 ${e.n} 筆` : "",
+    e.excessPct != null ? `5 日平均超額 ${e.excessPct >= 0 ? "+" : "−"}${Math.abs(e.excessPct)}%` : "",
+    e.winRatePct != null ? `跑贏大盤 ${e.winRatePct}%` : "",
   ].filter(Boolean);
-  return `${nums.length ? nums.join("、") + "；" : ""}來源：${e.source}`;
+  return nums.length ? nums.join("、") : "個案、無統計數字";
+}
+
+/**
+ * 教訓＋證據組成一句不可分割的文字（2026-10-05 第一階段已知問題：AI 引用教訓時常沒帶證據數字）。
+ * 例：「急漲後追價：回測 90 筆、5 日平均超額 −1.15%——…（有效）」；RULE_EXPERIENCE 要求原句引用「」內整句。
+ */
+export function lessonSentence(l: Lesson): string {
+  return `「${l.condition}：${evidenceNumbers(l)}——${l.advice.replace(/[。]+$/, "")}（${l.status}）」`;
 }
 
 export function describeLessons(lessons: Lesson[]): string | undefined {
   if (lessons.length === 0) return undefined;
   return `${LESSONS_TITLE}${lessons
-    .map((l, i) => `${i + 1}. [${l.status}] ${l.condition}：${l.advice}（${evidenceText(l)}）`)
+    .map((l, i) => `${i + 1}. ${lessonSentence(l)}（來源：${l.evidence.source}）`)
     .join("；")}`;
 }
 

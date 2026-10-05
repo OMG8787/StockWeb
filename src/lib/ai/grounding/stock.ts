@@ -37,6 +37,8 @@ import { getStockRating } from "../stockRating";
 import { describeExperience } from "../learning/experienceText";
 import type { RatingSource } from "../ratingLog";
 import { describeRatingForHolding } from "../holdingRating";
+import { getAiJudgment } from "../aiJudge";
+import { AI_VIEW_TITLE, describeAiView } from "../learning/aiAdjust";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -45,7 +47,7 @@ import type { HistoryPeriod } from "../intent";
  */
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined },
-  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource } = {}
+  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource; aiJudge?: boolean } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
   const [quote, chart, chartYear, stockRating] = await Promise.all([
@@ -56,6 +58,10 @@ export async function buildStockGrounding(
     getStockRating(target.symbol, target.market, opts.source ?? "ai-ask").catch(() => null),
   ]);
   if (!quote) return undefined;
+  // AI 判斷層（學習循環第二階段，aiJudge.ts）：只在呼叫端要求時（個股問答、最多 2 檔），跟下面的資料抓取平行跑；
+  // 每檔每天最多一次 AI 呼叫並快取，等不到 12 秒就先不附（背景照樣完成並快取）。
+  const aiJudgePromise =
+    opts.aiJudge && stockRating ? getAiJudgment(stockRating, opts.source ?? "ai-ask").catch(() => null) : Promise.resolve(null);
 
   // Fired only once the quote resolves the actual market (target.market may
   // be undefined when guessed from text) and gives us the real company name
@@ -116,6 +122,8 @@ export async function buildStockGrounding(
         ).text
       }（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
+    const aiView = describeAiView(await aiJudgePromise, stockRating.rating.code);
+    if (aiView) lines.push(`${AI_VIEW_TITLE}${aiView}`);
     // AI 經驗層：相似案例統計＋相關教訓（learning/experienceText.ts；只有台股）。
     lines.push(...(await describeExperience(stockRating).catch(() => [] as string[])));
   }

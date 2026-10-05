@@ -7,6 +7,7 @@ import { WEIGHT_HALF_LIFE_TRADING_DAYS, WEIGHT_PRIOR_STRENGTH } from "@/lib/ai/l
 import { MISS_EXCESS_THRESHOLD_PCT, REWARD_MDD_PENALTY, TRADE_COST_PCT } from "@/lib/ai/learning/reward";
 import { LESSONS } from "@/lib/ai/lessons";
 import { RATING_LABEL } from "@/lib/ai/siteRating";
+import { AI_ADJUST_AFFECTS_CONCLUSION, AI_ADJUST_PROMOTION } from "@/lib/ai/learning/aiAdjust";
 
 /**
  * 成績看板（AI 學習循環第一階段）：只讀每日學習工作存在 Redis 的彙總（learning/learningStore.ts），
@@ -36,6 +37,7 @@ function Insufficient({ n, min }: { n: number; min: number }) {
 
 export default async function ScoreboardPage() {
   const s = await readLearningSummary().catch(() => null);
+  const cc = s?.championChallenger;
   return (
     <div className="space-y-4">
       <header className="space-y-1">
@@ -93,6 +95,74 @@ export default async function ScoreboardPage() {
           </table>
         </div>
         <p className="mt-2 text-[13px] text-(--text-muted)">判斷正確率＝結論獎勵 &gt; 0 的比例；筆數少於 {SCOREBOARD_MIN_SAMPLES} 標「樣本不足」。</p>
+      </section>
+
+      <section className={card}>
+        <h2 className="font-semibold">冠軍／挑戰者：程式評等 vs AI 調整後</h2>
+        <p className="mt-1 text-[13px] leading-relaxed text-(--text-muted)">
+          AI 判斷層會依新聞、產業、大盤情緒、相似案例與教訓，對程式評等「調升一級／維持／調降一級」。只拿有 AI 判斷的同一批紀錄配對比較；
+          目前 AI 調整{AI_ADJUST_AFFECTS_CONCLUSION ? "已" : "不"}改變網站上的主結論（只顯示一行「AI 看法」）。
+        </p>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr>
+                <th className={th}>期間</th>
+                <th className={th}>筆數</th>
+                <th className={th}>AI 有調整</th>
+                <th className={th}>程式評等 勝率</th>
+                <th className={th}>程式評等 平均獎勵</th>
+                <th className={th}>AI 調整後 勝率</th>
+                <th className={th}>AI 調整後 平均獎勵</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(cc?.rows ?? []).map((r) => (
+                <tr key={r.h} className="border-t border-(--gridline)">
+                  <td className={td}>{r.h}日</td>
+                  <td className={td}>
+                    {r.n}
+                    <Insufficient n={r.n} min={SCOREBOARD_MIN_SAMPLES} />
+                  </td>
+                  <td className={td}>{r.adjustedN}</td>
+                  <td className={td}>{fmtPct(r.program.winRate, false)}</td>
+                  <td className={`${td} ${tone(r.program.avgReward)}`}>{fmtPct(r.program.avgReward)}</td>
+                  <td className={td}>{fmtPct(r.ai.winRate, false)}</td>
+                  <td className={`${td} ${tone(r.ai.avgReward)}`}>{fmtPct(r.ai.avgReward)}</td>
+                </tr>
+              ))}
+              {!cc && (
+                <tr>
+                  <td className={td} colSpan={7}>
+                    尚無資料（AI 判斷 2026-10-05 起寫入評等紀錄，滿 1 個交易日後才有成績）
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-2 text-[13px] leading-relaxed text-(--text-muted)">
+          <div>
+            「AI 調整」這個依據的權重：
+            {cc && cc.aiBasis.length > 0
+              ? cc.aiBasis.map((b) => `${describeBasis(b.basis)}（${REGIME_LABEL[b.regime]}，${b.n} 筆，${b.active ? fmtPct(b.weight) : `中性 ${fmtPct(b.weight)}`}）`).join("、")
+              : "尚無已滿 5 日的 AI 調整紀錄（中性）"}
+          </div>
+          <div className="mt-1">何時可以放寬 AI 調整空間（讓 AI 調整改變主結論）——以下全部成立才考慮，仍由人決定：</div>
+          <ul className="list-disc pl-5">
+            {(cc?.promotion.checks ?? []).map((c) => (
+              <li key={c.label}>
+                {c.ok ? "✅" : "⬜"} {c.label}
+              </li>
+            ))}
+            {!cc && (
+              <li>
+                有 AI 判斷且滿 5 日 ≥ {AI_ADJUST_PROMOTION.minSamples} 筆、其中 AI 實際調整 ≥ {AI_ADJUST_PROMOTION.minAdjusted} 筆、AI 調整後 5 日平均獎勵高於程式評等 ≥{" "}
+                {AI_ADJUST_PROMOTION.minEdgePct} 個百分點、逐筆配對差 t 值 ≥ {AI_ADJUST_PROMOTION.minT}
+              </li>
+            )}
+          </ul>
+        </div>
       </section>
 
       <section className={card}>
