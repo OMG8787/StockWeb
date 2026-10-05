@@ -80,7 +80,8 @@ export function getLastTechScreenRun(): Record<string, string> {
  */
 export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
   return cachedListWithDegradedEmptyTtl(
-    `tech-screen:${market}:v1`,
+    // v2（2026-10-05）：IndicatorState 新增 kdNearCross／macdNearCross（即將交叉），舊快取沒有這兩欄。
+    `tech-screen:${market}:v2`,
     // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
     sessionAwareTtl(market, TECH_SCREEN_TTL_MS),
     TECH_SCREEN_DEGRADED_TTL_MS,

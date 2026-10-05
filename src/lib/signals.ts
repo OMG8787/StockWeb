@@ -1,5 +1,14 @@
 import type { Candle, ChartRange } from "@/lib/data/types";
 import { computeMacdLines, MACD_MIN_BARS } from "@/lib/ema";
+import {
+  detectNearCross,
+  KD_NEAR_CROSS_CONVERGING_DAYS,
+  KD_NEAR_CROSS_MAX_EST_DAYS,
+  KD_NEAR_CROSS_MAX_GAP,
+  MACD_NEAR_CROSS_CONVERGING_DAYS,
+  MACD_NEAR_CROSS_MAX_EST_DAYS,
+  type NearCrossReading,
+} from "@/lib/nearCross";
 
 export interface Signal {
   label: string;
@@ -245,9 +254,17 @@ export interface KdReading {
   zone: KdZone;
 }
 
-export function computeKd(candles: Candle[]): KdReading | null {
-  const PERIOD = 9;
-  const SMOOTH = 3;
+const KD_PERIOD = 9;
+const KD_SMOOTH = 3;
+
+/**
+ * KD 的完整 %K／%D 序列（只含有效值）。兩個序列的**最後一個元素都是最新交易日**，
+ * dSeries 只是前面比 kSeries 短（需要多 SMOOTH-1 天暖機），從尾端對齊即可同日配對。
+ * 根數不足時回 null。computeKd（今日交叉）與「即將交叉」判斷共用這一份計算。
+ */
+function computeKdSeries(candles: Candle[]): { kSeries: number[]; dSeries: number[] } | null {
+  const PERIOD = KD_PERIOD;
+  const SMOOTH = KD_SMOOTH;
   if (candles.length < PERIOD + SMOOTH * 2) return null;
 
   const rawK = candles.map((c, i) => {
@@ -261,6 +278,13 @@ export function computeKd(candles: Candle[]): KdReading | null {
   const validRawK = rawK.filter((v): v is number => v !== null);
   const kSeries = sma(validRawK, SMOOTH).filter((v): v is number => v !== null);
   const dSeries = sma(kSeries, SMOOTH).filter((v): v is number => v !== null);
+  return { kSeries, dSeries };
+}
+
+export function computeKd(candles: Candle[]): KdReading | null {
+  const series = computeKdSeries(candles);
+  if (!series) return null;
+  const { kSeries, dSeries } = series;
 
   if (kSeries.length < 2 || dSeries.length < 2) return null;
   // Both series' *last* entries land on the same (most recent) trading day —
@@ -352,6 +376,32 @@ export interface IndicatorState {
   streakDirection: "up" | "down" | null;
   /** 最新一根量 ÷ 前 20 日均量（不含最新一根）；算不出來時 null。 */
   volumeRatio: number | null;
+  /** KD「即將交叉」（K 未穿 D 但差距小且連續收斂），見 lib/nearCross.ts；不符合時 null。 */
+  kdNearCross: NearCrossReading | null;
+  /** MACD「即將交叉」（DIF 未穿訊號線但柱狀體連續縮小、接近 0），見 lib/nearCross.ts；不符合時 null。 */
+  macdNearCross: NearCrossReading | null;
+}
+
+/** KD 即將交叉：快線＝K、慢線＝D，門檻見 lib/nearCross.ts（本站自訂經驗值）。 */
+export function computeKdNearCross(candles: Candle[]): NearCrossReading | null {
+  const series = computeKdSeries(candles);
+  if (!series) return null;
+  return detectNearCross(series.kSeries, series.dSeries, {
+    convergingDays: KD_NEAR_CROSS_CONVERGING_DAYS,
+    maxEstDays: KD_NEAR_CROSS_MAX_EST_DAYS,
+    maxGap: KD_NEAR_CROSS_MAX_GAP,
+    requireFastMoving: true,
+  });
+}
+
+/** MACD 即將交叉：快線＝DIF、慢線＝訊號線，門檻見 lib/nearCross.ts（本站自訂經驗值）。 */
+export function computeMacdNearCross(candles: Candle[]): NearCrossReading | null {
+  if (candles.length < MACD_MIN_BARS) return null;
+  const { macdLine, signalLine } = computeMacdLines(candles.map((c) => c.close));
+  return detectNearCross(macdLine, signalLine, {
+    convergingDays: MACD_NEAR_CROSS_CONVERGING_DAYS,
+    maxEstDays: MACD_NEAR_CROSS_MAX_EST_DAYS,
+  });
 }
 
 export function computeIndicatorState(candles: Candle[], currentPrice: number): IndicatorState | null {
@@ -382,5 +432,7 @@ export function computeIndicatorState(candles: Candle[], currentPrice: number): 
     streakDays: streak.days,
     streakDirection: streak.direction,
     volumeRatio: avgVolume > 0 ? latest.volume / avgVolume : null,
+    kdNearCross: computeKdNearCross(candles),
+    macdNearCross: computeMacdNearCross(candles),
   };
 }
