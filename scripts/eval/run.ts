@@ -16,7 +16,7 @@ import type { ChatTurn } from "@/lib/ai/types";
 import type { CallAiProvidersOptions, ProviderResult } from "@/lib/ai/provider";
 import { EVAL_CASES } from "./cases";
 import { gradeAnswer, type Phase } from "./graders";
-import { renderReport, type CaseCapture, type EvalRecord } from "./report";
+import { renderComparison, renderReport, type CaseCapture, type EvalRecord } from "./report";
 import type { EvalCase } from "./types";
 
 loadEnvConfig(process.cwd());
@@ -219,6 +219,25 @@ async function regrade(jsonPath: string) {
 async function main() {
   const regradePath = arg("regrade");
   if (regradePath) return regrade(regradePath);
+  // --compare 前.json 後.json：產生「改前 vs 改後」比較表（輸出到 --out，預設 docs/eval/compare.md）
+  const compareIdx = process.argv.indexOf("--compare");
+  if (compareIdx >= 0) {
+    const [a, b] = [process.argv[compareIdx + 1], process.argv[compareIdx + 2]];
+    const load = (f: string) => JSON.parse(fs.readFileSync(f, "utf8")) as { variants: string[]; records: EvalRecord[] };
+    const before = load(a);
+    const after = load(b);
+    const out = path.join("docs", "eval", `${arg("out") ?? "compare"}.md`);
+    fs.writeFileSync(
+      out,
+      renderComparison({
+        title: `評測比較：${path.basename(a, ".json")} → ${path.basename(b, ".json")}`,
+        before: { label: path.basename(a, ".json"), records: before.records },
+        after: { label: path.basename(b, ".json"), records: after.records },
+        variants: after.variants,
+      })
+    );
+    return log(`比較表：${out}`);
+  }
   const only = arg("only")?.split(",");
   const variants = arg("variants")?.split(",") ?? DEFAULT_VARIANTS;
   const withJudge = process.argv.includes("--judge");

@@ -106,3 +106,40 @@ export function renderReport(p: {
   }
   return L.join("\n");
 }
+
+/** 兩次評測（例如改提示詞前後）各模型各規則通過率的比較表。 */
+export function renderComparison(p: {
+  title: string;
+  before: { label: string; records: EvalRecord[] };
+  after: { label: string; records: EvalRecord[] };
+  variants: string[];
+}): string {
+  const L: string[] = [`# ${p.title}`, ""];
+  const stat = (rs: EvalRecord[], v: string, rule?: string) => {
+    const cs = rs.filter((r) => r.variant === v && r.ok).flatMap((r) => r.checks.filter((c) => !rule || c.rule === rule));
+    return { pass: cs.filter((c) => c.pass).length, total: cs.length };
+  };
+  const cell = (s: { pass: number; total: number }) => (s.total ? `${pct(s.pass, s.total)}（${s.pass}/${s.total}）` : "—");
+  const delta = (a: { pass: number; total: number }, b: { pass: number; total: number }) => {
+    if (!a.total || !b.total) return "";
+    const d = Math.round((b.pass / b.total - a.pass / a.total) * 100);
+    return d === 0 ? "＝" : d > 0 ? `▲${d}` : `▼${-d}`;
+  };
+  L.push("## 總覽", "", `| 模型組 | ${p.before.label} | ${p.after.label} | 變化 | 全部通過題數（前→後） |`, "|---|---|---|---|---|");
+  for (const v of p.variants) {
+    const a = stat(p.before.records, v);
+    const b = stat(p.after.records, v);
+    const allPass = (rs: EvalRecord[]) => rs.filter((r) => r.variant === v && r.ok && r.checks.every((c) => c.pass)).length;
+    L.push(`| ${v} | ${cell(a)} | ${cell(b)} | ${delta(a, b)} | ${allPass(p.before.records)}→${allPass(p.after.records)} |`);
+  }
+  L.push("");
+  const rules = [...new Set([...p.before.records, ...p.after.records].flatMap((r) => r.checks.map((c) => c.rule)))];
+  L.push("## 各規則（只列前後有任何模型沒全過的規則）", "", `| 規則 | ${p.variants.map((v) => `${v} 前→後`).join(" | ")} |`, `|---|${p.variants.map(() => "---").join("|")}|`);
+  for (const rule of rules) {
+    const cells = p.variants.map((v) => ({ a: stat(p.before.records, v, rule), b: stat(p.after.records, v, rule) }));
+    if (cells.every((c) => c.a.pass === c.a.total && c.b.pass === c.b.total)) continue;
+    L.push(`| ${rule} | ${cells.map((c) => `${cell(c.a)}→${cell(c.b)} ${delta(c.a, c.b)}`).join(" | ")} |`);
+  }
+  L.push("");
+  return L.join("\n");
+}
