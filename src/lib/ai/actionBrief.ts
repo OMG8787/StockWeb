@@ -81,7 +81,7 @@ function actionFormat(stance: TradingStance): string {
   nextOpen
     ? "**大盤**：一句白話講最近一個交易日收盤後的氣氛與下個交易日開盤要留意的方向（≤30字，不要堆指數數字；大盤概況沒有台股加權指數報價時，不可說台股漲跌或創新高）。"
     : "**大盤**：一句白話講今天氣氛（≤30字，不要堆指數數字；大盤概況沒有台股加權指數當日報價時，不可說台股漲跌或創新高）。",
-  nextOpen ? `**${stance.nextOpenLabel} 開盤建議**` : "**建議買進**",
+  nextOpen ? `**${stance.nextOpenLabel} 開盤建議**` : "**建議名單**",
   nextOpen
     ? "- **名稱(代號)**：照抄評等字樣（例如「建議買進」或「建議等回檔再買（區間 A～B）」）。開盤做法：一句，用評等裡的價位（例如「開盤若跳空高於C元不追，回到A～B元再分批」）。理由：2~3個最關鍵的數字，術語第一次出現要帶括號。風險：一句，只能根據體檢表裡的數字。"
     : "- **名稱(代號)**：照抄評等字樣（例如「建議買進」或「建議等回檔再買（區間 A～B）」）。理由：只挑2~3個最關鍵的數字，術語第一次出現要帶括號（例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）。風險：一句，只能根據體檢表裡的數字（例如技術面今天沒有夠強的訊號、融資使用率偏高）。",
@@ -174,7 +174,7 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
             ];
       const fallback = [
         `**大盤**：${indexSummary.replace(/^大盤：/, "")}`,
-        stance.briefMode === "next-open" ? `**${stance.nextOpenLabel} 開盤建議（本站綜合評等）**` : `**建議買進（本站綜合評等）**`,
+        stance.briefMode === "next-open" ? `**${stance.nextOpenLabel} 開盤建議（本站綜合評等）**` : `**建議名單（本站綜合評等）**`,
         ...pickLines,
         `**留意**：AI 白話說明暫時無法產生（${(result.failureReason ?? "未知原因").replace(/。$/, "")}），以上為程式依各面向評分與價位算出的評等。`,
       ].join("\n");
