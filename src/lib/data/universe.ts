@@ -638,6 +638,8 @@ export function findInUniverse(symbol: string, market?: Market): UniverseEntry |
 // ticker "AAPL". Stripped names are tried as an additional candidate rather
 // than replacing the full name, so exact full-name matches (rare but
 // possible) still work too.
+/** 台股官方簡稱結尾的標記：「*」／全形「＊」、「-KY」（含全形連字號）。 */
+const TW_NAME_MARK_PATTERN = /(?:[*＊]+|[-－]KY)$/i;
 const CORP_SUFFIX_PATTERN = /[,.]?\s+(inc|corp|corporation|co|ltd|plc|company|holdings?|group)\.?$/i;
 
 /**
@@ -732,6 +734,12 @@ function matchCandidates(entry: UniverseEntry): string[] {
   const { name } = entry;
   const stripped = name.replace(CORP_SUFFIX_PATTERN, "").trim();
   const candidates = stripped && stripped !== name ? [name, stripped] : [name];
+  // 台股官方簡稱常帶標記：結尾「*」（例：國巨*）、「-KY」（例：臻鼎-KY）。使用者打字時不會帶這些，
+  // 2026-10-05 使用者📝回報「為什麼沒有國巨資料」：AI 問答完全解析不到「國巨」，因為清單裡只有「國巨*」。
+  if (entry.market === "TW") {
+    const plain = name.replace(TW_NAME_MARK_PATTERN, "").trim();
+    if (plain && plain !== name && !candidates.includes(plain)) candidates.push(plain);
+  }
   const aliases = entry.market === "US" ? US_NAME_ALIASES[entry.symbol.toUpperCase()] : undefined;
   return aliases ? [...candidates, ...aliases] : candidates;
 }
