@@ -4,7 +4,9 @@ import type { Market } from "@/lib/data";
 import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
-import { getActionBrief } from "@/lib/ai/actionBrief";
+import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
+import { getTradingStance } from "./tradingStance";
+import { SITE_RATING_TITLE } from "./siteRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
@@ -16,6 +18,8 @@ import {
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   isBareTradeYesNoQuestion,
+  isListReferenceQuestion,
+  resolveListReferenceTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
   HOLDINGS_TOPIC_PATTERN,
   SINGLE_STOCK_ANALYSIS_INTENT_PATTERN,
@@ -60,6 +64,16 @@ export async function answerQuestion(
   if (targets.length === 0 && history.length > 0 && isBareTradeYesNoQuestion(question)) {
     targets = await resolveFollowupTargets(question, history);
   }
+  // 「這幾檔／這些／名單裡有你看好的嗎」：指上一則 AI 回答列出的整份清單（2026-10-05 使用者回報
+  // 跑出清單外的台積電）。要在全市場推薦判斷之前攔下，否則「幾檔」會被當成「推薦幾檔」。
+  let listReference = false;
+  if (targets.length === 0 && history.length > 0 && isListReferenceQuestion(question)) {
+    const listTargets = await resolveListReferenceTargets(history);
+    if (listTargets.length > 0) {
+      targets = listTargets;
+      listReference = true;
+    }
+  }
   // A themed request ("AI概念股有哪些") only makes sense to check when the
   // question didn't already resolve to specific stock(s) — "台積電是不是
   // AI概念股" should still ground 台積電 itself, not switch over to the
@@ -87,12 +101,13 @@ export async function answerQuestion(
   const wantsMarketWide = targets.length === 0 && !themeMatch && !unknownTheme && !wantsHoldingsAnalysis && wantsMarketWideBuyIdea(question);
   // 今日建議頁已經算好的全市場多面向買進候選（30分鐘快取，跟 /action 頁同一份，兩邊答案才會一致）；
   // 冷快取時最多等8秒，逾時就不附，不拖慢聊天回應。
-  const actionBriefPromise: Promise<string> = wantsMarketWide
+  const actionBriefPromise: Promise<ActionBrief | null> = wantsMarketWide
     ? Promise.race([
-        getActionBrief().then((b) => (b.usedAi ? b.text : "")).catch(() => ""),
-        new Promise<string>((resolve) => setTimeout(() => resolve(""), 8000)),
+        getActionBrief().catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
       ])
-    : Promise.resolve("");
+    : Promise.resolve(null);
+  const stance = getTradingStance();
   // The "問AI關於<股票>" button on every stock page pre-fills exactly this
   // phrasing (see ChatWidget.tsx's ASK_ABOUT_EVENT handler) — a user asked
   // for this button's answer to be as precise/thorough as the watchlist
@@ -166,7 +181,16 @@ export async function answerQuestion(
       getNewsFeed().catch(() => ({ pinned: [], items: [], generatedAt: "" })),
     ]);
 
-  const actionBriefText = await actionBriefPromise;
+  const actionBrief = await actionBriefPromise;
+  const actionBriefText = actionBrief?.usedAi ? actionBrief.text : "";
+  // 名單與結論是程式依本站綜合評等算好的（跟個股頁問AI同一份），AI 掛掉時也照樣附。
+  const ratingListText = actionBrief
+    ? actionBrief.picks.length > 0
+      ? actionBrief.picks
+          .map((p) => `${SITE_RATING_TITLE}${p.name}(${p.symbol})：未持有→「${p.label}」；已持有→「${p.holdingLabel}」。理由：${p.reason}。`)
+          .join("\n")
+      : "（本站綜合評等目前沒有任何一檔是「建議買進」或「建議等回檔再買」）"
+    : "";
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
@@ -292,6 +316,8 @@ export async function answerQuestion(
   // 台股特殊日期）。第二類不是不能給使用者看，而是要另外寫一份乾淨的版本才行，
   // 在 AI 本來就掛掉的當下，與其印出夾雜指令的半成品，不如誠實請使用者稍後再試。
   const groundingSections: Array<{ text: string; userSafe: boolean }> = [
+    // 目前時段與回答立場（盤中／盤後定價／收盤後／週末），見 tradingStance.ts。
+    { text: stance.stanceLine, userSafe: false },
     { text: stockGroundingText, userSafe: true },
     { text: notFoundNote, userSafe: false },
     { text: partialNotFoundNote, userSafe: false },
@@ -304,6 +330,10 @@ export async function answerQuestion(
     { text: marketNewsText ? `【近期市場新聞】\n${marketNewsText}` : "", userSafe: true },
     {
       text: moversGrounding ? `【今日焦點數據（漲幅榜、技術訊號共振股）】\n${moversGrounding}` : "",
+      userSafe: false,
+    },
+    {
+      text: ratingListText ? `【本站綜合評等名單（${actionBrief?.title ?? "今日建議"}同一份，只能從這裡推薦）】\n${ratingListText}` : "",
       userSafe: false,
     },
     {
@@ -371,6 +401,9 @@ ${actionBriefText}` : "",
     hasNotFoundMarker: !!(notFoundNote || partialNotFoundNote),
     singleStockDeep: wantsSingleStockAnalysis,
     marketWide: wantsMarketWide,
+    ratingListText,
+    hasTradingStance: true,
+    listReference,
     twMarketOpen: getMarketStatus("TW") === "open",
     usMarketOpen: getMarketStatus("US") === "open",
   });

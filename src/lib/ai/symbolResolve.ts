@@ -1,4 +1,4 @@
-import { findAllSymbolsByName, ensureTwUniverseWarm } from "@/lib/data";
+import { findAllSymbolsByName, ensureTwUniverseWarm, findInUniverse } from "@/lib/data";
 import type { Market } from "@/lib/data";
 
 // The negative lookahead keeps a plain year mention ("2025年台股展望") from
@@ -65,7 +65,15 @@ const STOPWORDS = new Set([
 // firing their own quote/chart/fundamentals/news fetches.
 const MAX_COMPARE_TARGETS = 4;
 
-export async function guessSymbolsFromText(text: string): Promise<{ symbol: string; market: Market }[]> {
+/**
+ * opts.max：最多回幾檔（預設 MAX_COMPARE_TARGETS）；「這幾檔」指代上一則 AI 列的清單時會放寬到 8。
+ * opts.knownOnly：只留本站股票清單查得到的（AI 回答裡常有價格、張數等 4 位數字，會被當成代號）。
+ */
+export async function guessSymbolsFromText(
+  text: string,
+  opts: { max?: number; knownOnly?: boolean } = {}
+): Promise<{ symbol: string; market: Market }[]> {
+  const max = opts.max ?? MAX_COMPARE_TARGETS;
   // findSymbolByName/findAllSymbolsByName 讀的模組層級快照要 warm 過才完整
   // （見 ensureTwUniverseWarm() 的完整說明）。這裡跟 lib/data/quote.ts 的
   // getQuote() 各自獨立呼叫一次同一個 warm 函式——**不是多餘的重複，兩處都要
@@ -93,7 +101,7 @@ export async function guessSymbolsFromText(text: string): Promise<{ symbol: stri
   // already spoken for by a name match.
   const matchedNameSubstrings: string[] = [];
 
-  for (const entry of findAllSymbolsByName(text, MAX_COMPARE_TARGETS * 2)) {
+  for (const entry of findAllSymbolsByName(text, max * 2)) {
     if (seen.has(entry.symbol)) continue;
     seen.add(entry.symbol);
     candidates.push({ symbol: entry.symbol, market: entry.market, index: text.indexOf(entry.name) });
@@ -124,7 +132,8 @@ export async function guessSymbolsFromText(text: string): Promise<{ symbol: stri
   }
 
   return candidates
+    .filter((c) => !opts.knownOnly || !!findInUniverse(c.symbol, c.market))
     .sort((a, b) => a.index - b.index)
-    .slice(0, MAX_COMPARE_TARGETS)
+    .slice(0, max)
     .map(({ symbol, market }) => ({ symbol, market }));
 }

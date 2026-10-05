@@ -48,7 +48,11 @@ import {
   RULE_ONLY_ASKED_STOCKS,
   RULE_YES_NO_DIRECT,
   RULE_CONCISE_ANSWER,
+  RULE_FOLLOW_SITE_RATING,
+  RULE_TRADING_STANCE,
+  RULE_LIST_REFERENCE,
 } from "./askSystemPrompt";
+import { SITE_RATING_TITLE } from "./siteRating";
 
 /** 這些字串必須跟各 grounding 產生的區塊文字一致；改那邊的標題要一起改這裡。 */
 export const BLOCK_MARKERS = {
@@ -96,10 +100,16 @@ export interface AskPromptContext {
   marketWide: boolean;
   twMarketOpen: boolean;
   usMarketOpen: boolean;
+  /** 本站綜合評等名單（全市場推薦用）文字 */
+  ratingListText?: string;
+  /** 參考資料有附【目前時段與回答立場】 */
+  hasTradingStance?: boolean;
+  /** 「這幾檔／這些」指代上一則回答的清單 */
+  listReference?: boolean;
 }
 
 export function composeAskSystemPrompt(c: AskPromptContext): string {
-  const dataText = [c.stockText, c.holdingsText, c.moversText, c.techScreenText].join("\n");
+  const dataText = [c.stockText, c.holdingsText, c.moversText, c.techScreenText, c.ratingListText ?? ""].join("\n");
   const asked = `${c.question}\n${c.lastUserTurn}`;
   const hasStockLike = c.stockCount > 0 || c.holdingsMode !== "none";
   const hasStockHistory = dataText.includes(HISTORY_SECTION_TITLE);
@@ -153,6 +163,9 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     hasStockLike ? RULE_PRICE_LEVEL_CONSISTENCY : "",
     dataText.includes(BLOCK_MARKERS.priceLevels) ? RULE_USE_PRICE_FRAMEWORK : "",
     c.stockCount > 0 && !c.marketWide ? RULE_ONLY_ASKED_STOCKS : "",
+    c.listReference ? RULE_LIST_REFERENCE : "",
+    dataText.includes(SITE_RATING_TITLE) ? RULE_FOLLOW_SITE_RATING : "",
+    c.hasTradingStance ? RULE_TRADING_STANCE : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),
     // 放最後：長度與格式規則聲明優先於前面要求多解釋的規則

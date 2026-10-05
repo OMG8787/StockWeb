@@ -246,6 +246,33 @@ export async function resolveFollowupTargets(
   return [];
 }
 
+// 2026-10-05 使用者回報：先問「快要黃金交叉」得到一份清單，再問「這幾檔有你特別看好的嗎?」，
+// 回答卻跑出清單外的台積電——「這幾檔」含「幾檔」被 LIST_REQUEST_PATTERN 當成全市場推薦，
+// 走了今日建議名單。指代「上一則 AI 回答列出的那一整份清單」的說法要先攔下來，解析成清單裡的
+// 全部股票（上限 LIST_REFERENCE_MAX_TARGETS），每檔附個股資料與本站綜合評等。
+export const LIST_REFERENCE_PATTERN =
+  /這幾[檔支個家只]|这几[档支个家只]|那幾[檔支個家只]|那几[档支个家只]|這些|这些|那些|上面(這|那)?(些|幾)|上述|剛剛?(那|這)幾|刚刚?(那|这)几|剛才(那|這)幾|名單(裡|中|內|上)|清單(裡|中|內|上)|名单(里|中|内)|清单(里|中|内)|以上(這|那)?(些|幾)/;
+export const LIST_REFERENCE_MAX_TARGETS = 8;
+
+export function isListReferenceQuestion(question: string): boolean {
+  return LIST_REFERENCE_PATTERN.test(question.trim()) && !EXPLICIT_HOLDINGS_SCOPE_PATTERN.test(question);
+}
+
+/**
+ * 「這幾檔／這些／上面這些／剛剛那幾檔／名單裡」→ 由新到舊找最近一則「列了 2 檔以上股票」的
+ * AI 回答，回傳其中全部股票（依出現順序，最多 LIST_REFERENCE_MAX_TARGETS 檔）。找不到就回空陣列。
+ */
+export async function resolveListReferenceTargets(
+  history: ChatTurn[]
+): Promise<Array<{ symbol: string; market: Market | undefined }>> {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role !== "assistant") continue;
+    const found = await guessSymbolsFromText(history[i].content, { max: LIST_REFERENCE_MAX_TARGETS, knownOnly: true });
+    if (found.length >= 2) return found.map((f) => ({ symbol: f.symbol, market: f.market }));
+  }
+  return [];
+}
+
 // Matches the chat widget's "📋 分析我的關注清單" button text and close
 // variants — a user reported the resulting analysis reading as "just data"
 // (a one-line quote+P&L per stock, see buildHoldingsGrounding above) and

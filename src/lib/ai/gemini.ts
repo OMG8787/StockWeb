@@ -1,5 +1,5 @@
 import { fetchWithTimeout } from "@/lib/data/cache";
-import type { ChatTurn } from "./types";
+import { AI_TEMPERATURE, type ChatTurn } from "./types";
 
 // Google Gemini API (generativelanguage.googleapis.com) via plain REST call,
 // so no extra SDK dependency is needed. Free tier: apply for a key at
@@ -81,7 +81,7 @@ async function callGemini(
         role: m.role === "assistant" ? "model" : "user",
         parts: [{ text: m.content }],
       })),
-      generationConfig: { maxOutputTokens: options.maxOutputTokens ?? 1000, temperature: 0.4 },
+      generationConfig: { maxOutputTokens: options.maxOutputTokens ?? 1000, temperature: AI_TEMPERATURE },
     }),
   });
 

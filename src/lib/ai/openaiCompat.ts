@@ -1,4 +1,4 @@
-import type { ChatTurn } from "./types";
+import { AI_TEMPERATURE, type ChatTurn } from "./types";
 
 // 共用的 OpenAI 相容 chat completions 呼叫（Groq、NVIDIA NIM 都走同一種格式）。
 // 只負責「送一次請求、把結果或失敗原因整理好」，要不要重試、要不要跳過某家
@@ -106,7 +106,7 @@ async function sendRequest(
         ...req.turns.map((t) => ({ role: t.role, content: t.content })),
       ],
       max_tokens: req.maxTokens,
-      temperature: 0.4,
+      temperature: AI_TEMPERATURE,
       ...req.extraBody,
     }),
   });

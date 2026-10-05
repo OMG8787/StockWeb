@@ -2,6 +2,7 @@
 
 import type { ActionBrief } from "@/lib/ai/actionBrief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
+import { useBriefStance } from "./ActionBriefHeading";
 import MarkdownLite from "./MarkdownLite";
 
 /**
@@ -14,18 +15,21 @@ import MarkdownLite from "./MarkdownLite";
 export default function ActionBriefCard() {
   const { data, failed } = useFetchOnce<{ actionBrief: ActionBrief }>("/api/action-brief");
   const brief = data?.actionBrief ?? null;
+  // 標題跟著內容走（14:30 後是「明日開盤建議」，見 tradingStance.ts）；還沒載入時依現在時段先顯示。
+  const stance = useBriefStance();
+  const title = brief?.title ?? stance.briefTitle;
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5">
       <div className="flex items-center gap-2">
-        <h2 className="font-semibold">🎯 今日建議</h2>
+        <h2 className="font-semibold">🎯 {title}</h2>
         {brief && !brief.usedAi && (
           <span className="rounded-full bg-(--page-plane) px-2 py-0.5 text-[13px] text-(--text-muted)">資料整理</span>
         )}
       </div>
       <div className="mt-2 space-y-1 text-sm leading-relaxed text-(--text-secondary)">
         {failed ? (
-          <p className="text-(--text-muted)">今日建議目前無法取得，請稍後再試。</p>
+          <p className="text-(--text-muted)">{title}目前無法取得，請稍後再試。</p>
         ) : brief ? (
           <MarkdownLite text={brief.text} />
         ) : (

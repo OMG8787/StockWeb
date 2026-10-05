@@ -22,7 +22,9 @@ import {
   detectHistoryPeriod,
   HISTORY_PERIOD_MAX_DAYS,
   isBareTradeYesNoQuestion,
+  isListReferenceQuestion,
   resolveFollowupTargets,
+  resolveListReferenceTargets,
   wantsMarketWideBuyIdea,
 } from "@/lib/ai/intent";
 
@@ -226,5 +228,40 @@ describe("conversationWantsTechScreen：快要／即將交叉的問法", () => {
 
   it("純名詞解釋不觸發", () => {
     expect(conversationWantsTechScreen("黃金交叉是什麼意思", [])).toBe(false);
+  });
+});
+
+describe("「這幾檔／這些」指代上一則回答的整份清單（2026-10-05 使用者回報跑出清單外的台積電）", () => {
+  beforeEach(() => {
+    guessSymbolsFromText.mockImplementation(async (text: string) =>
+      text.includes("AAA")
+        ? [
+            { symbol: "2330", market: "TW" as const },
+            { symbol: "2454", market: "TW" as const },
+            { symbol: "3034", market: "TW" as const },
+          ]
+        : []
+    );
+  });
+  it("isListReferenceQuestion 認得常見說法、不誤判一般問題", () => {
+    for (const q of ["這幾檔有你特別看好的嗎?", "這些哪個比較好", "上面這些可以買嗎", "剛剛那幾檔哪檔最強", "名單裡有推薦的嗎"]) {
+      expect(isListReferenceQuestion(q), q).toBe(true);
+    }
+    for (const q of ["台積電可以買嗎", "有推薦的股票嗎", "我的關注清單裡這些哪檔該賣"]) {
+      expect(isListReferenceQuestion(q), q).toBe(false);
+    }
+  });
+
+  it("resolveListReferenceTargets 回傳最近一則列了 2 檔以上的 AI 回答中的全部股票", async () => {
+    const history: ChatTurn[] = [
+      { role: "user", content: "快要黃金交叉的有哪些" },
+      { role: "assistant", content: "AAA 清單" },
+    ];
+    const got = await resolveListReferenceTargets(history);
+    expect(got.map((t) => t.symbol)).toEqual(["2330", "2454", "3034"]);
+  });
+
+  it("對話裡沒有列出股票的 AI 回答時回空陣列（走原本流程）", async () => {
+    expect(await resolveListReferenceTargets([{ role: "assistant", content: "沒有股票" }])).toEqual([]);
   });
 });

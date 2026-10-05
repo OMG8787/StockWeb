@@ -20,6 +20,8 @@ import type { Signal } from "@/lib/signals";
 import { getNewsFeed, type NewsFeed } from "@/lib/ai/newsfeed";
 import { formatSharesWithLots } from "@/lib/format";
 import { buildMarketOverviewText } from "./marketOverview";
+import { getStockRatings, type StockRatingResult } from "./stockRating";
+import { describeSiteRating, isRecommendable } from "./siteRating";
 import {
   pct,
   score,
@@ -195,10 +197,20 @@ function listUsMomentum(
     .join("\n");
 }
 
+/** 今日建議名單最多對幾檔算本站綜合評等（每檔可能要抓日K，見 stockRating.ts）。 */
+const RATED_PICK_LIMIT = 8;
+
+export interface RatedPick {
+  candidate: ScoredCandidate;
+  rating: StockRatingResult;
+}
+
 export interface ActionGrounding {
   text: string;
-  /** 通過「面向支持數 ≥2 且明確不支持 ≤1」門檻的候選股；AI 掛掉時的 fallback 也要用。 */
+  /** 通過「面向支持數 ≥2 且明確不支持 ≤1」門檻的候選股。 */
   qualified: ScoredCandidate[];
+  /** qualified 再經本站綜合評等（stockRating.ts）後，評等為「建議買進／建議等回檔再買」的——今日建議只能列這些。 */
+  picks: RatedPick[];
   indexSummary: string;
 }
 
@@ -248,6 +260,20 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     (c) => c.supportCount >= QUALIFY_MIN_SUPPORT && c.againstCount <= QUALIFY_MAX_AGAINST
   );
 
+  // 2026-10-05：今日建議、AI 問答、個股問答三個入口的結論要一致——名單只列本站綜合評等為
+  // 「建議買進／建議等回檔再買」的（跟個股頁問AI讀同一份 10 分鐘快取），評等字樣照用。
+  const ratings = await getStockRatings(
+    qualified.slice(0, RATED_PICK_LIMIT).map((c) => ({ symbol: c.symbol, market: "TW" as const }))
+  ).catch(() => new Map<string, StockRatingResult>());
+  const picks: RatedPick[] = qualified
+    .slice(0, RATED_PICK_LIMIT)
+    .map((c) => ({ candidate: c, rating: ratings.get(c.symbol.toUpperCase()) }))
+    .filter((p): p is RatedPick => !!p.rating && isRecommendable(p.rating.rating));
+  const notRecommended = qualified
+    .slice(0, RATED_PICK_LIMIT)
+    .map((c) => ratings.get(c.symbol.toUpperCase()))
+    .filter((r): r is StockRatingResult => !!r && !isRecommendable(r.rating));
+
   const indexSummary =
     indices.length > 0
       ? `大盤：${indices.map((i) => `${i.name} ${i.change >= 0 ? "+" : ""}${i.changePercent}%`).join("、")}。`
@@ -265,6 +291,11 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     `【本站已先幫你篩過的結果】今日候選股中，面向支持數 ≥${QUALIFY_MIN_SUPPORT} 且明確不支持面向 ≤${QUALIFY_MAX_AGAINST} 的共 ${qualified.length} 檔：${
       qualified.length > 0 ? qualified.map((c) => `${c.name}(${c.symbol})`).join("、") : "無"
     }`,
+    `【建議名單＝本站綜合評等為「建議買進」或「建議等回檔再買」的，共 ${picks.length} 檔（只能從這裡挑，結論字樣照抄，跟個股頁「問AI關於」同一份評等）】`,
+    picks.length > 0 ? picks.map((p) => describeSiteRating(p.rating.name, p.rating.symbol, p.rating.rating)).join("\n") : "（無）",
+    notRecommended.length > 0
+      ? `【體質過門檻、但本站綜合評等為「建議先不要買」的（不可列進建議）】\n${notRecommended.map((r) => describeSiteRating(r.name, r.symbol, r.rating)).join("\n")}`
+      : "",
     "",
     "【今日台股漲幅榜前10（純價格表現，已濾掉成交金額不足3000萬的冷門股）——漲最多不等於值得買，務必回體檢表對照其他面向】",
     liquidGainers.length > 0
@@ -306,5 +337,5 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       : "（目前沒有夠格的重大消息）",
   ].join("\n");
 
-  return { text, qualified, indexSummary };
+  return { text, qualified, picks, indexSummary };
 }

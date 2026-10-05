@@ -33,6 +33,8 @@ import { describeSocialSentiment } from "./sentiment";
 import { buildHistoryContext } from "./history";
 import { describeSectorFactors } from "./sectorFactors";
 import { findInUniverse } from "@/lib/data";
+import { getStockRating } from "../stockRating";
+import { describeSiteRating } from "../siteRating";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -44,10 +46,12 @@ export async function buildStockGrounding(
   opts: { period?: HistoryPeriod; compact?: boolean } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
-  const [quote, chart, chartYear] = await Promise.all([
+  const [quote, chart, chartYear, stockRating] = await Promise.all([
     getQuote(target.symbol, target.market),
     getChart(target.symbol, "3m", target.market),
     getChart(target.symbol, "1y", target.market).catch(() => null),
+    // 本站綜合評等（跟今日建議／全市場推薦同一份快取，見 stockRating.ts）。
+    getStockRating(target.symbol, target.market).catch(() => null),
   ]);
   if (!quote) return undefined;
 
@@ -98,6 +102,11 @@ export async function buildStockGrounding(
         `今日：最高 ${quote.high ?? "（今日無成交）"} / 最低 ${quote.low ?? "（今日無成交）"} / 前日均價 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()} 股`
       : `今日：開 ${quote.open} / 高 ${quote.high} / 低 ${quote.low} / 昨收 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()}`,
   ];
+  if (stockRating) {
+    lines.push(
+      `${describeSiteRating(stockRating.name, stockRating.symbol, stockRating.rating)}（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
+    );
+  }
   if (quote.board === "emerging") {
     lines.push(
       "板別：興櫃（Emerging Stock Market）。回答時務必讓使用者知道這幾件事，用白話講：興櫃是公司正式上市或上櫃之前的階段，交易方式是跟推薦證券商「議價」一對一談，不是集中撮合；因此沒有開盤價也沒有收盤價，上面的漲跌是拿最近一筆成交價跟「前日均價」比出來的；興櫃沒有漲跌幅上下限，單日大漲大跌都可能；成交量通常很少，甚至整天都沒有人成交。興櫃的交易時間是 09:00~15:00（比上市櫃的 09:00~13:30 晚 1.5 小時收盤，也沒有上市櫃那種 08:30 試撮），如果使用者問到現在有沒有在交易，要用這個時間回答。也要提醒興櫃風險明顯高於上市櫃股票。" +
@@ -137,7 +146,11 @@ export async function buildStockGrounding(
   }
   // 支撐／壓力＋自洽的買進區間／出場價／不追價，由程式算好（見 priceLevels.ts）；興櫃成交稀疏不給。
   const levelCandles = chartYear?.candles ?? chart?.candles;
-  if (levelCandles && quote.board !== "emerging") {
+  if (stockRating) {
+    // 直接用評等那份框架，買進區間的數字才會跟評等逐字相同。
+    const levelsText = describePriceFramework(stockRating.framework);
+    if (levelsText) lines.push(levelsText);
+  } else if (levelCandles && quote.board !== "emerging") {
     const levelsText = describePriceFramework(computePriceFramework(levelCandles, quote.price, quote.market));
     if (levelsText) lines.push(levelsText);
   }

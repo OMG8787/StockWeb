@@ -152,6 +152,31 @@ export function isTwQuoteWindow(now: Date = new Date()): boolean {
 }
 
 /**
+ * 台股（上市櫃）「現在處在哪個交易時段」——AI 回答立場與今日／明日開盤建議用（見 ai/tradingStance.ts）。
+ *  - "pre-open"：平日 00:00~09:00（含 08:30 試撮）→ 以「今天開盤」立場。
+ *  - "intraday"：平日 09:00~13:30 一般交易。
+ *  - "after-hours-fixed"：平日 13:30~14:30 盤後定價交易（以當日收盤價成交）。
+ *  - "after-close"：平日 14:30 之後 → 以「下一個交易日開盤」立場。
+ *  - "weekend"：週六、週日 → 以「下一個交易日開盤」立場。
+ * 跟這個檔案其他函式一樣不處理國定假日（沒有免費的假日行事曆 API）。
+ */
+export type TwTradingPhase = "pre-open" | "intraday" | "after-hours-fixed" | "after-close" | "weekend";
+
+export function getTwTradingPhase(now: Date = new Date()): TwTradingPhase {
+  const clock = taipeiClock(now);
+  if (!isTwWeekday(clock)) return "weekend";
+  if (clock.minutes < 9 * 60) return "pre-open";
+  if (clock.minutes < TW_CLOSE_MINUTES) return "intraday";
+  if (clock.minutes < TW_LIVE_END_MINUTES) return "after-hours-fixed";
+  return "after-close";
+}
+
+/** 台北時間今天是星期幾（0=週日…6=週六）。 */
+export function taipeiWeekday(now: Date = new Date()): number {
+  return taipeiClock(now).weekday;
+}
+
+/**
  * 現在是不是興櫃的「該輪詢期間」（09:00~15:10，含收盤後 10 分鐘的結算緩衝）。
  * 注意這跟「興櫃盤中嗎」不是同一件事——盤中/已收盤的徽章一律以
  * marketStatus.ts 的 getMarketStatus("TW-EMERGING") 為準（15:00 就收盤）。

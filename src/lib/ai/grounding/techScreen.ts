@@ -1,6 +1,8 @@
 import { getTechnicalScreen } from "@/lib/data";
 import type { TechScreenItem } from "@/lib/data";
 import { describeTechState } from "./indicators";
+import { getStockRatings } from "../stockRating";
+import { describeSiteRating } from "../siteRating";
 import {
   KD_NEAR_CROSS_CONVERGING_DAYS,
   KD_NEAR_CROSS_MAX_EST_DAYS,
@@ -37,6 +39,32 @@ function describeMacdNearCross(i: TechScreenItem): string {
   const golden = n.direction === "golden";
   const hist = n.gaps.map((g) => fmtMacd(golden ? -g : g)).join("→");
   return `${i.name}(${i.symbol})，現價${i.price}(${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%)：DIF ${fmtMacd(n.fast)}${golden ? "仍低於" : "仍高於"}訊號線 ${fmtMacd(n.slow)}（DIF在0軸${n.fast >= 0 ? "上方" : "下方"}），柱狀體(DIF−訊號線)近${n.gaps.length}日 ${hist}（連續縮小、逼近0），照目前速度推估約${Math.max(1, Math.round(n.estDays))}個交易日內可能${golden ? "黃金" : "死亡"}交叉`;
+}
+
+/** MACD 與 KD 同時黃金交叉的股票，最多對幾檔附本站綜合評等（每檔可能要抓日K）。 */
+export const TECH_SCREEN_RATING_LIMIT = 8;
+/** 算評等最多等多久，逾時就不附（不拖慢聊天回應）。 */
+const TECH_SCREEN_RATING_WAIT_MS = 12_000;
+
+/**
+ * 2026-10-05 使用者回報：問「MACD與KD皆黃金交叉、你多方面驗證後建議買入的股票」→ AI 說健鼎「建議買入」，
+ * 到個股頁問AI卻說「暫緩觀望」。技術條件只是篩選條件，買不買要跟個股頁同一份本站綜合評等。
+ */
+async function describeBothGoldenRatings(items: TechScreenItem[]): Promise<string> {
+  const targets = items
+    .filter((i) => i.state.macdCross === "golden" && i.state.kd?.cross === "golden")
+    .slice(0, TECH_SCREEN_RATING_LIMIT);
+  if (targets.length === 0) return "";
+  const ratings = await Promise.race([
+    getStockRatings(targets.map((t) => ({ symbol: t.symbol }))),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), TECH_SCREEN_RATING_WAIT_MS)),
+  ]).catch(() => null);
+  if (!ratings || ratings.size === 0) return "";
+  const lines = targets
+    .map((t) => ratings.get(t.symbol.toUpperCase()))
+    .filter((r) => r != null)
+    .map((r) => describeSiteRating(r.name, r.symbol, r.rating));
+  return `【MACD與KD同時黃金交叉者的本站綜合評等（跟今日建議、個股頁「問AI關於」同一份結論）】技術交叉只是篩選條件，買不買以這裡的評等為準：\n${lines.join("\n")}`;
 }
 
 /**
@@ -141,5 +169,6 @@ ${fmtNear(macdNearDeath, describeMacdNearCross)}`,
       .join("\n\n");
   };
 
-  return [blockFor(tw, "台股", tw.length), blockFor(us, "美股", us.length)].filter(Boolean).join("\n\n");
+  const ratingsText = await describeBothGoldenRatings([...tw, ...us]).catch(() => "");
+  return [ratingsText, blockFor(tw, "台股", tw.length), blockFor(us, "美股", us.length)].filter(Boolean).join("\n\n");
 }
