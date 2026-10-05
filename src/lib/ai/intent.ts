@@ -84,6 +84,19 @@ const EXPLICIT_HOLDINGS_SCOPE_PATTERN = /(我的|我).{0,3}(關注|自選|持股
 export const HOLDINGS_TOPIC_PATTERN =
   /(我的|我).{0,3}(關注|自選|持股|持有|庫存|部位)|關注清單|自選股|持股|持有|庫存|手上|成本|損益|賺|賠|虧|停損|止損|停利|止盈|續抱|加碼|減碼|該賣|要賣|賣掉|攤平|套牢|解套/;
 
+// 2026-10-05 使用者回報：分析關注清單把 1528 等判「建議減碼或出場」，3 分鐘後問「持有名單建議盤後賣掉哪些?」
+// 卻回「沒有建議賣出的」——第二題沒命中 HOLDINGS_ANALYSIS_INTENT_PATTERN，走輕量清單、沒附評等。
+// 談持股（HOLDINGS_TOPIC_PATTERN 成立）且是在做決策（賣不賣、賣哪些、停損停利、加減碼…）時，
+// 輕量清單也要附每檔「含個人成本的本站評等」（grounding/holdings.ts rateHoldings），結論才會一致。
+export const HOLDINGS_DECISION_PATTERN =
+  /賣|停損|止損|停利|止盈|減碼|加碼|出場|出清|續抱|抱著|留著|該不該|要不要|建議|怎麼(辦|處理|操作)|評等|風險|分析/;
+
+// 2026-10-05 使用者👎「仁寶何時進場」回答太淺。判斷題（買不買、何時進場、要不要賣、走勢、比較）與
+// 「再多分析／詳細一點／為什麼」放寬輸出長度（ask.ts maxOutputTokens；長度規則見 RULE_CONCISE_ANSWER）。
+export const JUDGMENT_QUESTION_PATTERN =
+  /買不買|能不能(買|賣|進場)|可以(買|進場)|該不該|要不要|何時|什麼時候|甚麼時候|進場|出場|賣不賣|走勢|怎麼看|看法|比較|值得|推薦|建議.{0,4}(買|賣)/;
+export const DEEPER_ANALYSIS_REQUEST_PATTERN = /再多|多分析|詳細|深入|仔細|為什麼|為何|展開|說清楚/;
+
 // 2026-10-04 使用者回報：先問「2330 最近走勢如何？」，接著問「建議買嗎?」，AI 卻改推薦全市場
 // 其他股票——BUY_IDEA_INTENT_PATTERN 第一段「建議.{0,8}買」把這句是非題當成「建議買什麼」。
 // 全市場推薦必須同時有「要列一份清單」的字眼才算；沒指名對象的買賣是非題見 isBareTradeYesNoQuestion。

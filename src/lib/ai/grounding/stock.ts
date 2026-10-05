@@ -35,7 +35,7 @@ import { describeSectorFactors } from "./sectorFactors";
 import { findInUniverse } from "@/lib/data";
 import { getStockRating } from "../stockRating";
 import type { RatingSource } from "../ratingLog";
-import { applyHoldingCost, checkTakeProfit, describeSiteRating } from "../siteRating";
+import { describeRatingForHolding } from "../holdingRating";
 import type { HistoryPeriod } from "../intent";
 
 /**
@@ -105,14 +105,15 @@ export async function buildStockGrounding(
   ];
   if (stockRating) {
     lines.push(
-      `${describeSiteRating(
-        stockRating.name,
-        stockRating.symbol,
-        // 關注清單有購買價格時套持有中停利提示（個人成本不進全站共用的評等快取）。
-        opts.costBasis != null && chart
-          ? applyHoldingCost(stockRating.rating, checkTakeProfit(opts.costBasis, chart.candles, stockRating.price))
-          : stockRating.rating
-      )}（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
+      `${
+        // 關注清單有購買價格時套持有中停利提示＋持有中出場參考（個人成本不進全站共用的評等快取；
+        // 跟關注清單輕量／深度分析同一個函式，見 holdingRating.ts）。
+        describeRatingForHolding(
+          stockRating,
+          opts.costBasis != null ? { costBasis: opts.costBasis, market: quote.market, emerging: quote.board === "emerging" } : null,
+          chart?.candles
+        ).text
+      }（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
   }
   if (quote.board === "emerging") {

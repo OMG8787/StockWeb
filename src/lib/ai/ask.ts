@@ -22,6 +22,9 @@ import {
   resolveListReferenceTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
   HOLDINGS_TOPIC_PATTERN,
+  HOLDINGS_DECISION_PATTERN,
+  JUDGMENT_QUESTION_PATTERN,
+  DEEPER_ANALYSIS_REQUEST_PATTERN,
   SINGLE_STOCK_ANALYSIS_INTENT_PATTERN,
   TECH_INDICATOR_PATTERN,
 } from "./intent";
@@ -125,6 +128,8 @@ export async function answerQuestion(
   const lastUserTurn = [...history].reverse().find((t) => t.role === "user")?.content ?? "";
   const holdingsTopical =
     wantsHoldingsAnalysis || HOLDINGS_TOPIC_PATTERN.test(question) || HOLDINGS_TOPIC_PATTERN.test(lastUserTurn);
+  // 談持股且在做決策（賣哪些、要不要賣、停損停利…）：輕量清單也附每檔含成本的評等，跟深度分析同一套結論。
+  const wantsHoldingsDecision = holdingsTopical && !wantsHoldingsAnalysis && HOLDINGS_DECISION_PATTERN.test(question);
   const targetSymbolSet = new Set(targets.map((t) => t.symbol.toUpperCase()));
   const holdingsForGrounding = holdingsTopical
     ? holdings
@@ -176,7 +181,7 @@ export async function answerQuestion(
       themeMatch ? buildThemeGrounding(themeMatch) : Promise.resolve(""),
       (wantsHoldingsAnalysis
         ? buildHoldingsAnalysisGrounding(holdings)
-        : buildHoldingsGrounding(holdingsForGrounding, TECH_INDICATOR_PATTERN.test(question))
+        : buildHoldingsGrounding(holdingsForGrounding, TECH_INDICATOR_PATTERN.test(question), wantsHoldingsDecision)
       ).catch(() => ""),
       Promise.all([fetchNews("台股", 6), fetchUsMarketNews(5)]).catch(() => [[], []] as const),
       // Shares the same 20-minute cache as the /news page's AI classifier —
@@ -446,7 +451,10 @@ ${actionBriefText}` : "",
         // the default budget was sized for a short chat answer and cut this
         // kind of multi-paragraph analysis off mid-sentence.
         await callAiProviders(system, messages, { timeoutMs: 30000, maxOutputTokens: 2500 })
-      : await callAiProviders(system, messages);
+      : JUDGMENT_QUESTION_PATTERN.test(question) || DEEPER_ANALYSIS_REQUEST_PATTERN.test(question) || wantsHoldingsDecision
+        ? // 判斷題約 300～450 字、要求再多分析時約 700 字（RULE_CONCISE_ANSWER），預設 1000 tokens 會截斷。
+          await callAiProviders(system, messages, { maxOutputTokens: 1800 })
+        : await callAiProviders(system, messages);
   if (result.usedAi) {
     return { answer: stripRatingTags(sanitizeLeakedMarkers(result.answer)), groundedSymbol, usedAi: true };
   }
