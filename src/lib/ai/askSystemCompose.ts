@@ -11,6 +11,7 @@ import { RECENT_CROSSES_TITLE } from "./grounding/indicators";
 import { SECTOR_FACTORS_TITLE } from "./grounding/sectorFactors";
 import { PRICE_LEVELS_TITLE } from "./grounding/priceLevels";
 import { MARKET_HISTORY_TITLE } from "./marketHistoryText";
+import { TOPIC_NEWS_TITLE } from "@/lib/data/topicNews";
 import {
   SYSTEM_ROLE,
   RULE_HONESTY,
@@ -32,6 +33,7 @@ import {
   RULE_INTRADAY_TW,
   RULE_INTRADAY_US,
   RULE_MACRO,
+  RULE_TOPIC_NEWS,
   RULE_RATE_HIKE_NUANCE,
   RULE_NIGHT_FUTURES,
   RULE_MOVERS,
@@ -50,6 +52,7 @@ import {
   RULE_CONCISE_ANSWER,
   RULE_FOLLOW_SITE_RATING,
   RULE_TRADING_STANCE,
+  RULE_RATING_CHANGE,
   RULE_LIST_REFERENCE,
 } from "./askSystemPrompt";
 import { SITE_RATING_TITLE } from "./siteRating";
@@ -57,6 +60,7 @@ import { SIMILAR_CASES_TITLE } from "./learning/similar";
 import { LESSONS_TITLE } from "./learning/lessonMatch";
 import { RULE_AI_VIEW, RULE_EXPERIENCE } from "./learning/experienceRule";
 import { AI_VIEW_TITLE } from "./learning/aiAdjust";
+import { RATING_CHANGE_TITLE } from "./ratingChange";
 
 /** 這些字串必須跟各 grounding 產生的區塊文字一致；改那邊的標題要一起改這裡。 */
 export const BLOCK_MARKERS = {
@@ -72,6 +76,8 @@ export const BLOCK_MARKERS = {
   similarCases: SIMILAR_CASES_TITLE, // learning/similar.ts（共用常數）
   lessons: LESSONS_TITLE, // learning/lessonMatch.ts（共用常數）
   aiView: AI_VIEW_TITLE, // learning/aiAdjust.ts（共用常數）
+  topicNews: TOPIC_NEWS_TITLE, // data/topicNews.ts（共用常數）
+  ratingChange: RATING_CHANGE_TITLE, // ratingChange.ts（共用常數）
 } as const;
 
 /** 使用者引用「你更早說過」的話（看不到的對話）。 */
@@ -113,6 +119,8 @@ export interface AskPromptContext {
   hasTradingStance?: boolean;
   /** 「這幾檔／這些」指代上一則回答的清單 */
   listReference?: boolean;
+  /** 主題新聞搜尋的資料區塊文字（有搜尋才有；見 data/topicNews.ts） */
+  topicNewsText?: string;
 }
 
 export function composeAskSystemPrompt(c: AskPromptContext): string {
@@ -156,6 +164,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     c.usMarketOpen && (hasStockLike || c.moversText || c.techScreenText) ? RULE_INTRADAY_US : "",
     // 大盤／總經
     c.indexText.includes(BLOCK_MARKERS.macro) ? RULE_MACRO : "",
+    (c.topicNewsText ?? "").includes(BLOCK_MARKERS.topicNews) ? RULE_TOPIC_NEWS : "",
     RATE_TOPIC_PATTERN.test(asked) ? RULE_RATE_HIKE_NUANCE : "",
     c.indexText.includes(BLOCK_MARKERS.nightFutures) && MARKET_JUDGMENT_PATTERN.test(asked) ? RULE_NIGHT_FUTURES : "",
     // 全市場篩選
@@ -174,6 +183,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     dataText.includes(SITE_RATING_TITLE) ? RULE_FOLLOW_SITE_RATING : "",
     dataText.includes(BLOCK_MARKERS.similarCases) || dataText.includes(BLOCK_MARKERS.lessons) ? RULE_EXPERIENCE : "",
     dataText.includes(BLOCK_MARKERS.aiView) ? RULE_AI_VIEW : "",
+    dataText.includes(BLOCK_MARKERS.ratingChange) ? RULE_RATING_CHANGE : "",
     c.hasTradingStance ? RULE_TRADING_STANCE : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),

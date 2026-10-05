@@ -1,7 +1,8 @@
 import { findInUniverse, getIndices, getMacroSnapshot, getTaifexNightFutures } from "@/lib/data";
 import { buildMarketOverviewText } from "./marketOverview";
 import type { Market } from "@/lib/data";
-import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
+import { fetchIntlMarketNews, fetchNews, fetchUsMarketNews } from "@/lib/data/news";
+import { formatTopicNewsBlock, searchTopicNews } from "@/lib/data/topicNews";
 import { callAiProviders } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
@@ -13,10 +14,13 @@ import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
 import { guessSymbolByFuzzyName, guessSymbolsFromText } from "./symbolResolve";
 import { describeFuzzyGuess } from "./fuzzyName";
+import { describeRatingChanges } from "./ratingChange";
+import { getStockRating } from "./stockRating";
 import {
   conversationWantsMovers,
   conversationWantsTechScreen,
   detectHistoryPeriod,
+  extractTopicNewsQuery,
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   isBareTradeYesNoQuestion,
@@ -78,6 +82,11 @@ export async function answerQuestion(
       listReference = true;
     }
   }
+  // 主題新聞題（「今天有沒有 美國 伊朗的新聞」）：問句沒指到個股時，依主題即時搜尋新聞（lib/data/topicNews.ts）。
+  // 2026-10-06 使用者回報：本站只有固定的台股／美股市場新聞，這類題目 AI 只能回「資料裡沒有」。
+  // 有主題時不走全市場焦點／技術篩選／追問找個股（「有哪些新聞」會被誤當成「推薦哪些股票」）；
+  // 但錯字個股（「建鼎有什麼新聞」）仍會在下面的模糊比對猜到一檔，猜到就改走個股流程。
+  let topicNewsQuery = targets.length === 0 ? extractTopicNewsQuery(question) : null;
   // A themed request ("AI概念股有哪些") only makes sense to check when the
   // question didn't already resolve to specific stock(s) — "台積電是不是
   // AI概念股" should still ground 台積電 itself, not switch over to the
@@ -86,18 +95,18 @@ export async function answerQuestion(
   // 問的是主題/概念股，但本站沒有這個主題的分類資料（見 THEME_QUESTION_PATTERN
   // 的說明）——這種情況要明講，不能讓 AI 拿一般的今日焦點清單冒充成該主題的成分股。
   const unknownTheme = targets.length === 0 && !themeMatch && THEME_QUESTION_PATTERN.test(question);
-  const wantsMovers = targets.length === 0 && !themeMatch && conversationWantsMovers(question, history);
+  const wantsMovers = targets.length === 0 && !themeMatch && !topicNewsQuery && conversationWantsMovers(question, history);
   // 「用技術指標條件篩股票」跟上面的 wantsMovers 是兩個獨立的需求：問「有沒有
   // MACD跟KD都黃金交叉的股票」時需要的是全市場逐檔算過的指標明細，不是漲幅榜；
   // 反過來問「今天有哪些股票不錯」則不需要那份很長的指標表。兩者可以同時成立
   // （例如「有沒有均線多頭排列、適合明天買的股票」），各自附各自的資料。
-  const wantsTechScreen = targets.length === 0 && !themeMatch && conversationWantsTechScreen(question, history);
+  const wantsTechScreen = targets.length === 0 && !themeMatch && !topicNewsQuery && conversationWantsTechScreen(question, history);
   // 這一句沒寫出股票名稱、也不是主題/篩選問題，但看起來是在追問上文提過的某一檔
   // （「第一檔的本益比多少?」「這檔法人買超多少?」）——把那一檔從對話紀錄裡
   // 找回來當成目標，否則會完全沒有個股資料、誤答成「查不到這檔股票的資料」。
   // 刻意排在 themeMatch/wantsMovers/wantsTechScreen 之後判斷，確保全市場篩選類
   // 問題永遠優先，不會被誤解成在問某一檔。
-  if (targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && history.length > 0) {
+  if (targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && !topicNewsQuery && history.length > 0) {
     targets = await resolveFollowupTargets(question, history);
   }
   // 錯字（「建鼎呢?」→ 健鼎）：完全比對不到、也不是篩選／主題／追問時，猜最可能的一檔直接分析，
@@ -108,11 +117,13 @@ export async function answerQuestion(
     if (guess) {
       targets = [{ symbol: guess.best.symbol, market: guess.best.market }];
       fuzzyNote = describeFuzzyGuess(guess);
+      topicNewsQuery = null;
     }
   }
   const wantsHoldingsAnalysis = holdings.length > 0 && HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question);
   // 開放式「建議買什麼」→ 範圍是全市場，見 intent.ts wantsMarketWideBuyIdea 的說明。
-  const wantsMarketWide = targets.length === 0 && !themeMatch && !unknownTheme && !wantsHoldingsAnalysis && wantsMarketWideBuyIdea(question);
+  const wantsMarketWide =
+    targets.length === 0 && !themeMatch && !unknownTheme && !topicNewsQuery && !wantsHoldingsAnalysis && wantsMarketWideBuyIdea(question);
   // 今日建議頁已經算好的全市場多面向買進候選（30分鐘快取，跟 /action 頁同一份，兩邊答案才會一致）；
   // 冷快取時最多等8秒，逾時就不附，不拖慢聊天回應。
   const actionBriefPromise: Promise<ActionBrief | null> = wantsMarketWide
@@ -170,6 +181,7 @@ export async function answerQuestion(
     holdingsGrounding,
     marketNews,
     newsFeed,
+    topicNews,
   ] =
     await Promise.all([
       // 問到過去某天/某段期間時，個股【歷史脈絡】多附該期間逐日明細；多檔比較時每檔歷史脈絡精簡版。
@@ -196,14 +208,17 @@ export async function answerQuestion(
         ? buildHoldingsAnalysisGrounding(holdings)
         : buildHoldingsGrounding(holdingsForGrounding, TECH_INDICATOR_PATTERN.test(question), wantsHoldingsDecision)
       ).catch(() => ""),
-      Promise.all([fetchNews("台股", 6), fetchUsMarketNews(5)]).catch(() => [[], []] as const),
+      Promise.all([fetchNews("台股", 6), fetchUsMarketNews(5), fetchIntlMarketNews(5)]).catch(() => [[], [], []] as const),
       // Shares the same 20-minute cache as the /news page's AI classifier —
       // a near-free reuse of work already done there (which items are
       // genuinely market-moving, plus a one-line plain-language "what this
       // means" for each) rather than re-deriving importance from the raw
       // headlines below.
       getNewsFeed().catch(() => ({ pinned: [], items: [], generatedAt: "" })),
+      // 主題新聞搜尋：搜尋失敗會標成「失敗」（不是「0 則」），模型才不會把沒搜到說成沒有新聞。
+      topicNewsQuery ? searchTopicNews(topicNewsQuery) : Promise.resolve(null),
     ]);
+  const topicNewsText = topicNews ? formatTopicNewsBlock(topicNews) : "";
 
   const actionBrief = await actionBriefPromise;
   const actionBriefText = actionBrief?.usedAi ? actionBrief.text : "";
@@ -228,6 +243,11 @@ export async function answerQuestion(
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
+  // 評等跟前一交易日不同時，附原因讓 AI 主動交代（2026-10-06 使用者：「昨天你不是說南亞不要追高」）。見 ratingChange.ts。
+  const ratingChangeText = await buildRatingChangeText([
+    ...stockGroundings.map((g) => g.symbol),
+    ...(actionBrief?.picks ?? []).map((p) => p.symbol),
+  ]);
   // At least one candidate symbol was parsed out of the question but NONE
   // of them resolved to real data — the single-target case this already
   // handled before multi-symbol support existed. A PARTIAL miss (e.g.
@@ -276,10 +296,14 @@ export async function answerQuestion(
   // 問的是特定個股時不附一般大盤新聞標題：2026-10-04 使用者回報問「2330 最近走勢如何？」，
   // 回答卻扯進標題裡順帶出現的「台灣精材(3467)與其他個股無關」。個股自己的新聞已在個股資料裡，
   // 大盤層級的重大事件（pinnedEventsText）照常附。
-  const [twNews, usNews] = stockGroundings.length > 0 ? [[], []] : marketNews;
+  const [twNews, usNews, intlNews] = stockGroundings.length > 0 ? [[], [], []] : marketNews;
   const marketNewsText = [
     twNews.length > 0 ? `台股：\n${twNews.map((n) => `- ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}` : "",
     usNews.length > 0 ? `美股：\n${usNews.map((n) => `- ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}` : "",
+    // 國際／地緣政治／總經（戰爭、制裁、油價、Fed…），固定的台股／美股查詢抓不到這類大事。
+    intlNews.length > 0
+      ? `國際／地緣政治／總經：\n${intlNews.map((n) => `- [${n.pubDate.slice(5, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -354,6 +378,7 @@ export async function answerQuestion(
     { text: stance.stanceLine, userSafe: false },
     { text: stockGroundingText, userSafe: true },
     { text: fuzzyNote, userSafe: false },
+    { text: ratingChangeText, userSafe: false },
     { text: notFoundNote, userSafe: false },
     { text: partialNotFoundNote, userSafe: false },
     { text: specialDateNote ? `【台股特殊日期】\n${specialDateNote}` : "", userSafe: false },
@@ -362,6 +387,7 @@ export async function answerQuestion(
       text: pinnedEventsText ? `【近期重大事件（AI 已判斷為可能影響整體大盤等級）】\n${pinnedEventsText}` : "",
       userSafe: true,
     },
+    { text: topicNewsText, userSafe: true },
     { text: marketNewsText ? `【近期市場新聞】\n${marketNewsText}` : "", userSafe: true },
     {
       text: moversGrounding ? `【今日焦點數據（漲幅榜、技術訊號共振股）】\n${moversGrounding}` : "",
@@ -439,6 +465,7 @@ ${actionBriefText}` : "",
     ratingListText,
     hasTradingStance: true,
     listReference,
+    topicNewsText,
     twMarketOpen: getMarketStatus("TW") === "open",
     usMarketOpen: getMarketStatus("US") === "open",
   });
@@ -494,4 +521,19 @@ export function postProcessAiAnswer(answer: string, grounding: string): string {
   const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
   if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
   return consistent.text;
+}
+
+/** 評等改變說明（只看台股、最多 6 檔；評等讀同一份 10 分鐘快取，不記評等紀錄；3 秒內拿不到就不附）。 */
+const RATING_CHANGE_MAX = 6;
+const RATING_CHANGE_WAIT_MS = 3000;
+async function buildRatingChangeText(symbols: string[]): Promise<string> {
+  const tw = [...new Set(symbols.map((s) => s.toUpperCase()))].filter((s) => /^\d{4,6}[A-Z]?$/.test(s)).slice(0, RATING_CHANGE_MAX);
+  if (tw.length === 0) return "";
+  const work = (async () => {
+    const ratings = (await Promise.all(tw.map((s) => getStockRating(s, "TW").catch(() => null)))).filter((r) => r != null);
+    return describeRatingChanges(
+      ratings.map((r) => ({ name: r.name, symbol: r.symbol, price: r.price, rating: r.rating, facets: r.facets }))
+    );
+  })().catch(() => "");
+  return Promise.race([work, new Promise<string>((resolve) => setTimeout(() => resolve(""), RATING_CHANGE_WAIT_MS))]);
 }

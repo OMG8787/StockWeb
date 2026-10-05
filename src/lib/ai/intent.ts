@@ -466,3 +466,51 @@ export function detectHistoryPeriod(
   }
   return undefined;
 }
+
+// ---------------------------------------------------------------------------
+// 主題新聞意圖（2026-10-06）：「今天有沒有 美國 伊朗的新聞」「最近 Fed 有什麼消息」。
+// 本站原本只有固定的台股／美股市場新聞與個股新聞，沒有依使用者問的主題搜尋，
+// 模型只能回「資料裡沒有」。這裡只負責「抽出主題關鍵字」（唯一入口）；要不要真的搜尋
+// （問句沒指到個股才搜，個股新聞走既有個股流程）由 ask.ts 決定，搜尋本身在 lib/data/topicNews.ts。
+// ---------------------------------------------------------------------------
+
+/** 問句在問新聞／消息類（沒有這類字眼就不是主題新聞題）。 */
+const TOPIC_NEWS_WORD_PATTERN =
+  /新聞|新闻|消息|報導|报道|報道|最新(情況|情况|狀況|状况|動態|动态|進展|进展|發展|发展)|發生(了)?(什麼|甚麼|啥)|发生(了)?(什么|啥)|有什麼事|頭條|头条|快訊|快讯/;
+/** 指代上文某則新聞的問法（「這則新聞對…的影響」）不是在要新的新聞搜尋。 */
+const TOPIC_NEWS_ANAPHORA_PATTERN = /這則|這篇|這個新聞|這條|这则|这篇|这条|上面|剛剛那|剛才那|那則|那篇/;
+/** 抽完主題後只剩這些泛稱＝問的是大盤層級新聞，既有「台股／美股市場新聞」就涵蓋，不另外搜。 */
+const TOPIC_GENERIC_ONLY_PATTERN = /^(台股|美股|大盤|股市|市場|股票|財經|财经|金融|投資|投资|盤勢|盘势|行情|國際|国际|全球|世界)+$/;
+/** 要從問句剝掉的虛詞與新聞用語（順序有意義：長的在前）。 */
+const TOPIC_STRIP_PATTERNS: RegExp[] = [
+  /(對|对)[^，。？?！!]{0,12}?(有什麼|有甚麼|有啥|會有什麼|会有什么)?(的)?(影響|影响|衝擊|冲击|利多|利空)(嗎|吗)?/g,
+  /最新(情況|情况|狀況|状况|動態|动态|進展|进展|發展|发展)/g,
+  /發生(了)?(什麼|甚麼|啥)(事情|事)?|发生(了)?(什么|啥)(事情|事)?|有什麼事|有什么事/g,
+  /有沒有|有没有|有無|有无|有什麼|有甚麼|有什么|有哪些|有嗎|有吗|還有|还有|有關於|有关于|關於|关于|有關|有关|相關|相关/g,
+  /新聞|新闻|消息|報導|报道|報道|頭條|头条|快訊|快讯/g,
+  /今天|今日|昨天|昨日|最近|近期|近來|近来|目前|現在|现在|這幾天|这几天|這兩天|这两天|這陣子|这阵子|近\s*\d+\s*(天|日)|這週|這周|本週|本周|最新/g,
+  /請問|请问|幫我|帮我|麻煩|麻烦|請|请|想知道|我想知道|告訴我|告诉我|查一下|查查|查詢|查询|看一下|看看|搜尋|搜索|一下|是否|是不是|會不會|会不会/g,
+  /[的了嗎吗呢啊吧喔哦呀]/g,
+  /[，。、？?！!：:；;「」『』“”"'（）()]/g,
+];
+const TOPIC_NEWS_MAX_QUESTION_LEN = 40;
+const TOPIC_NEWS_MIN_TOPIC_LEN = 2;
+const TOPIC_NEWS_MAX_TOPIC_LEN = 24;
+
+/**
+ * 問句是「某個主題的新聞／消息」時，回傳要搜尋的主題關鍵字（多個詞用單一空白隔開）；否則回 null。
+ * 例：「今天有沒有 美國 伊朗的新聞」→「美國 伊朗」、「最近 Fed 有什麼消息」→「Fed」。
+ * 只抽關鍵字，不判斷主題是不是個股（「台積電最新新聞」也會回「台積電」，由呼叫端在問句已指到個股時略過）。
+ */
+export function extractTopicNewsQuery(question: string): string | null {
+  const q = question.trim();
+  if (!q || q.length > TOPIC_NEWS_MAX_QUESTION_LEN) return null;
+  if (!TOPIC_NEWS_WORD_PATTERN.test(q)) return null;
+  if (TOPIC_NEWS_ANAPHORA_PATTERN.test(q)) return null;
+  let rest = q;
+  for (const p of TOPIC_STRIP_PATTERNS) rest = rest.replace(p, " ");
+  const topic = rest.replace(/\s+/g, " ").trim();
+  if (topic.length < TOPIC_NEWS_MIN_TOPIC_LEN || topic.length > TOPIC_NEWS_MAX_TOPIC_LEN) return null;
+  if (TOPIC_GENERIC_ONLY_PATTERN.test(topic.replace(/\s+/g, ""))) return null;
+  return topic;
+}

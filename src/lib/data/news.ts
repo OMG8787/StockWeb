@@ -101,6 +101,15 @@ export async function fetchNews(query: string, limit = 6, locale: NewsLocale = "
 }
 
 /**
+ * 跟 fetchNews 同一個來源與快取，但**失敗會丟出例外、不吞成空陣列**：呼叫端要分得出
+ * 「搜尋成功但真的 0 則」與「搜尋這一刻失敗」（主題新聞搜尋 topicNews.ts 用，
+ * 兩者對使用者的說法完全不同；fetchNews 把兩者都變成 []，不可拿來判斷「查無」）。
+ */
+export async function fetchNewsStrict(query: string, limit: number, locale: NewsLocale = "zh-TW"): Promise<NewsItem[]> {
+  return cached(`news:${locale}:${query}`, NEWS_TTL_MS, () => fetchNewsRaw(query, limit, locale));
+}
+
+/**
  * Fetches the same query across several Google News regional editions in
  * parallel and merges them, de-duplicated by title — used for US stocks/
  * market news so the grounding gets genuine English-language wire coverage
@@ -137,6 +146,23 @@ export async function fetchUsMarketNews(perLocaleLimit = 5): Promise<NewsItem[]>
     fetchNews("US stock market", perLocaleLimit, "en-US").catch(() => []),
   ]);
   return dedupeNews([...zh, ...en]);
+}
+
+/** 國際／地緣政治／總經查詢組（台股美股以外的大事：戰爭、制裁、油價、Fed…），數量刻意節制。 */
+const INTL_MARKET_QUERIES = ["國際 股市 when:2d", "地緣政治 油價 when:2d", "Fed 利率 when:2d"];
+const INTL_MARKET_MAX_AGE_MS = 3 * 24 * 60 * 60_000;
+
+/**
+ * 國際面市場新聞（今日快報與一般問答的市場新聞池補強）：固定的「台股」「美股」查詢抓不到
+ * 美伊衝突這類國際大事（2026-10-06 使用者回報問「美國 伊朗的新聞」回答資料裡沒有）。
+ * 各查詢走 fetchNews 的 5 分鐘快取，合併去重、新到舊、只留近 3 天。
+ */
+export async function fetchIntlMarketNews(limit = 6): Promise<NewsItem[]> {
+  const lists = await Promise.all(INTL_MARKET_QUERIES.map((q) => fetchNews(q, 6).catch(() => [])));
+  const cutoff = Date.now() - INTL_MARKET_MAX_AGE_MS;
+  const merged = dedupeNews(lists.flat().filter((item) => item.pubDate && Date.parse(item.pubDate) >= cutoff));
+  merged.sort((a, b) => b.pubDate.localeCompare(a.pubDate));
+  return merged.slice(0, limit);
 }
 
 /**

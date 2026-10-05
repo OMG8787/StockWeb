@@ -13,7 +13,7 @@ import {
   RULE_SHORT_UTILIZATION_MEANING,
   holdingStructureCompact,
 } from "./chipsRatiosWording";
-import { fetchNews, fetchUsMarketNews } from "@/lib/data/news";
+import { fetchIntlMarketNews, fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatSharesWithLots } from "@/lib/format";
 import { callAiProviders } from "@/lib/ai/provider";
 import { archiveBrief } from "./briefArchive";
@@ -182,7 +182,7 @@ const BRIEF_SYSTEM_PROMPT = [
 export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
   // 2026-10-05：只在 aiSchedule.ts 的時點用較強模型重寫（slotCache.ts），其間沿用最近一次版本。
   return slotCached(BRIEF_CACHE_KEY, dailyBriefSlot(), async (): Promise<DailyBrief> => {
-    const [indices, taifexFutures, macro, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews] =
+    const [indices, taifexFutures, macro, twGainers, usGainers, twLosers, usLosers, twMomentum, usMomentum, twNews, usNews, intlNews] =
       await Promise.all([
         getIndices(),
         getTaifexNightFutures().catch(() => null),
@@ -200,6 +200,8 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
         // today's numbers a second time.
         fetchNews("台股", 15).catch(() => []),
         fetchUsMarketNews(10).catch(() => []),
+        // 國際／地緣政治／總經（戰爭、制裁、油價、Fed…）：固定的「台股」「美股」查詢抓不到這類大事。
+        fetchIntlMarketNews(8).catch(() => []),
       ]);
     const [chipsSummary, holdingSummary] = await Promise.all([
       buildTwChipsSummary(twGainers, twLosers),
@@ -240,6 +242,8 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       twNews.length > 0 ? twNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
       "【近期市場新聞（美股，中英文來源混合，依時間排序，可能橫跨最近幾天）】",
       usNews.length > 0 ? usNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
+      "【近期國際／地緣政治／總經新聞（依時間排序，近3天）】",
+      intlNews.length > 0 ? intlNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
     ].join("\n");
 
 

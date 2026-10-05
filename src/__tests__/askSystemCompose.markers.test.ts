@@ -13,6 +13,7 @@ const producers: Array<[keyof typeof BLOCK_MARKERS, string]> = [
   ["priceLevels", "ai/grounding/priceLevels.ts"],
   ["macro", "ai/macroText.ts"],
   ["nightFutures", "ai/marketOverview.ts"],
+  ["topicNews", "data/topicNews.ts"],
 ];
 
 describe("askSystemCompose BLOCK_MARKERS 與資料區塊標題一致", () => {
