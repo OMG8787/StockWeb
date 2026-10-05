@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useBriefStance } from "./ActionBriefHeading";
 import ThemeToggle from "./ThemeToggle";
 import AuthButton from "./AuthButton";
 
@@ -46,6 +47,9 @@ function isTwStockCode(input: string): boolean {
 const SUGGEST_DEBOUNCE_MS = 200;
 
 export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
+  // 「今日建議」在 14:30 後到隔天開盤前改叫「明日開盤建議」（跟 /action 頁首、卡片同一個判斷，見 tradingStance.ts）。
+  const briefTitle = useBriefStance().briefTitle;
+  const navItems = NAV_ITEMS.map((item) => (item.href === "/action" ? { ...item, label: briefTitle } : item));
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
@@ -206,7 +210,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
         </Link>
 
         <nav className="hidden sm:flex items-center gap-1 text-sm">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -290,7 +294,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
           is a familiar enough mobile pattern and avoids a bigger layout
           rework for what's still a short list. */}
       <nav className="flex sm:hidden items-center gap-1 overflow-x-auto px-4 pb-2 text-sm">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
