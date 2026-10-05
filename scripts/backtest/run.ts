@@ -2,6 +2,7 @@
  * 本站綜合評等回測（2026-10-05 檢討建立；之後每次調評等規則／門檻都要先跑）：
  *   npx tsx scripts/backtest/fetch.ts   # 先補資料（只抓快取沒有的）
  *   npx tsx scripts/backtest/run.ts     # 輸出統計表
+ *   npx tsx scripts/backtest/run.ts --wide  # 擴大樣本（200 檔、約 2 年；先跑 wideFetch.ts），見 wide.ts
  *
  * 做法：對 config.ts 的股票池 × 訊號日，用「訊號日當天收盤為止」的日K與當日三大法人，
  * 直接呼叫正式程式的 score()／computeSiteRating()（src/lib/ai），隔一個交易日開盤進場，
@@ -306,7 +307,10 @@ function alternatives(rows: Row[]) {
   line("　扣掉貢獻前 5 檔後", avoid.filter((r) => !top5.has(r.sym)));
 }
 
-if (process.argv.includes("--alt")) {
+if (process.argv.includes("--wide")) {
+  // 擴大樣本回測（200 檔分層、約 2 年；資料用 wideFetch.ts 下載，見 wide.ts）
+  import("./wide").then((m) => m.runWide());
+} else if (process.argv.includes("--alt")) {
   const rows = buildRows();
   alternatives(rows);
 } else {
