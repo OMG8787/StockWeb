@@ -102,6 +102,15 @@ describe("computeSiteRating", () => {
     expect(computeSiteRating(input)).toEqual(computeSiteRating(input));
   });
 
+  it("describeSiteRating：先不要買不給買進區間與買進後出場價（只列觀察用支撐）", () => {
+    const r = computeSiteRating({ ...facets(["不支持", "支持", "支持", "中性", "中性"]), signals: [], framework: frame(110, [95, 100]) });
+    expect(r.code).toBe("avoid");
+    const text = describeSiteRating("仁寶", "2324", r);
+    expect(text).not.toContain("買進區間 95");
+    expect(text).not.toContain("買進後跌破");
+    expect(text).toContain("不是買進區間");
+  });
+
   it("describeSiteRating 帶標題、未持有／已持有字樣與價位", () => {
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110, [95, 100], 90, 113.5) });
     const text = describeSiteRating("健鼎", "3044", r);

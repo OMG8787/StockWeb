@@ -228,9 +228,14 @@ export const SITE_RATING_TITLE = "【本站綜合評等】";
 /** 給 AI 的一行評等（個股資料最上面、全市場名單每檔都用同一格式）。 */
 export function describeSiteRating(name: string, symbol: string, r: SiteRating): string {
   const levels = [
-    r.zone ? `買進區間 ${fmt(r.zone.low)}～${fmt(r.zone.high)}` : "",
+    r.zone
+      ? r.code === "avoid"
+        ? // 2026-10-05 正式站：仁寶評等先不要買，AI 仍寫「等回檔到 A～B 再分批買」，跟結論矛盾。先不要買不給買進區間。
+          `下方支撐 ${fmt(r.zone.low)}～${fmt(r.zone.high)}（只是觀察用支撐、不是買進區間；先不要買，要等轉為可考慮買進的條件出現）`
+        : `買進區間 ${fmt(r.zone.low)}～${fmt(r.zone.high)}`
+      : "",
     r.noChase != null ? `高於 ${fmt(r.noChase)} 不追價` : "",
-    r.exit != null ? `買進後跌破 ${fmt(r.exit)} 出場` : "",
+    r.exit != null && r.code !== "avoid" ? `買進後跌破 ${fmt(r.exit)} 出場` : "",
   ].filter(Boolean);
   return `${SITE_RATING_TITLE}${name}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${
     levels.length > 0 ? `價位：${levels.join("；")}。` : ""
