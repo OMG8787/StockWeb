@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import WatchlistTable, { type HoldingItem, type WatchlistQuote } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
+import WatchlistCsvControls from "@/components/WatchlistCsvControls";
 import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
-import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import {
   hasHolding,
   hasManualUnheldOrder,
@@ -35,72 +35,6 @@ const EMPTY: WatchlistItem[] = [];
  *  舊資料維持原本的加入順序。 */
 function byOrder(a: HoldingItem, b: HoldingItem): number {
   return (a.order ?? 0) - (b.order ?? 0);
-}
-
-/** CSV 欄位刻意跟畫面上的 WatchlistTable 完全對應（含 2026-09-15 那次改版
- *  新增的持有股數/購買價格/損益平衡價/投資金額/損益）——原本只匯出
- *  股價/漲跌幅/成交量，使用者匯出自己的關注清單時，最想留存的持股與損益
- *  資料反而整批遺失。數字一律走 lib/portfolio.ts 的同一組函式，確保
- *  CSV 裡的金額跟畫面上看到的逐格相同，不會出現兩套算法。
- *  僅關注（沒填持股）的那幾檔，這些欄位留空字串而不是 0——空白代表
- *  「沒有這筆資料」，填 0 會被試算表當成真的持有 0 股、成本 0 元。 */
-function exportCsv(items: HoldingItem[]) {
-  const header = [
-    "市場",
-    "代碼",
-    "名稱",
-    "成交量",
-    "股價",
-    "漲跌幅(%)",
-    "狀態",
-    "持有股數",
-    "購買價格",
-    "損益平衡價",
-    "投資金額",
-    "損益",
-    "損益(%)",
-  ];
-  const rows = items.map((i) => {
-    const held = hasHolding(i);
-    const breakEven = held ? breakEvenPrice(i.costBasis!, i.shares!, i.market) : null;
-    const invested = held ? investedAmount(i.costBasis!, i.shares!, i.market) : null;
-    // 報價暫缺（price === null）的那幾檔，股價/漲跌幅/成交量/損益一律留空字串，
-    // 跟「僅關注沒填持股」同樣的處理原則：空白＝沒有這筆資料，填 0 會被試算表
-    // 當成真的股價 0 元、損益 0 元。
-    const { pnl, pnlPercent } = held && i.price != null
-      ? computeHoldingPnl(i.price, i.costBasis!, i.shares!, i.market)
-      : { pnl: null, pnlPercent: null };
-    return [
-      i.market === "TW" ? "台股" : "美股",
-      i.symbol,
-      i.name,
-      i.volume ?? "",
-      i.price ?? "",
-      i.changePercent ?? "",
-      held ? "持有中" : "僅關注",
-      held ? i.shares! : "",
-      held ? i.costBasis! : "",
-      breakEven ?? "",
-      invested ?? "",
-      pnl ?? "",
-      pnlPercent ?? "",
-    ];
-  });
-  const csv = [header, ...rows]
-    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
-    .join("\r\n");
-  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  // Some browsers silently drop a non-ASCII `download` attribute and fall
-  // back to a bare "download" filename — keep it ASCII-only (the CSV
-  // *content* is still full Traditional Chinese, only the filename isn't).
-  a.download = `stockradar-watchlist-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /**
@@ -279,17 +213,9 @@ export default function WatchlistSection() {
   // xl（>=1280px）時比主內容欄（max-w-6xl）更寬：關注清單欄位多，桌機要一次全部顯示、不用橫向捲動。
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4 xl:ml-[calc((100%-min(100vw-2rem,1760px))/2)] xl:w-[min(calc(100vw-2rem),1760px)]">
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">我的關注</h2>
-        {displayItems.length > 0 && (
-          <button
-            onClick={() => exportCsv(displayItems)}
-            className="rounded-md border border-(--gridline) bg-(--surface-2) px-2 py-1 text-xs hover:bg-(--page-plane)"
-            title="匯出成 CSV"
-          >
-            匯出 CSV
-          </button>
-        )}
+        <WatchlistCsvControls items={displayItems} />
       </div>
       {list.length === 0 ? (
         <p className="py-6 text-center text-sm text-(--text-muted)">

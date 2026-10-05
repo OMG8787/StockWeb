@@ -61,6 +61,20 @@ function readManualOrderFlags(): Partial<Record<Market, boolean>> {
   }
 }
 
+/** 讀出各市場的「僅關注手動排序」旗標（匯出／備份用）。 */
+export function getManualUnheldOrderFlags(): Partial<Record<Market, boolean>> {
+  return { ...readManualOrderFlags() };
+}
+
+/** 整組覆寫旗標（匯入／復原用）。不發事件——呼叫端緊接著 replaceWatchlist 會發。 */
+export function setManualUnheldOrderFlags(flags: Partial<Record<Market, boolean>>): void {
+  try {
+    window.localStorage.setItem(UNHELD_MANUAL_ORDER_KEY, JSON.stringify(flags));
+  } catch {
+    // localStorage 不可用——維持原狀
+  }
+}
+
 /** 這個市場的「僅關注」清單是否已被使用者手動排過（拖曳或按過排序按鈕）。 */
 export function hasManualUnheldOrder(market: Market): boolean {
   return readManualOrderFlags()[market] === true;
