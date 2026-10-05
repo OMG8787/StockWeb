@@ -42,3 +42,6 @@ next-env.d.ts
 
 # 回測工具的本機資料快取（scripts/backtest）
 /.cache/
+
+# 評測完整原始回答（scripts/eval，只提交 .md 報告）
+/docs/eval/*.json

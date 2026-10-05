@@ -20,9 +20,13 @@ import { renderReport, type CaseCapture, type EvalRecord } from "./report";
 import type { EvalCase } from "./types";
 
 loadEnvConfig(process.cwd());
+// 2026-10-05 實測：gemini-2.5-flash 對這把金鑰回 404（不再開放新用戶）、非 lite 的 3.x flash 免費層每模型每天只有
+// 20 次且思考 token 會吃掉輸出上限而被截斷。評測預設把 Gemini 固定在 lite（正式站原本實際在用的模型），
+// 參考資料裡的 AI 判斷層等輔助呼叫也走它；要測正式流程的自動挑選加 --gemini-auto，要測其他模型用 gemini:<模型>。
+if (!process.env.GEMINI_MODEL && !process.argv.includes("--gemini-auto")) process.env.GEMINI_MODEL = "gemini-flash-lite-latest";
 
-/** 評測的「模型組」：gemini＝正式流程自動挑的 Gemini（目前挑到 lite）；gemini:<model>＝直接指定 Gemini 模型。 */
-const DEFAULT_VARIANTS = ["gemini", "gemini:gemini-2.5-flash", "nvidia", "groq"];
+/** 評測的「模型組」：gemini＝正式 Gemini 轉接層（模型見上面 GEMINI_MODEL）；gemini:<model>＝評測腳本直接指定 Gemini 模型。 */
+const DEFAULT_VARIANTS = ["gemini", "nvidia", "groq"];
 const CASE_GAP_MS = 6000;
 const RETRY_WAITS_MS = [30_000, 65_000];
 /** 評測給寬一點的逾時，量的是品質；實際延遲另外記錄在報告裡。 */
