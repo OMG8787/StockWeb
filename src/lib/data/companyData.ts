@@ -177,9 +177,12 @@ export function getTwMarginMap(): Promise<Map<string, Chips>> {
  */
 export function getTwInstitutionalMap(): Promise<Map<string, Chips>> {
   return cachedMap(
-    "chips:TW:institutional",
+    "chips:TW:institutional:v2", // v2：改抓不含權證版本，同時作廢可能缺上市半邊的舊快取
     CHIPS_TTL_MS,
-    () => mergeTwMaps(fetchTwseInstitutionalTradingAll, fetchTpexInstitutionalTradingAll),
+    // 2026-10-05：原本用 selectType=ALL（含權證，約 2.4MB），實測下載要 ~7 秒、常撞 8 秒逾時，
+    // 上市那半邊就變成空表（mergeTwMaps 單邊失敗吞掉）被快取 1 小時——台積電等上市股的個股法人整段消失，
+    // AI 只好拿新聞標題的全市場合計頂替。改用 ALLBUT0999（不含權證，約 190KB、~1.7 秒），股票／ETF 都在。
+    () => mergeTwMaps(() => fetchTwseInstitutionalTradingAll(undefined, "ALLBUT0999"), fetchTpexInstitutionalTradingAll),
     { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
   );
 }

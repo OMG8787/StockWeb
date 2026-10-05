@@ -9,6 +9,7 @@ import { weekendNoteForAi } from "@/lib/marketStatus";
 import { HISTORY_SECTION_TITLE } from "./grounding/history";
 import { RECENT_CROSSES_TITLE } from "./grounding/indicators";
 import { SECTOR_FACTORS_TITLE } from "./grounding/sectorFactors";
+import { PRICE_LEVELS_TITLE } from "./grounding/priceLevels";
 import { MARKET_HISTORY_TITLE } from "./marketHistoryText";
 import {
   SYSTEM_ROLE,
@@ -43,6 +44,7 @@ import {
   RULE_HOLDINGS_DEEP_ANALYSIS,
   RULE_SINGLE_STOCK_DEEP_ANALYSIS,
   RULE_PRICE_LEVEL_CONSISTENCY,
+  RULE_USE_PRICE_FRAMEWORK,
   RULE_ONLY_ASKED_STOCKS,
   RULE_YES_NO_DIRECT,
   RULE_CONCISE_ANSWER,
@@ -52,6 +54,7 @@ import {
 export const BLOCK_MARKERS = {
   recentCrosses: RECENT_CROSSES_TITLE, // grounding/indicators.ts（共用常數）
   sectorFactors: SECTOR_FACTORS_TITLE, // grounding/sectorFactors.ts（共用常數）
+  priceLevels: PRICE_LEVELS_TITLE, // grounding/priceLevels.ts（共用常數）
   chipsRatios: "籌碼比例（", // grounding/chipsRatios.ts
   socialSentiment: "社群情緒（", // grounding/sentiment.ts
   institutional: "三大法人", // grounding/stock.ts、movers.ts、techScreen.ts
@@ -148,6 +151,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     c.holdingsEmptyAsked ? RULE_HOLDINGS_EMPTY_NOT_NO_PERMISSION : "",
     c.singleStockDeep ? RULE_SINGLE_STOCK_DEEP_ANALYSIS : "",
     hasStockLike ? RULE_PRICE_LEVEL_CONSISTENCY : "",
+    dataText.includes(BLOCK_MARKERS.priceLevels) ? RULE_USE_PRICE_FRAMEWORK : "",
     c.stockCount > 0 && !c.marketWide ? RULE_ONLY_ASKED_STOCKS : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),

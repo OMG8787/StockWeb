@@ -10,6 +10,7 @@ const producers: Array<[keyof typeof BLOCK_MARKERS, string]> = [
   ["chipsRatios", "ai/grounding/chipsRatios.ts"],
   ["socialSentiment", "ai/grounding/sentiment.ts"],
   ["institutional", "ai/grounding/stock.ts"],
+  ["priceLevels", "ai/grounding/priceLevels.ts"],
   ["macro", "ai/macroText.ts"],
   ["nightFutures", "ai/marketOverview.ts"],
 ];

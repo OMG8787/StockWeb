@@ -23,7 +23,10 @@ import { resolveMarketCap } from "@/lib/data/marketCap";
 import { formatTwReportDeadline } from "@/lib/data/twReportDeadline";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState, describeRecentCrosses, RECENT_CROSSES_TITLE } from "./indicators";
-import { getMarketStatus } from "@/lib/marketStatus";
+import { getMarketStatus, isTaipeiWeekend } from "@/lib/marketStatus";
+import { taipeiDayKey } from "@/lib/pollingSchedule";
+import { chipsSectionTitle, formatStockNewsLines } from "./stockNewsAndChips";
+import { computePriceFramework, describePriceFramework } from "./priceLevels";
 import { describeChipsRatios } from "./chipsRatios";
 import { getUsStockSentiment } from "@/lib/data/sentiment";
 import { describeSocialSentiment } from "./sentiment";
@@ -132,6 +135,12 @@ export async function buildStockGrounding(
   } else {
     lines.push("（歷史走勢資料目前無法取得）");
   }
+  // 支撐／壓力＋自洽的買進區間／出場價／不追價，由程式算好（見 priceLevels.ts）；興櫃成交稀疏不給。
+  const levelCandles = chartYear?.candles ?? chart?.candles;
+  if (levelCandles && quote.board !== "emerging") {
+    const levelsText = describePriceFramework(computePriceFramework(levelCandles, quote.price, quote.market));
+    if (levelsText) lines.push(levelsText);
+  }
   lines.push("（來源：即時/近即時公開資料）");
 
   if (fundamentals) {
@@ -192,7 +201,8 @@ export async function buildStockGrounding(
       const change = chips.shortBalanceChange != null ? `，較前日${signed(chips.shortBalanceChange)}張` : "";
       parts.push(`融券餘額 ${chips.shortBalance.toLocaleString()} 張${change}`);
     }
-    if (parts.length > 0) lines.push(`籌碼面（${chips.date ?? "最近交易日"}）：${parts.join("；")}`);
+    // 標題註明資料日；盤中當天的個股法人尚未公布時明講（見 stockNewsAndChips.ts）。
+    if (parts.length > 0) lines.push(`${chipsSectionTitle(chips.date ?? chips.marginDate, taipeiDayKey(), isTaipeiWeekend())}：${parts.join("；")}`);
   }
   const chipsRatiosText = describeChipsRatios(chipsRatios);
   if (chipsRatiosText) lines.push(chipsRatiosText);
@@ -206,8 +216,10 @@ export async function buildStockGrounding(
     lines.push(`近期重大訊息公告：\n${shown.join("\n")}`);
   }
 
-  if (news.length > 0) {
-    lines.push(`近期相關新聞：\n${news.map((n) => `- ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n")}`);
+  // 濾掉多檔彙整標題（法人買賣超排行等）並標日期，見 stockNewsAndChips.ts。
+  const newsLines = formatStockNewsLines(news, quote.symbol);
+  if (newsLines.length > 0) {
+    lines.push(`近期相關新聞：\n${newsLines.join("\n")}`);
   }
 
   return { symbol: quote.symbol, text: lines.join("\n") };
