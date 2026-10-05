@@ -38,6 +38,8 @@ interface WRow {
   ret: Record<H, number | null>;
   /** 減同日全樣本平均 */
   xs: Record<H, number | null>;
+  /** 減同日「同市值層級」平均（中性化大小型股效應；主要指標） */
+  xt: Record<H, number | null>;
   /** 減 0050 */
   xm: Record<H, number | null>;
 }
@@ -120,6 +122,7 @@ function buildRows(): { rows: WRow[]; universe: ReturnType<typeof buildUniverse>
         revYoy: revenueYoyAsOf(date, u.sym),
         ret: Object.fromEntries(HORIZONS.map((h) => [h, fwd(cs, i, h)])) as Record<H, number | null>,
         xs: {} as Record<H, number | null>,
+        xt: {} as Record<H, number | null>,
         xm: {} as Record<H, number | null>,
       });
     }
@@ -129,8 +132,12 @@ function buildRows(): { rows: WRow[]; universe: ReturnType<typeof buildUniverse>
     for (const h of HORIZONS) {
       const avgH = mean(same.map((r) => r.ret[h]).filter((x): x is number => x != null));
       const e = etfRet.get(d)?.[h] ?? null;
+      const tierAvg = new Map<Tier, number>();
+      for (const t of ["大型", "中型", "小型"] as Tier[])
+        tierAvg.set(t, mean(same.filter((r) => r.tier === t).map((r) => r.ret[h]).filter((x): x is number => x != null)));
       for (const r of same) {
         r.xs[h] = r.ret[h] == null ? null : r.ret[h]! - avgH;
+        r.xt[h] = r.ret[h] == null ? null : r.ret[h]! - tierAvg.get(r.tier)!;
         r.xm[h] = r.ret[h] == null || e == null ? null : r.ret[h]! - e;
       }
     }
@@ -176,7 +183,8 @@ function seriesStat(series: number[], h: number, seed = 1): { mean: number; lo: 
   return { mean: mu, lo: reps[Math.floor(0.025 * reps.length)], hi: reps[Math.floor(0.975 * reps.length)], t };
 }
 
-function stat(sel: WRow[], h: H, kind: "xs" | "xm" = "xs"): Stat | null {
+type Kind = "xs" | "xt" | "xm";
+function stat(sel: WRow[], h: H, kind: Kind = "xt"): Stat | null {
   const vals = sel.filter((r) => r[kind][h] != null);
   if (vals.length === 0) return null;
   const byDate = new Map<string, number[]>();
@@ -237,16 +245,16 @@ function logics(rows: WRow[]): Logic[] {
   ];
 }
 
-function randomBand(rows: WRow[], h: H, frac = 0.1, reps = 300): { lo: number; hi: number; sd: number } {
+function randomBand(rows: WRow[], h: H, kind: Kind, frac = 0.1, reps = 300): { lo: number; hi: number; sd: number } {
   const rnd = mulberry32(7);
   const byDate = new Map<string, WRow[]>();
-  for (const r of rows) if (r.xs[h] != null) byDate.set(r.date, [...(byDate.get(r.date) ?? []), r]);
+  for (const r of rows) if (r[kind][h] != null) byDate.set(r.date, [...(byDate.get(r.date) ?? []), r]);
   const out: number[] = [];
   for (let k = 0; k < reps; k++) {
     const series: number[] = [];
     for (const rs of byDate.values()) {
       const pick = rs.filter(() => rnd() < frac);
-      if (pick.length) series.push(mean(pick.map((r) => r.xs[h]!)));
+      if (pick.length) series.push(mean(pick.map((r) => r[kind][h]!)));
     }
     out.push(mean(series));
   }
@@ -273,7 +281,7 @@ export function runWide() {
   p(`- **選樣（避免前視）**：只用訊號期開始前（2024-09-23～09-30）上市＋上櫃普通股的平均成交金額排名（當時共約 ${rankedCount()} 檔普通股；排除 ETF／ETN、存託憑證，興櫃不在行情表內）。大型＝前 60 全取；中型＝第 61～300 名隨機抽 70；小型＝第 301～900 名隨機抽 70（900 名以後成交太少不抽）；固定亂數種子可重現。`);
   p(`- **存活者偏差**：選樣只用期初資訊，沒有用「現在還在」的名單，所以沒有前視型偏差；殘餘偏差是 Yahoo 已下架（下市）的股票抓不到日K：${universe.length} 檔中抓不到 ${missing.length} 檔${missing.length ? `（${missing.join("、")}）` : ""}。沒有每季重新選樣（每季重選需要全市場每季行情，留待之後），所以後期新上市、後來才變熱門的股票不在樣本內——這讓樣本偏向「期初就大的公司」，但不會讓任何邏輯的超額系統性變好。`);
   p(`- **進出場**：訊號日收盤判斷、下一交易日開盤買進、第 5／10／20 個交易日收盤賣出；日K用 Yahoo 還原權息（除權息不會被當成下跌）。`);
-  p(`- **超額報酬**：主要＝個股報酬 − 同訊號日全樣本等權平均（扣掉大盤漲跌與小型股整體表現）；另列 − 0050 同期報酬。**交易成本**：表中超額是未扣成本的「選股能力」；實際可賺要再扣來回 ${ROUND_TRIP_COST_PCT}%（「扣成本」欄＝平均−${ROUND_TRIP_COST_PCT}）。`);
+  p(`- **超額報酬**：主要＝個股報酬 − 同訊號日「同市值層級」等權平均（扣掉大盤漲跌，也扣掉這兩年大型股遠強於中小型股的規模效應——不中性化的話，任何偏向大型股的邏輯都會白撿超額）；另列 − 同日全樣本平均、− 0050 同期報酬。**交易成本**：表中超額是未扣成本的「選股能力」；實際可賺要再扣來回 ${ROUND_TRIP_COST_PCT}%（「扣成本」欄＝平均−${ROUND_TRIP_COST_PCT}）。`);
   p(`- **統計**：同一週的多檔股票高度相關，所以統計單位是「每週選中股票的平均超額」這條 ${DATES.length} 週的時間序列（＝每週等權買入的組合）。t 值用 Newey-West（落後期數＝ceil(持有日÷5)，處理 10／20 日持有期的重疊）；95% 信賴區間用區塊 bootstrap（區塊＝ceil(持有日÷5)+1 週，2000 次）。**判定**：區間不含 0 且 |t|>2 才算「可靠為正／負」，其餘「分不出來」。`);
   p(`- **市況分段**：訊號日加權指數近 60 個交易日報酬 > +${REGIME_RET60_PCT}% 為上漲、< −${REGIME_RET60_PCT}% 為下跌、其餘盤整（純客觀規則，事先定好）。本樣本：上漲 ${regimeCount("上漲")} 週、下跌 ${regimeCount("下跌")} 週、盤整 ${regimeCount("盤整")} 週。`);
   p(`- **前後半期（樣本外檢查）**：前半 ${[...HALF1][0]}～${[...HALF1].at(-1)}、後半 ${DATES.find((d) => !HALF1.has(d))}～${DATES.at(-1)}。門檻沒有依任何一半調整，所以兩半都算樣本外；方向一致才可信。`);
@@ -281,7 +289,7 @@ export function runWide() {
   p(`- **月營收**：公開資訊觀測站上市＋上櫃彙總表；訊號日只用當時已公布的月份（次月 11 日起才用）。覆蓋 ${rows.filter((r) => r.revYoy != null).length}/${rows.length} 筆。`);
   p();
 
-  const sum = (label: string, kind: "xs" | "xm") => {
+  const sum = (label: string, kind: Kind) => {
     p(`## ${label}`);
     p();
     p("| 邏輯 | 筆數 | " + HORIZONS.map((h) => `${h}日超額% [95%區間]｜t｜判定`).join(" | ") + ` | 10日中位 | 10日跑贏 | 10日扣成本 |`);
@@ -296,7 +304,7 @@ export function runWide() {
           ` | ${s10 ? f2(s10.median) : "—"} | ${s10 ? (s10.win * 100).toFixed(0) + "%" : "—"} | ${lg.buySide && s10 ? f2(s10.mean - ROUND_TRIP_COST_PCT) : "—"} |`
       );
     }
-    if (kind === "xs") {
+    if (kind !== "xm") {
       const e = HORIZONS.map((h) => {
         const series = DATES.map((d) => {
           const same = rows.filter((r) => r.date === d && r.ret[h] != null);
@@ -307,15 +315,16 @@ export function runWide() {
         return `${f2(s.mean)} [${f2(s.lo)}, ${f2(s.hi)}]｜${f2(s.t)}｜${verdict({ ...s, n: series.length, weeks: series.length, median: 0, win: 0 })}`;
       });
       p(`| ⑦a 基準：買進持有 0050（相對全樣本平均） | ${DATES.length}週 | ${e.join(" | ")} | — | — | — |`);
-      const rb = HORIZONS.map((h) => randomBand(rows, h));
+      const rb = HORIZONS.map((h) => randomBand(rows, h, kind));
       p(`| ⑦b 基準：每週隨機抽 10%（300 次的 95% 範圍＝運氣帶） | — | ${rb.map((b) => `[${f2(b.lo)}, ${f2(b.hi)}]`).join(" | ")} | — | — | — |`);
     }
     p();
   };
-  sum("一、全期（超額＝減同日全樣本平均）", "xs");
+  sum("一、全期（主要：超額＝減同日「同市值層級」平均）", "xt");
+  sum("一之二、全期（超額＝減同日全樣本平均，未中性化市值；大型股這兩年明顯強於中小型，會讓偏大型股的邏輯看起來比較好）", "xs");
 
   const breakdown = (h: H) => {
-    p(`## 二、${h} 日超額：依市況與前後半期（平均 [95%區間]，括號後為判定）`);
+    p(`## 二、${h} 日超額（減同日同層級平均）：依市況與前後半期（平均 [95%區間]，括號後為判定）`);
     p();
     p("| 邏輯 | 上漲 | 下跌 | 盤整 | 前半 | 後半 |");
     p("|---|---|---|---|---|---|");
@@ -336,7 +345,7 @@ export function runWide() {
   breakdown(10);
   breakdown(20);
 
-  p("## 三、10 日超額：依市值層級");
+  p("## 三、10 日超額（減同日同層級平均）：依市值層級");
   p();
   p("| 邏輯 | 大型 | 中型 | 小型 |");
   p("|---|---|---|---|");
