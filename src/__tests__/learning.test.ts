@@ -164,8 +164,12 @@ describe("教訓比對與驗證", () => {
     const ls = matchLessons(feat({ rsi: 80, r5: 20 }), "buy");
     expect(ls.length).toBe(LESSONS_MAX_PER_STOCK);
     expect(ls.map((l) => l.id)).toContain("rsi-75");
-    expect(ls.every((l) => l.status === "有效")).toBe(true);
-    expect(describeLessons(ls)).toContain("「RSI ≥ 75：回測 61 筆、5 日平均超額 −2.58%、跑贏大盤 34%——");
+    expect(ls[0].status).toBe("有效");
+    // 2026-10-06：教訓說法要跟評等規則一致（急漲只提示、不擋）——不可再出現「宜等指標降溫」這種叫人不要買的說法。
+    const text = describeLessons(ls)!;
+    expect(text).toContain("「RSI ≥ 75：回測 1745 筆、5 日平均超額 −0.23%——");
+    expect(text).toContain("不是不能買");
+    expect(text).not.toMatch(/宜等指標降溫|追高是本站推薦失敗的主因/);
   });
   it("一般情況的先不要買：不附條件型教訓", () => {
     expect(matchLessons(feat(), "avoid")).toEqual([]);

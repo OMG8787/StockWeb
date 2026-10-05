@@ -48,24 +48,31 @@ export interface Lesson {
   status: LessonStatus;
 }
 
+/** 擴大回測報告（2026-10-05）。 */
+const WIDE = "docs/backtest/2026-10-wide-summary.md（198 檔×99 週、減同市值層級平均）";
+
+// 2026-10-06 修正：原本「RSI≥75 是最一致的負向訊號（61 筆、5 日 −2.58%）」來自 60 檔／2 個月小樣本，
+// 擴大回測沒有重現（追高組 5 日 −0.23% 不顯著、20 日 +1.64%），跟評等規則（急漲只提示、不擋）矛盾——
+// 使用者 10/6 回報主結論「建議買進」下一行卻引用這條說「有效」，不知道以哪個為主。改成跟評等規則一致的說法。
 export const LESSON_RSI_OVERHEAT: Lesson = {
   id: "rsi-75",
   condition: "RSI ≥ 75",
-  advice: "RSI≥75 是回測中最一致的負向訊號，這時買進 5 日後多半跑輸大盤，宜等指標降溫",
+  advice: "短線 5 日常回檔、但 20 日表現不比較差（擴大回測 20 日 +1.64%），所以不是不能買，宜分批、不要一次買滿（舊的 60 檔小樣本「5 日 −2.58%」結論已被擴大樣本修正）",
   when: [{ field: "rsi", op: ">=", value: 75 }],
-  evidence: { n: 61, excessPct: -2.58, winRatePct: 34, source: "2026-10-05 檢討回測（前60大上市股、8/3～9/22、960 筆；未觸發組 +0.18%）" },
+  evidence: { n: 1745, excessPct: -0.23, winRatePct: null, source: `${WIDE}：追高組（5日>15% 或 RSI≥75）5 日 −0.23%（不顯著）、20 日 +1.64%` },
   expectedExcessSign: -1,
   created: "2026-10-05",
   status: "有效",
 };
 
+// 2026-10-06 修正：同 LESSON_RSI_OVERHEAT（小樣本「急漲 90 筆 5 日 −1.15%」在擴大回測沒有重現）。
 export const LESSON_SURGE: Lesson = {
   id: "surge",
   condition: "近 5 日漲幅 > 15% 或近 10 日漲幅 > 25%（急漲）",
-  advice: "急漲後才進場，5 日後平均跑輸大盤，追高是本站推薦失敗的主因",
+  advice: "急漲後短線 5 日常回檔、但 20 日表現不比較差，所以不是不能買，宜分批、不要一次買滿（舊的 60 檔小樣本「5 日 −1.15%」結論已被擴大樣本修正）",
   when: [],
   anyOf: [[{ field: "r5", op: ">", value: 15 }], [{ field: "r10", op: ">", value: 25 }]],
-  evidence: { n: 90, excessPct: -1.15, winRatePct: 34, source: "2026-10-05 檢討回測（chaseGuards.ts ②；未觸發組 +0.12%）" },
+  evidence: { n: 1745, excessPct: -0.23, winRatePct: null, source: `${WIDE}：追高組 5 日 −0.23%（不顯著）、20 日 +1.64%` },
   expectedExcessSign: -1,
   created: "2026-10-05",
   status: "有效",
@@ -74,7 +81,7 @@ export const LESSON_SURGE: Lesson = {
 export const LESSON_LIMIT_UP_CHASE: Lesson = {
   id: "limit-up-chase",
   condition: "近 3 日內有漲停、且近 20 日漲幅 > 25%",
-  advice: "漲停後追價（隔日開高進場）是使用者實際虧損案例的共同模式，進場價常是短線高點",
+  advice: "漲停後隔日開高進場，進場價常是短線高點，宜分批、設好出場價（個案觀察，結論仍以本站綜合評等為準）",
   when: [
     { field: "lu", op: ">=", value: 1 },
     { field: "r20", op: ">", value: 25 },
@@ -85,16 +92,17 @@ export const LESSON_LIMIT_UP_CHASE: Lesson = {
   status: "待驗證",
 };
 
+// 2026-10-06：評等改果斷二分、不再有「等回檔」（siteRating.ts），這條只留給舊紀錄的驗證，不再附給 AI。
 export const LESSON_WAIT_FOR_ZONE: Lesson = {
   id: "wait-for-zone",
-  condition: "評等為「等回檔再買」",
-  advice: "等回檔的股票，回測中等價格回到買進區間上緣才買、抱 5 日平均 +0.71%（未扣大盤），比現價追進好",
+  condition: "評等為「等回檔再買」（舊評等）",
+  advice: "等回檔的股票，回測中等價格回到買進區間上緣才買、抱 5 日平均 +0.71%（未扣大盤）",
   when: [],
   codes: ["buy-on-pullback"],
   evidence: { n: null, excessPct: null, winRatePct: null, source: "2026-10-05 檢討回測（等回檔組回到區間才買抱 5 日 +0.71%，未扣大盤）" },
   expectedExcessSign: -1,
   created: "2026-10-05",
-  status: "待驗證",
+  status: "已失效",
 };
 
 export const LESSON_TAKE_PROFIT: Lesson = {
@@ -109,16 +117,17 @@ export const LESSON_TAKE_PROFIT: Lesson = {
   status: "待驗證",
 };
 
+// 2026-10-06 更新：原本引用 33 筆小樣本「建議買進 5 日 −1.47%」；二分評等擴大回測 3,524 筆為正但未達統計可靠。
 export const LESSON_TECH_SCORE_NEGATIVE: Lesson = {
   id: "tech-score-negative",
   condition: "評等為「建議買進」",
-  advice: "誠實提醒：2026-10-05 回測中本站「建議買進」組 5 日超額仍為負（33 筆 -1.47%、跑贏 30%），「先不要買」組反而 +0.35%，評等只能當參考、要分批與設出場價",
+  advice: "誠實提醒：擴大回測中本站「建議買進」10 日超額 +0.34%、20 日 +0.76%，方向為正但尚未達統計可靠，評等是參考、宜分批並設出場價",
   when: [],
   codes: ["buy"],
-  evidence: { n: 33, excessPct: -1.47, winRatePct: 30, source: "2026-10-05 檢討回測（siteRating 建議買進組）" },
-  expectedExcessSign: -1,
+  evidence: { n: 3524, excessPct: 0.2, winRatePct: null, source: `${WIDE}：2026-10-05 二分評等（0e01390）建議買進組` },
+  expectedExcessSign: 1,
   created: "2026-10-05",
-  status: "有效",
+  status: "待驗證",
 };
 
 export const LESSONS: Lesson[] = [
