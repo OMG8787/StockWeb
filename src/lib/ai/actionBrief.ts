@@ -1,4 +1,5 @@
-import { cached } from "@/lib/data/cache";
+import { peekCached, writeCached } from "@/lib/data/cache";
+import { cachedWithDegradedPredicate } from "@/lib/data/degradedCache";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { slotCached } from "./slotCache";
 import { actionBriefSlot, nextActionBriefSlotTime } from "./aiSchedule";
@@ -6,6 +7,7 @@ import type { StockRatingResult } from "./stockRating";
 import { premiumFellBack } from "./gemini";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
+import { frozenListEpochKey, LAST_LIST_TTL_MS } from "./actionStability";
 import {
   buildPlan,
   mergeAiExplanation,
@@ -142,6 +144,8 @@ export function actionAiLayerPrefix(day: string, mode: BriefMode): string {
 
 /** 程式即時層（名單、結論、價位、操作計畫）：跟 stockRating 同樣 10 分鐘，不需要 AI、不吃配額。 */
 export const ACTION_LIST_TTL_MS = 10 * 60_000;
+/** 上游整份抓不到（degradedReasons 非空）時只快取這麼久，讓它盡快自我修復（不要把缺資料的名單放 10 分鐘）。 */
+export const ACTION_LIST_DEGRADED_TTL_MS = 60_000;
 
 interface ActionListLayer {
   grounding: string;
@@ -152,6 +156,19 @@ interface ActionListLayer {
   gainersAvailable: boolean;
   marketNote: string | null;
   listAt: string;
+  /** 輸入不完整的原因（空陣列＝完整）；非空時只快取 ACTION_LIST_DEGRADED_TTL_MS */
+  degradedReasons: string[];
+}
+
+/** 「資料已定」時段內上一份名單的存檔（見 actionStability.ts）：只存完整輸入算出來的名單評等。 */
+interface LastActionList {
+  at: string;
+  picks: StockRatingResult[];
+}
+
+/** 上一份名單存檔的 key：帶「資料已定」時段代號（週末、夜間到隔天開盤前同一份）。 */
+export function lastActionListKey(epoch: string): string {
+  return `action-list-last:v1:${epoch}`;
 }
 
 /** AI 解說層快取物件（slotCached 需要 usedAi）。 */
@@ -162,25 +179,41 @@ interface StoredAiLayer extends ActionAiLayer {
   fellBackToLite?: boolean;
 }
 
-function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
-  return cached(
-    `action-list:v1:${taipeiDayKey()}:${stance.briefMode}`,
-    ACTION_LIST_TTL_MS,
-    async () => {
-      const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote } = await buildActionGrounding();
-      const picks: ActionBriefPick[] = ratedPicks.map((p) => ({
-        symbol: p.rating.symbol,
-        name: p.rating.name,
-        label: p.rating.rating.label,
-        code: p.rating.rating.code,
-        holdingLabel: p.rating.rating.holdingLabel,
-        reason: p.rating.rating.reason,
-        plan: buildPlan(p.rating.rating, stance),
-      }));
-      return { grounding, picks, ratings: ratedPicks.map((p) => p.rating), indexSummary, notChase, gainersAvailable, marketNote, listAt: new Date().toISOString() };
-    },
-    { forceRefresh }
-  );
+async function computeActionList(stance: TradingStance): Promise<ActionListLayer> {
+  // 資料已定的時段（夜間到隔天開盤前、週末）：同一時段上一份名單的股票，只有被重新評等為不建議買進才換掉，
+  // 上游抓失敗不會讓整份名單重排（見 actionStability.ts；盤中與 14:30～22:00 資料在變，不套用）。
+  const epoch = frozenListEpochKey(new Date());
+  const last = epoch ? await peekCached<LastActionList>(lastActionListKey(epoch)).catch(() => undefined) : undefined;
+  const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote, degradedReasons } =
+    await buildActionGrounding({ previousPicks: last?.picks });
+  if (degradedReasons.length > 0) console.warn("[action-list] 輸入不完整：", degradedReasons.join("、"));
+  const picks: ActionBriefPick[] = ratedPicks.map((p) => ({
+    symbol: p.rating.symbol,
+    name: p.rating.name,
+    label: p.rating.rating.label,
+    code: p.rating.rating.code,
+    holdingLabel: p.rating.rating.holdingLabel,
+    reason: p.rating.rating.reason,
+    plan: buildPlan(p.rating.rating, stance),
+  }));
+  const ratings = ratedPicks.map((p) => p.rating);
+  // 只有輸入完整的這次才存檔當「上一份名單」（不完整的名單不能當之後的基準）。
+  if (epoch && degradedReasons.length === 0) {
+    await writeCached<LastActionList>(lastActionListKey(epoch), { at: new Date().toISOString(), picks: ratings }, LAST_LIST_TTL_MS).catch(() => {});
+  }
+  return { grounding, picks, ratings, indexSummary, notChase, gainersAvailable, marketNote, listAt: new Date().toISOString(), degradedReasons };
+}
+
+async function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
+  // v2（2026-10-06）：新增 degradedReasons 與凍結時段穩定名單；輸入不完整只快取 1 分鐘。
+  const key = `action-list:v2:${taipeiDayKey()}:${stance.briefMode}`;
+  const isDegraded = (l: ActionListLayer) => (l.degradedReasons?.length ?? 0) > 0;
+  if (forceRefresh) {
+    const fresh = await computeActionList(stance);
+    await writeCached(key, fresh, isDegraded(fresh) ? ACTION_LIST_DEGRADED_TTL_MS : ACTION_LIST_TTL_MS);
+    return fresh;
+  }
+  return cachedWithDegradedPredicate(key, ACTION_LIST_TTL_MS, ACTION_LIST_DEGRADED_TTL_MS, isDegraded, () => computeActionList(stance));
 }
 
 /**

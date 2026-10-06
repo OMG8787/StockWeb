@@ -24,6 +24,7 @@ import { getStockRating, getStockRatings, type StockRatingResult } from "./stock
 import { describeSiteRating, isRecommendable, WEAK_MARKET_RET60_PCT, weakMarketNote } from "./siteRating";
 import { getTaiexRet60Pct } from "./learning/regimeData";
 import { PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
+import { stabilizeBuyPicks } from "./actionStability";
 import {
   pct,
   score,
@@ -173,7 +174,12 @@ async function buildCandidates(
   return candidates
     .map(score)
     .sort(
-      (a, b) => b.supportCount - a.supportCount || a.againstCount - b.againstCount || b.changePercent - a.changePercent
+      (a, b) =>
+        b.supportCount - a.supportCount ||
+        a.againstCount - b.againstCount ||
+        b.changePercent - a.changePercent ||
+        // 2026-10-06：全部同分時以代號定序（原本靠加入順序，來源清單順序一變就換名單），相同輸入必得相同名單。
+        a.symbol.localeCompare(b.symbol)
     );
 }
 
@@ -205,8 +211,17 @@ const RATED_PICK_LIMIT = 8;
 const NOT_CHASE_VERIFY_ATTEMPTS = 3;
 
 export interface RatedPick {
-  candidate: ScoredCandidate;
+  /** 上一份名單保留下來、這次候選池沒有的股票沒有候選資料（null） */
+  candidate: ScoredCandidate | null;
   rating: StockRatingResult;
+}
+
+export interface ActionGroundingOptions {
+  /**
+   * 同一個「資料已定」時段（見 actionStability.ts）上一份名單的評等：這次重算時，其中的股票只有被重新評等為
+   * 「不建議買進」才會被換掉，上游抓失敗（沒有評等）則保留。沒給＝完全依這次的候選排序（盤中、測試、評測）。
+   */
+  previousPicks?: readonly StockRatingResult[];
 }
 
 export interface ActionGrounding {
@@ -221,6 +236,11 @@ export interface ActionGrounding {
   gainersAvailable: boolean;
   /** 大盤偏弱提示（加權 60 日報酬 < WEAK_MARKET_RET60_PCT；不弱或抓不到是 null） */
   marketNote: string | null;
+  /**
+   * 這次算名單時哪些上游整份抓不到（報價表、技術訊號共振清單、法人買超榜、估值排行為空，或候選股的評等沒算出來）。
+   * 空陣列＝輸入完整。非空時名單只快取很短（見 actionBrief.ts），且不當作「上一份名單」存檔。
+   */
+  degradedReasons: string[];
 }
 
 /**
@@ -228,7 +248,7 @@ export interface ActionGrounding {
  * 原始資料。這一頁的正確性幾乎完全取決於 grounding 有沒有如實呈現各面向——「建議買進」
  * 這種話一旦建立在錯的或半套的資料上，比寫得含糊還糟——所以讓它可以被單獨叫起來檢查。
  */
-export async function buildActionGrounding(): Promise<ActionGrounding> {
+export async function buildActionGrounding(opts: ActionGroundingOptions = {}): Promise<ActionGrounding> {
   const [indices, taifexFutures, macro, twMomentum, usMomentum, newsFeed, chipsRanking, valueScreen, twAll] =
     await Promise.all([
       getIndices(),
@@ -249,6 +269,12 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
     ]);
 
   const liquidGainers = twAll.filter((i) => i.turnover >= CANDIDATE_MIN_TURNOVER_TWD && i.changePercent > 0);
+  // 上面每個來源失敗都被 .catch 吞成空清單：不記下來的話，缺了一整個來源的名單會被當成正常結果快取 10 分鐘。
+  const degradedReasons: string[] = [];
+  if (twAll.length === 0) degradedReasons.push("全市場報價表為空");
+  if (twMomentum.length === 0) degradedReasons.push("技術訊號共振清單為空");
+  if (chipsRanking.institutionalBuy.length === 0 && chipsRanking.foreignBuy.length === 0) degradedReasons.push("法人買超榜為空");
+  if (valueScreen.lowPe.length === 0 && valueScreen.highYield.length === 0 && valueScreen.lowPb.length === 0) degradedReasons.push("估值排行為空");
 
   const usTargets = usMomentum.slice(0, US_ENRICH_LIMIT);
   const usExtras = new Map<string, { fundamentals: Fundamentals | null; earnings: Earnings | null }>();
@@ -271,19 +297,45 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
 
   // 2026-10-05：今日建議、AI 問答、個股問答三個入口的結論要一致——名單只列本站綜合評等為
   // 「建議買進／建議等回檔再買」的（跟個股頁問AI讀同一份 10 分鐘快取），評等字樣照用。
+  const rated = qualified.slice(0, RATED_PICK_LIMIT);
+  const previous = opts.previousPicks ?? [];
+  const ratedKeys = new Set(rated.map((c) => c.symbol.toUpperCase()));
+  // 上一份名單的股票也要重新評等（10 分鐘快取，多半命中）：才分得出「明確變成不建議買進」與「這次抓不到」。
+  const previousExtra = previous.filter((p) => !ratedKeys.has(p.symbol.toUpperCase()));
   const ratings = await getStockRatings(
-    qualified.slice(0, RATED_PICK_LIMIT).map((c) => ({ symbol: c.symbol, market: "TW" as const })),
+    [...rated.map((c) => ({ symbol: c.symbol, market: "TW" as const })), ...previousExtra.map((p) => ({ symbol: p.symbol, market: "TW" as const }))],
     undefined,
     "today-brief"
   ).catch(() => new Map<string, StockRatingResult>());
-  const allPicks = qualified
-    .slice(0, RATED_PICK_LIMIT)
+  if (rated.some((c) => !ratings.has(c.symbol.toUpperCase()))) degradedReasons.push("部分候選股的本站評等沒算出來");
+  const candidateBySymbol = new Map(candidates.map((c) => [c.symbol.toUpperCase(), c] as const));
+  const toItem = (r: StockRatingResult) => ({
+    symbol: r.symbol,
+    name: r.name,
+    rating: r.rating,
+    pick: { candidate: candidateBySymbol.get(r.symbol.toUpperCase()) ?? null, rating: r } as RatedPick,
+  });
+  const allPicks = rated
     .map((c) => ({ candidate: c, rating: ratings.get(c.symbol.toUpperCase()) }))
-    .filter((p): p is RatedPick => !!p.rating && isRecommendable(p.rating.rating))
-    .map((p) => ({ ...p, symbol: p.rating.symbol, name: p.rating.name, rating: p.rating }));
+    .filter((p): p is { candidate: ScoredCandidate; rating: StockRatingResult } => !!p.rating && isRecommendable(p.rating.rating))
+    .map((p) => toItem(p.rating));
   // 2026-10-05：分組、每組上限、排序、去重由程式決定（actionPicks.ts），AI 只寫解說——AI 曾在等回檔列 7 檔。
-  const groups = selectPickGroups(allPicks.map((p) => ({ symbol: p.symbol, name: p.name, rating: p.rating.rating, pick: p })));
-  const picks: RatedPick[] = groups.buy.map((g) => ({ candidate: g.pick.candidate, rating: g.pick.rating }));
+  // 2026-10-06：資料已定的時段，上一份名單的成員只有被重新評等為不建議買進才換掉（actionStability.ts）。
+  const ranked = selectPickGroups(allPicks, Number.MAX_SAFE_INTEGER).buy;
+  const members =
+    previous.length > 0
+      ? stabilizeBuyPicks({
+          previous: previous.map(toItem),
+          ranked,
+          fresh: new Map(
+            [...ratings.values()].filter((r) => isRecommendable(r.rating)).map((r) => [r.symbol.toUpperCase(), toItem(r)] as const)
+          ),
+          rejected: new Set([...ratings.values()].filter((r) => !isRecommendable(r.rating)).map((r) => r.symbol.toUpperCase())),
+          limit: PICK_GROUP_LIMIT,
+        })
+      : ranked;
+  const groups = selectPickGroups(members, PICK_GROUP_LIMIT);
+  const picks: RatedPick[] = groups.buy.map((g) => g.pick);
   const ret60 = await getTaiexRet60Pct().catch(() => null);
   const marketNote = ret60 != null && ret60 < WEAK_MARKET_RET60_PCT ? weakMarketNote(ret60) : null;
   // 體檢表裡已有本站評等的候選股，五面向與支持數一律改用評等那份（2026-10-06 整合稽核：候選股原本用技術訊號共振清單／
@@ -316,8 +368,7 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       : cand;
     break;
   }
-  const notRecommended = qualified
-    .slice(0, RATED_PICK_LIMIT)
+  const notRecommended = rated
     .map((c) => ratings.get(c.symbol.toUpperCase()))
     .filter((r): r is StockRatingResult => !!r && !isRecommendable(r.rating));
 
@@ -389,5 +440,5 @@ export async function buildActionGrounding(): Promise<ActionGrounding> {
       : "（目前沒有夠格的重大消息）",
   ].join("\n");
 
-  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0, marketNote };
+  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0, marketNote, degradedReasons };
 }
