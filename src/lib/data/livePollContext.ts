@@ -27,3 +27,11 @@ export function hasLivePollHeader(req: { headers: { get(name: string): string | 
 export function withLivePollWait<T>(req: { headers: { get(name: string): string | null } }, fn: () => Promise<T>): Promise<T> {
   return hasLivePollHeader(req) ? storage.run({ livePoll: true }, fn) : fn();
 }
+
+/**
+ * AI 問答：回答要用「現在」的報價（2026-10-06 使用者問 AI 盤中資料準不準）。跟輪詢一樣放寬過期等待，
+ * 讓個股報價、指數在過期時同步等重抓，而不是回上一輪的舊值。只給 /api/ask 用（使用者本來就在等 AI 回答）。
+ */
+export function withFreshLiveData<T>(fn: () => Promise<T>): Promise<T> {
+  return storage.run({ livePoll: true }, fn);
+}

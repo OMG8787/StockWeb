@@ -1,3 +1,4 @@
+import { withFreshLiveData } from "@/lib/data/livePollContext";
 import { NextRequest, NextResponse } from "next/server";
 import { answerQuestion, type HoldingInput } from "@/lib/ai/ask";
 import type { ChatTurn } from "@/lib/ai/types";
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
   const history = parseHistory(body.history);
   const holdings = parseHoldings(body.holdings);
   try {
-    const result = await answerQuestion(question, symbol, history, holdings);
+    const result = await withFreshLiveData(() => answerQuestion(question, symbol, history, holdings));
     // 各模型回答數（成績看板「各模型」，modelStats.ts）。
     recordModelEvent(result.model?.id, result.usedAi ? "answer" : "fallback");
     return NextResponse.json(result);
