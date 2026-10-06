@@ -586,6 +586,7 @@ ${actionBriefText}` : "",
     return {
       answer: checked.answer,
       groundedSymbol,
+      resolvedTargets: targets.map((t) => t.symbol),
       usedAi: true,
       model: checked.outcome === "program" ? PROGRAM_MODEL : modelInfo(result.model),
     };
@@ -594,6 +595,7 @@ ${actionBriefText}` : "",
   return {
     answer: buildCannedAnswer(groundingSections, groundedSymbol, result.failureReason ?? "未知原因"),
     groundedSymbol,
+    resolvedTargets: targets.map((t) => t.symbol),
     usedAi: false,
   };
 }
