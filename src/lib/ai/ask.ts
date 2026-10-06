@@ -283,7 +283,9 @@ export async function answerQuestion(
     ? listLines.length > 0
       ? `【建議買進（現價可分批買）】\n${listLines.join("\n")}`
       : "（本站綜合評等目前沒有任何一檔是「建議買進」）"
-    : "";
+    : wantsMarketWide
+      ? "（今日建議名單這次讀取逾時，不是沒有建議買進的股票：照實告訴使用者「名單暫時讀不到，請稍後再問一次或看今日建議頁」，不可說今天沒有推薦）"
+      : "";
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
