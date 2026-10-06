@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  ensureMarginSignalMentioned,
+  MARGIN_SIGNAL_APPENDIX_TITLE,
   changePercentOnDate,
   computeMarginSignal,
   describeMarginSignal,
@@ -96,5 +98,33 @@ describe("describeMarginSignal／marginSignalLine", () => {
   it("changePercentOnDate：找不到那天或第一根 → null", () => {
     expect(changePercentOnDate([], "2026-10-05")).toBeNull();
     expect(changePercentOnDate([{ time: "2026-10-05", open: 1, high: 1, low: 1, close: 1, volume: 1 }], "2026-10-05")).toBeNull();
+  });
+});
+
+describe("ensureMarginSignalMentioned（回答沒講出訊號就補程式說明）", () => {
+  const line = `${MARGIN_SIGNAL_TITLE}（程式依單日數字算好，10/05單日數字，不是趨勢）：【籌碼沉澱】股價下跌、融資大減。依據：股價-5.6%、融資-4.9%（-9,367張）`;
+  const grounding = `股票：聯電（2303，台股）\n目前價格：147.5\n${line}\n籌碼比例（…）`;
+  it("提到該檔卻沒講出訊號名稱 → 補一句", () => {
+    const r = ensureMarginSignalMentioned("聯電(2303)建議先不要買，技術面偏弱。", grounding);
+    expect(r.appended).toEqual(["2303"]);
+    expect(r.text).toContain(MARGIN_SIGNAL_APPENDIX_TITLE);
+    expect(r.text).toContain("聯電(2303)：【籌碼沉澱】");
+    expect(r.text).toContain("融資-4.9%（-9,367張）");
+  });
+  it("已講出訊號名稱 → 不動", () => {
+    const a = "聯電(2303)融資大減、籌碼沉澱。";
+    expect(ensureMarginSignalMentioned(a, grounding)).toEqual({ text: a, appended: [] });
+  });
+  it("沒提到那一檔 → 不動；參考資料沒有區塊 → 不動", () => {
+    const a = "台積電(2330)可以買。";
+    expect(ensureMarginSignalMentioned(a, grounding).appended).toEqual([]);
+    expect(ensureMarginSignalMentioned("聯電(2303)不買。", "股票：聯電（2303，台股）").appended).toEqual([]);
+  });
+  it("最多補 4 檔", () => {
+    const g = ["2303", "2330", "2454", "2317", "2412"]
+      .map((c) => `股票：X${c}（${c}，台股）\n${line}`)
+      .join("\n");
+    const a = ["2303", "2330", "2454", "2317", "2412"].map((c) => `X${c}(${c})`).join("、");
+    expect(ensureMarginSignalMentioned(a, g).appended).toHaveLength(4);
   });
 });

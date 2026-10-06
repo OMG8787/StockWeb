@@ -17,6 +17,7 @@ import type { AskResult, HoldingInput } from "./askTypes";
 import { guessSymbolByFuzzyName, guessSymbolsFromText } from "./symbolResolve";
 import { describeFuzzyGuess } from "./fuzzyName";
 import { describeRatingChanges, ensureRatingChangeExplained } from "./ratingChange";
+import { ensureMarginSignalMentioned } from "./marginSignal";
 import { getStockRating } from "./stockRating";
 import {
   conversationWantsMovers,
@@ -670,7 +671,7 @@ ${actionBriefText}` : "",
 /**
  * AI 回答送出前的程式後處理（唯一入口；跨模型評測 scripts/eval/run.ts 也呼叫這一個，兩邊才不會漂移）：
  * 清內部標記 → 拿掉評等標籤 → 關鍵價位抄錯更正為程式值（numberGuard.ts）→ 先不要買的股票刪掉出場價／買進區間 →
- * 持有中的持有動作照程式字樣（guardHeldAnswer；兩者都在 ratingConsistencyGuard.ts）→ 評等變動沒交代就補程式說明（ratingChange.ts）。
+ * 持有中的持有動作照程式字樣（guardHeldAnswer；兩者都在 ratingConsistencyGuard.ts）→ 評等變動沒交代就補程式說明（ratingChange.ts）→ 融資融券組合判讀沒講出就補程式說明（marginSignal.ts）。
  */
 export function postProcessAiAnswer(answer: string, grounding: string): string {
   const guarded = guardAnswerNumbers(
@@ -690,7 +691,10 @@ export function postProcessAiAnswer(answer: string, grounding: string): string {
   // 評等跟前一交易日不同、回答卻沒交代的，補上程式說明（ratingChange.ts）。
   const changed = ensureRatingChangeExplained(covered.text, grounding);
   if (changed.appended.length > 0) console.warn("[ask] 補評等變動說明：", JSON.stringify(changed.appended));
-  return changed.text;
+  // 融資融券組合判讀有訊號、回答提到該檔卻沒講出訊號名稱的，補上程式說明（marginSignal.ts）。
+  const margin = ensureMarginSignalMentioned(changed.text, grounding);
+  if (margin.appended.length > 0) console.warn("[ask] 補融資融券組合判讀：", JSON.stringify(margin.appended));
+  return margin.text;
 }
 
 /**

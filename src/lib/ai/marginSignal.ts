@@ -153,3 +153,38 @@ export function marginSignalLine(
     `${md}數字，不是趨勢`
   );
 }
+
+export const MARGIN_SIGNAL_APPENDIX_TITLE = "融資融券組合判讀（本站程式說明）";
+/** 最多補幾檔（關注清單深度分析可能有十幾檔，全補會稀釋重點）。 */
+export const MARGIN_SIGNAL_APPENDIX_MAX = 4;
+const STOCK_HEADER = /^股票：(.+?)（([0-9A-Za-z.\-]+)，台股）/;
+const SIGNAL_LINE = new RegExp(`^${MARGIN_SIGNAL_TITLE}（[^）]*）：【([^】]+)】(.*)$`);
+
+/**
+ * 回答後保證（唯一入口，ask.ts postProcessAiAnswer 呼叫；跨模型評測同一路徑）：
+ * 個股參考資料有「融資融券組合判讀」【訊號】、回答提到該檔卻沒講出訊號名稱時，在回答最後補上程式寫好的一句
+ * （確定性、不重生）。評測 2026-10-06：只靠提示詞規則，gemini-flash-lite／NVIDIA 在「融資融券怎麼看」「可以買嗎」常略過它。
+ */
+export function ensureMarginSignalMentioned(answer: string, grounding: string): { text: string; appended: string[] } {
+  if (!answer || !grounding.includes(MARGIN_SIGNAL_TITLE)) return { text: answer, appended: [] };
+  const missing: Array<{ symbol: string; line: string }> = [];
+  let cur: { name: string; symbol: string } | null = null;
+  for (const raw of grounding.split("\n")) {
+    const h = raw.match(STOCK_HEADER);
+    if (h) {
+      cur = { name: h[1].replace(/[*＊]/g, "").trim(), symbol: h[2] };
+      continue;
+    }
+    const m = cur ? raw.match(SIGNAL_LINE) : null;
+    if (!cur || !m) continue;
+    const [, label, rest] = m;
+    const mentioned = answer.includes(cur.symbol) || (cur.name.length >= 2 && answer.includes(cur.name));
+    if (mentioned && !answer.includes(label)) missing.push({ symbol: cur.symbol, line: `${cur.name}(${cur.symbol})：【${label}】${rest}` });
+  }
+  if (missing.length === 0) return { text: answer, appended: [] };
+  const shown = missing.slice(0, MARGIN_SIGNAL_APPENDIX_MAX);
+  return {
+    text: `${answer.replace(/\s+$/, "")}\n\n${MARGIN_SIGNAL_APPENDIX_TITLE}：\n${shown.map((x) => `- ${x.line}`).join("\n")}`,
+    appended: shown.map((x) => x.symbol),
+  };
+}

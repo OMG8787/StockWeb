@@ -178,6 +178,8 @@ flowchart TD
 
 ## 5. 回答後檢查矩陣
 
+> AI 問答後處理（`postProcessAiAnswer`）末端另有兩個「補程式說明」：`ensureRatingChangeExplained`（評等跟前一交易日不同）與 `ensureMarginSignalMentioned`（個股資料有「融資融券組合判讀」【訊號】、回答提到該檔卻沒講出訊號名稱，marginSignal.ts）；評測走同一路徑。
+
 | AI 入口 | 繁中正規化 | 清內部標記 | 去評等標籤 | numberGuard（價位抄錯） | 先不要買刪價位 | 結構化輸出 |
 |---|---|---|---|---|---|---|
 | AI 問答（含持股、問AI關於） | ✓ | ✓ | ✓ | ✓ | ✓ | 結論卡＋回答後檢查不過時同模型重生一次、仍不過用程式版（模型標示「本站程式版」） |
