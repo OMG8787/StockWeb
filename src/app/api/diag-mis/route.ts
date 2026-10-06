@@ -1,40 +1,30 @@
-// 暫時性診斷（2026-10-06）：比較 MIS 不同請求方式回的資料新舊。查完即刪。
+// 暫時性診斷（2026-10-06）：比較 MIS 不同 ex_ch 寫法回的資料新舊。查完即刪。
 import { NextResponse } from "next/server";
 
-const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
-type Row = { t?: string; tlong?: string; d?: string; v?: string; z?: string; ts?: string };
+type Row = { c?: string; t?: string; tlong?: string; v?: string };
 
-async function probe(label: string, url: string, headers: Record<string, string>) {
+async function probe(label: string, exCh: string, extra = "") {
+  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${Date.now()}${extra}`;
   const t0 = Date.now();
   try {
-    const res = await fetch(url, { headers, cache: "no-store", signal: AbortSignal.timeout(8000) });
-    const j = (await res.json()) as { msgArray?: Row[]; queryTime?: { sysTime?: string; sysDate?: string } };
-    const r = j.msgArray?.[0];
+    const res = await fetch(url, { headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" }, cache: "no-store", signal: AbortSignal.timeout(8000) });
+    const j = (await res.json()) as { msgArray?: Row[]; queryTime?: { sysTime?: string } };
+    const r = j.msgArray?.find((x) => x.c === "2317");
     const now = Date.now();
-    return {
-      label, ms: now - t0, status: res.status, t: r?.t, tlong: r?.tlong, v: r?.v, z: r?.z,
-      ageSec: r?.tlong ? Math.round((now - Number(r.tlong)) / 1000) : null,
-      sys: j.queryTime?.sysTime,
-    };
+    return { label, ms: now - t0, t: r?.t, v: r?.v, ageSec: r?.tlong ? Math.round((now - Number(r.tlong)) / 1000) : null, sys: j.queryTime?.sysTime };
   } catch (e) {
     return { label, error: String(e) };
   }
 }
 
 export async function GET() {
-  const base = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_2317.tw&json=1&delay=0";
-  const ref = { Referer: "https://mis.twse.com.tw/stock/index.jsp" };
-  const results = [];
-  results.push(await probe("A 現行(有_)", `${base}&_=${Date.now()}`, ref));
-  results.push(await probe("A2 現行無_", base, ref));
-  results.push(await probe("B 瀏覽器UA", `${base}&_=${Date.now()}`, { ...ref, "User-Agent": UA, Accept: "application/json, text/javascript, */*; q=0.01" }));
-  // C：先拿 session cookie
-  let cookie = "";
-  try {
-    const idx = await fetch("https://mis.twse.com.tw/stock/index.jsp", { headers: { "User-Agent": UA }, cache: "no-store", signal: AbortSignal.timeout(8000) });
-    cookie = (idx.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
-  } catch {}
-  results.push(await probe(`C session cookie(${cookie ? "有" : "無"})`, `${base}&_=${Date.now()}`, { ...ref, "User-Agent": UA, Cookie: cookie }));
-  results.push(await probe("D 現行再打一次", `${base}&_=${Date.now()}`, ref));
+  const results = await Promise.all([
+    probe("V1 單檔", "tse_2317.tw"),
+    probe("V2 2317|2330", "tse_2317.tw|tse_2330.tw"),
+    probe("V3 2330|2317", "tse_2330.tw|tse_2317.tw"),
+    probe("V4 2317|8069", "tse_2317.tw|otc_8069.tw"),
+    probe("V5 單檔+額外參數", "tse_2317.tw", `&x=${Math.random()}`),
+    probe("V6 2317|2603|2454", "tse_2317.tw|tse_2603.tw|tse_2454.tw"),
+  ]);
   return NextResponse.json({ now: new Date().toISOString(), results });
 }
