@@ -23,16 +23,36 @@ export async function getQuotesBatch(
   const listed = requests.filter((r) => r.market === "TW" && servedFromListedBatch(r.symbol)).map((r) => r.symbol);
   const live: Map<string, Quote> = listed.length > 0 ? await getListedQuotesLive(listed) : new Map();
 
-  return Promise.all(
-    requests.map(async ({ market, symbol }) => {
+  const withSector = (quote: Quote): QuoteWithSector => {
+    const sector = findInUniverse(quote.symbol, quote.market)?.sector;
+    return sector ? { ...quote, sector } : quote;
+  };
+  const results = await Promise.all(
+    requests.map(async ({ market, symbol }): Promise<QuoteWithSector | null> => {
       const fromBatch = market === "TW" && servedFromListedBatch(symbol) ? live.get(symbol) : undefined;
       const quote = fromBatch ?? (await getQuote(symbol, market).catch(() => null));
-      if (!quote) return null;
-      const sector = findInUniverse(quote.symbol, quote.market)?.sector;
-      return sector ? { ...quote, sector } : quote;
+      return quote ? withSector(quote) : null;
     })
   );
+
+  // 單檔抓失敗的 null 只快取 1 秒（quote.ts QUOTE_DEGRADED_TTL_MS）：上游那一刻剛好逾時／節點不健康很常見。
+  // 伺服器端的呼叫端（模擬投資組合、AI）沒有前端「1.2 秒後重試」可靠，所以這裡自己對「官方清單裡的股票」
+  // 再試一次（只在有失敗時才多等；清單外的代號本來就抓不到，不重試，免得每一輪都白等）。
+  const retryIdx = results.flatMap((r, i) => (r === null && findInUniverse(requests[i].symbol, requests[i].market) ? [i] : []));
+  if (retryIdx.length > 0) {
+    await new Promise((resolve) => setTimeout(resolve, NULL_RETRY_DELAY_MS));
+    await Promise.all(
+      retryIdx.map(async (i) => {
+        const quote = await getQuote(requests[i].symbol, requests[i].market).catch(() => null);
+        if (quote) results[i] = withSector(quote);
+      })
+    );
+  }
+  return results;
 }
+
+/** 略長於單檔報價失敗 null 的快取時間（1 秒），重試才會真的重抓。 */
+const NULL_RETRY_DELAY_MS = 1_100;
 
 /**
  * 只有上市（TWSE）走指定代號批次。上櫃刻意走單檔 getQuote()：非交易時段單檔報價會把成交量
