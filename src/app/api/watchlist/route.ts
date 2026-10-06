@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getServerWatchlist, setServerWatchlist, watchlistSyncAvailable } from "@/lib/watchlistStore";
 import type { WatchlistItem } from "@/lib/watchlist";
+import { sanitizeSales } from "@/lib/soldRecords";
 
 // The stored value is whatever the client PUTs, so it is bounded here
 // rather than trusted: without a cap a signed-in client could park an
@@ -29,12 +30,14 @@ function finitePositive(v: unknown): number | undefined {
 
 /** Keeps only the recognised fields, so nothing else a client sends is persisted. */
 function normalize(item: WatchlistItem): WatchlistItem {
+  const sales = sanitizeSales(item.sales);
   return {
     symbol: item.symbol,
     market: item.market,
     name: item.name,
     costBasis: finitePositive(item.costBasis),
     shares: finitePositive(item.shares),
+    ...(sales.length > 0 ? { sales } : {}),
   };
 }
 

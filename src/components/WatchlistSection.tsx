@@ -13,6 +13,7 @@ import { formatTaipeiTime } from "@/lib/format";
 import {
   hasHolding,
   hasManualUnheldOrder,
+  hasSoldState,
   WATCHLIST_CHANGED_EVENT,
   getWatchlist,
   type WatchlistItem,
@@ -196,7 +197,7 @@ export default function WatchlistSection() {
     .filter((i) => holdingByKey.has(`${i.market}:${i.symbol.toUpperCase()}`))
     .map((i) => {
       const holding = holdingByKey.get(`${i.market}:${i.symbol.toUpperCase()}`);
-      return { ...i, costBasis: holding?.costBasis, shares: holding?.shares, order: holding?.order };
+      return { ...i, costBasis: holding?.costBasis, shares: holding?.shares, order: holding?.order, sales: holding?.sales };
     })
     ;
 
@@ -208,11 +209,13 @@ export default function WatchlistSection() {
   // WatchlistTable applies; keeping the two in sync is what stops the CSV
   // from silently coming out in a different order than the table.
   const heldItems = displayItemsRaw.filter(hasHolding).sort(byOrder);
+  // 已賣出（股數 0、購買價格保留、有賣出紀錄）夾在持有中與僅關注之間，跟表格上的分組順序一致。
+  const soldItems = displayItemsRaw.filter(hasSoldState).sort(byOrder);
   const unheldItems = (["TW", "US"] as Market[]).flatMap((m) => {
-    const group = displayItemsRaw.filter((i) => !hasHolding(i) && i.market === m);
+    const group = displayItemsRaw.filter((i) => !hasHolding(i) && !hasSoldState(i) && i.market === m);
     return hasManualUnheldOrder(m) ? group.sort(byOrder) : sortByFineIndustry(group);
   });
-  const displayItems: HoldingItem[] = [...heldItems, ...unheldItems];
+  const displayItems: HoldingItem[] = [...heldItems, ...soldItems, ...unheldItems];
   // 清單中最新的一筆上游成交時間（ISO 字串同格式可直接比大小）；讓使用者看得到報價實際多新。
   const latestTradeTime = formatTaipeiTime(
     displayItems.reduce<string | undefined>((max, i) => (i.tradeTime && (!max || i.tradeTime > max) ? i.tradeTime : max), undefined)

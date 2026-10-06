@@ -51,7 +51,7 @@ describe("往返", () => {
   it("新版 UTF-16LE 匯出→匯入後資料完全相同（含順序、手動排序旗標）", () => {
     const flags = { TW: true };
     const r = roundTrip(buildWatchlistCsv(items, flags));
-    expect(r.version).toBe("v2");
+    expect(r.version).toBe("v3");
     expect(r.invalid).toEqual([]);
     expect(r.manualUnheld).toEqual({ TW: true });
     const expected: WatchlistItem[] = items.map((i) => {
@@ -131,8 +131,8 @@ describe("壞資料", () => {
     const many = ["代碼,名稱", ...Array.from({ length: CSV_MAX_ROWS + 1 }, (_, i) => `${1000 + i},x`)].join("\n");
     expect(parseWatchlistCsv(many).ok).toBe(false);
   });
-  it("檔案超過 200KB 被擋", () => {
-    expect(decodeWatchlistFile(new Uint8Array(201 * 1024)).ok).toBe(false);
+  it("檔案超過 500KB 被擋", () => {
+    expect(decodeWatchlistFile(new Uint8Array(501 * 1024)).ok).toBe(false);
   });
   it("Big5 位元組被偵測並提示", () => {
     // 「代碼」的 Big5：A5 N A5 58 ... 不是合法 UTF-8
@@ -159,5 +159,53 @@ describe("合併", () => {
     expect(m[1]).toMatchObject({ shares: 10, costBasis: 100, order: 0 }); // 換到持有組，排在持有組最後
     expect(m[2].order).toBe(0);
     expect(m[3].order).toBe(1);
+  });
+});
+
+describe("已賣出（v3）往返", () => {
+  const sold: WatchlistExportItem[] = [
+    {
+      market: "TW", symbol: "2330", name: "台積電", price: 950, shares: 0, costBasis: 800, order: 0,
+      sales: [
+        { id: "a", date: "2026-10-01", shares: 1000, buyPrice: 800, sellPrice: 900, remaining: 0, user: ["sellPrice", "date"], confirmed: true },
+        { id: "b", date: "2026-10-03", shares: 200, buyPrice: 790, remaining: 0 },
+      ],
+    },
+    { market: "US", symbol: "AAPL", name: "Apple", price: 200, shares: 50, costBasis: 150, order: 1, sales: [{ id: "c", date: "2026-10-02", shares: 5.5, buyPrice: 150, sellPrice: 190, remaining: 50, user: [] }] },
+    { market: "TW", symbol: "2317", name: "鴻海", order: 2, sales: [{ id: "d", date: "2026-09-30", shares: 10, buyPrice: 100, sellPrice: 120, remaining: 0, user: ["日期" as never].slice(0, 0) }] },
+  ];
+  const strip = (l: WatchlistItem[]) =>
+    l.map((i) => ({ ...i, sales: i.sales?.map(({ id, ...rest }) => { void id; return { ...rest, user: rest.user ?? [] }; }) }));
+  it("賣出紀錄（含 user 欄位標記、已確認、部分賣出、價格已清掉的未持有檔）完整往返", () => {
+    const r = roundTrip(buildWatchlistCsv(sold, {}));
+    expect(r.invalid).toEqual([]);
+    expect(r.version).toBe("v3");
+    const got = strip(r.items);
+    expect(got[0]).toMatchObject({ symbol: "2330", shares: 0, costBasis: 800 });
+    expect(got[0].sales).toEqual([
+      { date: "2026-10-01", shares: 1000, buyPrice: 800, sellPrice: 900, remaining: 0, user: ["date", "sellPrice"], confirmed: true, autoAt: undefined },
+      { date: "2026-10-03", shares: 200, buyPrice: 790, sellPrice: undefined, remaining: 0, user: [], confirmed: undefined, autoAt: undefined },
+    ]);
+    expect(got[1].sales![0]).toMatchObject({ shares: 5.5, remaining: 50, sellPrice: 190 });
+    expect(got[2].shares).toBeUndefined();
+    expect(got[2].sales).toHaveLength(1);
+  });
+  it("已賣出那一列的狀態是「已賣出」，賣出紀錄各占一列", () => {
+    const lines = buildWatchlistCsv(sold, {}).split(String.fromCharCode(13, 10));
+    expect(lines).toHaveLength(1 + 3 + 4);
+    expect(lines.filter((l) => l.includes("	已賣出	"))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes("	賣出紀錄	"))).toHaveLength(4);
+    expect(new Set(lines.map((l) => l.split(String.fromCharCode(9)).length)).size).toBe(1);
+  });
+  it("舊格式（v2／舊版）匯入不會有賣出紀錄", () => {
+    const v2 = ["市場	代碼	名稱	狀態	持有股數	購買價格	格式版本	清單順序", "台股	2330	台積電	持有中	10	800	v2	0"].join(String.fromCharCode(10));
+    const r = parseWatchlistCsv(v2);
+    expect(r.ok && r.version).toBe("v2");
+    expect(r.ok && r.items[0].sales).toBeUndefined();
+  });
+  it("壞的賣出紀錄列（日期不對）被列為無法辨識", () => {
+    const text = buildWatchlistCsv(sold, {}).replace("2026-10-01", "2026/10/01");
+    const r = parseWatchlistCsv(text);
+    expect(r.ok && r.invalid).toHaveLength(1);
   });
 });

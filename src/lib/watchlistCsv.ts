@@ -1,6 +1,7 @@
 import type { Market } from "@/lib/data";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
-import { hasHolding, type WatchlistItem } from "@/lib/watchlist";
+import { hasHolding, hasSoldState, type WatchlistItem } from "@/lib/watchlist";
+import { isValidSaleDate, MAX_SALES_PER_ITEM, newSaleId, SALE_FIELDS, type SaleField, type SaleRecord } from "@/lib/soldRecords";
 
 /**
  * 關注清單的匯出／匯入檔格式（純函式，不碰 DOM／localStorage，方便單元測試）。
@@ -11,14 +12,22 @@ import { hasHolding, type WatchlistItem } from "@/lib/watchlist";
  * 正確開啟的格式。匯入則 UTF-16LE/BE、UTF-8（有／無 BOM）都能讀，分隔符（Tab／逗號／分號）
  * 自動判斷，所以舊版 UTF-8 逗號 CSV 也能匯入。
  *
- * 欄位：前 13 欄是給人看的表（含現價、損益等即時數字，匯入時忽略），最後 3 欄是還原用：
- *   格式版本（目前 v2）／清單順序（order）／僅關注手動排序（該市場的僅關注清單是否被手動排過，1 或空白）。
+ * 欄位：前 13 欄是給人看的表（含現價、損益等即時數字，匯入時忽略），之後 3 欄是還原用：
+ *   格式版本（目前 v3）／清單順序（order）／僅關注手動排序（該市場的僅關注清單是否被手動排過，1 或空白）。
  * 沒有這 3 欄的是舊版檔，靠代碼＋名稱＋持股欄位還原，順序依檔案列順序。
+ *
+ * v3（2026-10-06 加「已賣出」）：多一種列「狀態＝賣出紀錄」——每筆賣出紀錄一列（同代碼同市場，一檔可多列），
+ * 用最後 7 欄帶賣出日期／股數／買進價／賣出價／賣出後剩餘股數／使用者改過的欄位（日期+股數+買進價+賣出價 的子集，
+ * 沒列到的是自動帶入的估計值）／已確認（1 或空白）。股票本身的那一列照舊（狀態＝持有中／已賣出／僅關注，
+ * 已賣出＝持有股數 0 且購買價格保留）。v2／舊版檔沒有這些欄位，匯入時視為沒有賣出紀錄（舊檔裡的賣出價一律不存在，
+ * 所以不會有「舊值被當成使用者值」的問題）。
  */
 
-export const CSV_FORMAT_VERSION = "v2";
-export const CSV_MAX_BYTES = 200 * 1024;
-export const CSV_MAX_ROWS = 300;
+export const CSV_FORMAT_VERSION = "v3";
+export const CSV_MAX_BYTES = 500 * 1024;
+export const CSV_MAX_ROWS = 1000;
+const SALE_ROW_STATUS = "賣出紀錄";
+const FIELD_CODE: Record<SaleField, string> = { date: "日期", shares: "股數", buyPrice: "買進價", sellPrice: "賣出價" };
 export const CSV_ENCODING_HINT = "無法辨識檔案編碼（可能是 Big5／ANSI 編碼的 CSV）。請改用本網站「匯出 CSV」產生的檔案，或另存為 UTF-8 CSV 後再匯入。";
 
 const TW_SYMBOL = /^\d{4}[0-9A-Z]{0,2}$/;
@@ -34,12 +43,14 @@ export interface WatchlistExportItem {
   costBasis?: number;
   shares?: number;
   order?: number;
+  sales?: SaleRecord[];
 }
 
 const HEADER = [
   "市場", "代碼", "名稱", "成交量", "股價", "漲跌幅(%)", "狀態",
   "持有股數", "購買價格", "損益平衡價", "投資金額", "損益", "損益(%)",
   "格式版本", "清單順序", "僅關注手動排序",
+  "賣出日期", "賣出股數", "賣出買進價", "賣出價", "賣出後剩餘股數", "賣出使用者改過欄位", "賣出已確認",
 ];
 
 function cell(v: unknown): string {
@@ -52,8 +63,10 @@ export function buildWatchlistCsv(
   items: WatchlistExportItem[],
   manualUnheld: Partial<Record<Market, boolean>>
 ): string {
-  const rows = items.map((i) => {
+  const rows: unknown[][] = [];
+  for (const i of items) {
     const held = hasHolding(i);
+    const sold = hasSoldState(i);
     const breakEven = held ? breakEvenPrice(i.costBasis!, i.shares!, i.market) : null;
     const invested = held ? investedAmount(i.costBasis!, i.shares!, i.market) : null;
     // 報價暫缺的檔股價／損益留空：空白＝沒有這筆資料，填 0 會被試算表當成真的 0。
@@ -61,16 +74,17 @@ export function buildWatchlistCsv(
       held && i.price != null
         ? computeHoldingPnl(i.price, i.costBasis!, i.shares!, i.market)
         : { pnl: null, pnlPercent: null };
-    return [
-      i.market === "TW" ? "台股" : "美股",
+    const mk = i.market === "TW" ? "台股" : "美股";
+    rows.push([
+      mk,
       i.symbol,
       i.name,
       i.volume ?? "",
       i.price ?? "",
       i.changePercent ?? "",
-      held ? "持有中" : "僅關注",
-      held ? i.shares! : "",
-      held ? i.costBasis! : "",
+      held ? "持有中" : sold ? "已賣出" : "僅關注",
+      held ? i.shares! : sold ? 0 : "",
+      held || sold ? i.costBasis! : "",
       breakEven ?? "",
       invested ?? "",
       pnl ?? "",
@@ -78,8 +92,23 @@ export function buildWatchlistCsv(
       CSV_FORMAT_VERSION,
       i.order ?? "",
       !held && manualUnheld[i.market] ? "1" : "",
-    ];
-  });
+      "", "", "", "", "", "", "",
+    ]);
+    // 賣出紀錄一律全部匯出（含價格已清掉、目前不顯示的），往返才不會掉資料。
+    for (const r of i.sales ?? []) {
+      rows.push([
+        mk, i.symbol, i.name, "", "", "", SALE_ROW_STATUS, "", "", "", "", "", "",
+        CSV_FORMAT_VERSION, "", "",
+        r.date,
+        r.shares,
+        r.buyPrice ?? "",
+        r.sellPrice ?? "",
+        r.remaining,
+        SALE_FIELDS.filter((f) => r.user?.includes(f)).map((f) => FIELD_CODE[f]).join("+"),
+        r.confirmed ? "1" : "",
+      ]);
+    }
+  }
   return [HEADER, ...rows].map((r) => r.map(cell).join("\t")).join("\r\n");
 }
 
@@ -178,7 +207,7 @@ export interface ParsedWatchlistCsv {
   items: WatchlistItem[];
   /** 各市場的僅關注清單是否要視為「手動排序過」 */
   manualUnheld: Partial<Record<Market, boolean>>;
-  version: "v2" | "legacy";
+  version: "v3" | "v2" | "legacy";
   invalid: CsvRowIssue[];
   /** 不影響匯入、但值得告知的狀況（持股資料不完整被略過、重複代碼等） */
   warnings: CsvRowIssue[];
@@ -194,6 +223,11 @@ function parseNum(raw: string, delim: string): number | null {
   if (!/^-?\d+(\.\d+)?$/.test(s)) return null;
   const n = Number(s);
   return Number.isFinite(n) && Math.abs(n) < 1e12 ? n : null;
+}
+
+/** 檔案裡有任何一列格式版本是 v3 就是新格式。 */
+function v3File(versionCells: string[]): boolean {
+  return versionCells.some((v) => v.toLowerCase() === "v3");
 }
 
 function cleanName(raw: string): string {
@@ -226,6 +260,14 @@ export function parseWatchlistCsv(text: string): ParseResult {
   const cVersion = col(["格式版本"]);
   const cOrder = col(["清單順序"]);
   const cManual = col(["僅關注手動排序"]);
+  const cStatus = col(["狀態"]);
+  const cSaleDate = col(["賣出日期"]);
+  const cSaleShares = col(["賣出股數"]);
+  const cSaleBuy = col(["賣出買進價"]);
+  const cSaleSell = col(["賣出價"]);
+  const cSaleRemain = col(["賣出後剩餘股數"]);
+  const cSaleUser = col(["賣出使用者改過欄位"]);
+  const cSaleConfirmed = col(["賣出已確認"]);
 
   const dataRows = all
     .slice(headerIdx + 1)
@@ -235,19 +277,21 @@ export function parseWatchlistCsv(text: string): ParseResult {
     return { ok: false, error: `列數太多（${dataRows.length} 列，上限 ${CSV_MAX_ROWS} 列）` };
   }
 
-  let version: "v2" | "legacy" = "legacy";
+  let version: "v3" | "v2" | "legacy" = "legacy";
   if (cVersion >= 0) {
     const v = dataRows.map(({ r }) => (r[cVersion] ?? "").trim()).find((x) => x !== "") ?? CSV_FORMAT_VERSION;
     if (/^v\d+$/i.test(v) && Number(v.slice(1)) > Number(CSV_FORMAT_VERSION.slice(1))) {
       return { ok: false, error: `檔案格式版本（${v}）比本網站支援的新，請先重新整理頁面更新網站` };
     }
-    version = "v2";
+    version = v3File(dataRows.map(({ r }) => (r[cVersion] ?? "").trim())) ? "v3" : "v2";
   }
 
   const invalid: CsvRowIssue[] = [];
   const warnings: CsvRowIssue[] = [];
   const byKey = new Map<string, WatchlistItem>();
   const manualUnheld: Partial<Record<Market, boolean>> = {};
+  const salesByKey = new Map<string, SaleRecord[]>();
+  const saleOnlyItems = new Map<string, WatchlistItem>();
 
   for (const { r, line } of dataRows) {
     const symbol = (r[cSymbol] ?? "").trim().toUpperCase().replace(/^["']|["']$/g, "");
@@ -272,19 +316,46 @@ export function parseWatchlistCsv(text: string): ParseResult {
       continue;
     }
     const item: WatchlistItem = { symbol, market, name: (cName >= 0 ? cleanName(r[cName] ?? "") : "") || symbol };
+    if (version === "v3" && cStatus >= 0 && (r[cStatus] ?? "").trim() === SALE_ROW_STATUS) {
+      const date = (cSaleDate >= 0 ? r[cSaleDate] ?? "" : "").trim();
+      const sShares = cSaleShares >= 0 ? parseNum(r[cSaleShares] ?? "", delim) : null;
+      if (!isValidSaleDate(date) || sShares == null || sShares <= 0) {
+        invalid.push({ line, symbol: shown, reason: "賣出紀錄的日期（YYYY-MM-DD）或股數不正確" });
+        continue;
+      }
+      const userCell = cSaleUser >= 0 ? r[cSaleUser] ?? "" : "";
+      const rec: SaleRecord = {
+        id: newSaleId(line),
+        date,
+        shares: sShares,
+        buyPrice: (cSaleBuy >= 0 ? parseNum(r[cSaleBuy] ?? "", delim) : null) ?? undefined,
+        sellPrice: (cSaleSell >= 0 ? parseNum(r[cSaleSell] ?? "", delim) : null) ?? undefined,
+        remaining: Math.max(0, (cSaleRemain >= 0 ? parseNum(r[cSaleRemain] ?? "", delim) : null) ?? 0),
+        user: SALE_FIELDS.filter((f) => userCell.includes(FIELD_CODE[f])),
+        confirmed: cSaleConfirmed >= 0 && (r[cSaleConfirmed] ?? "").trim() === "1" ? true : undefined,
+      };
+      const key = `${market}:${symbol}`;
+      salesByKey.set(key, [...(salesByKey.get(key) ?? []), rec]);
+      if (!saleOnlyItems.has(key)) saleOnlyItems.set(key, item);
+      continue;
+    }
     const shares = cShares >= 0 ? parseNum(r[cShares] ?? "", delim) : null;
     const cost = cCost >= 0 ? parseNum(r[cCost] ?? "", delim) : null;
     if (shares != null && shares > 0 && cost != null && cost >= 0) {
       item.shares = shares;
       item.costBasis = cost;
+    } else if (version === "v3" && shares === 0 && cost != null && cost > 0) {
+      // 已賣出：股數 0、購買價格保留
+      item.shares = 0;
+      item.costBasis = cost;
     } else if ((shares != null && shares > 0) !== (cost != null && cost > 0) && (shares != null || cost != null)) {
       warnings.push({ line, symbol: shown, reason: "持股資料不完整（只有股數或只有購買價格），僅匯入為關注" });
     }
-    if (version === "v2" && cOrder >= 0) {
+    if (version !== "legacy" && cOrder >= 0) {
       const o = parseNum(r[cOrder] ?? "", delim);
       if (o != null && Number.isInteger(o)) item.order = o;
     }
-    if (version === "v2" && cManual >= 0 && (r[cManual] ?? "").trim() === "1" && !hasHolding(item)) {
+    if (version !== "legacy" && cManual >= 0 && (r[cManual] ?? "").trim() === "1" && !hasHolding(item)) {
       manualUnheld[market] = true;
     }
     const key = `${market}:${symbol}`;
@@ -295,6 +366,12 @@ export function parseWatchlistCsv(text: string): ParseResult {
     byKey.set(key, item);
   }
 
+  // 賣出紀錄掛回該檔（沒有對應的股票列＝只有賣出紀錄列，也補成一檔僅關注，不丟資料）
+  for (const [key, recs] of salesByKey) {
+    const target = byKey.get(key) ?? saleOnlyItems.get(key)!;
+    target.sales = recs.slice(0, MAX_SALES_PER_ITEM);
+    if (!byKey.has(key)) byKey.set(key, target);
+  }
   const items = Array.from(byKey.values());
   if (version === "legacy") {
     // 舊版檔沒有順序欄：檔案列順序就是當時畫面上的顯示順序，各組（持有／僅關注 × 市場）依列序編號，

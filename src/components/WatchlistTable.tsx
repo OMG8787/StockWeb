@@ -146,7 +146,6 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
   // hasManualUnheldOrder），才改回完全照 order 顯示——否則每次重新整理都會把
   // 使用者剛調好的順序強制打回產業排序。
   // 已賣出（股數 0、購買價格保留、有賣出紀錄）自成一組，不再混在僅關注裡。
-  const soldItems = items.filter(hasSoldState);
   const saleItems = items.filter((i) => visibleSales(i).length > 0);
   const unheldItems = items.filter((i) => !hasHolding(i) && !hasSoldState(i));
   const market = items[0].market; // 一張表只會有同一個市場（上層已用 MarketTabs 分開）

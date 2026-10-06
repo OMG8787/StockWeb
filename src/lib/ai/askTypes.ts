@@ -1,5 +1,6 @@
 import type { Market } from "@/lib/data";
 import type { ModelInfo } from "./modelName";
+import type { SaleRecord } from "@/lib/soldRecords";
 
 export interface AskResult {
   answer: string;
@@ -17,4 +18,6 @@ export interface HoldingInput {
   name: string;
   costBasis?: number;
   shares?: number;
+  /** 賣出紀錄（關注清單「已賣出」；AI 的已賣出區塊用，見 grounding/soldHoldings.ts） */
+  sales?: SaleRecord[];
 }

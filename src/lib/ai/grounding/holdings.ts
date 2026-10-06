@@ -3,6 +3,7 @@ import { mapWithConcurrency } from "@/lib/data/cache";
 import { computeHoldingPnl } from "@/lib/portfolio";
 import type { HoldingInput } from "../askTypes";
 import { describeHoldingTechnical } from "./indicators";
+import { buildSoldGrounding } from "./soldHoldings";
 import { buildStockGrounding } from "./stock";
 import { getStockRatings } from "../stockRating";
 import { describeRatingForHolding, formatHoldingRatingSummary, type HoldingRatingEntry } from "../holdingRating";
@@ -15,6 +16,11 @@ export const HOLDING_RATING_CONCURRENCY = 4;
 
 function isHeldInput(h: HoldingInput): boolean {
   return h.costBasis != null && h.shares != null && h.shares > 0;
+}
+
+/** 已賣出（跟 lib/watchlist.ts hasSoldState 同一個定義）：股數 0、購買價格保留、有賣出紀錄＝目前不持有，但不是「沒設定過」。 */
+function isSoldInput(h: HoldingInput): boolean {
+  return h.shares === 0 && h.costBasis != null && h.costBasis > 0 && (h.sales?.length ?? 0) > 0;
 }
 
 /**
@@ -58,7 +64,9 @@ export async function buildHoldingsGrounding(
   holdings: HoldingInput[],
   includeTechnical = false,
   /** 附每檔【本站綜合評等】（含個人成本的停利提示與持有中出場參考）：問持股要不要賣、賣哪些、停損停利時用。 */
-  withRating = false
+  withRating = false,
+  /** 是否附【已賣出紀錄】區塊（深度分析的後段退回輕量版時傳 false，避免跟前段已附的重複）。 */
+  withSold = true
 ): Promise<string> {
   if (holdings.length === 0) return "";
   const ratings = withRating ? await rateHoldings(holdings) : new Map<string, HoldingRatingEntry>();
@@ -87,11 +95,13 @@ export async function buildHoldingsGrounding(
         const pnlLabel = h.market === "TW" ? "損益（已估算計入買賣手續費與證交稅）" : "損益";
         return `${base}；持有 ${h.shares} 股，平均成本 ${h.costBasis}，${pnlLabel} ${pnlText}${technical}${ratingText}`;
       }
+      if (isSoldInput(h)) return `${base}（已全部賣出，目前未持有；賣出紀錄見【已賣出紀錄】）${technical}${ratingText}`;
       return `${base}（尚未設定持股成本/股數）${technical}${ratingText}`;
     })
   );
   const summary = withRating ? formatHoldingRatingSummary(holdings.map((h) => ratings.get(h.symbol.toUpperCase()))) : "";
-  return [...lines, summary].filter(Boolean).join("\n");
+  const sold = withSold ? await buildSoldGrounding(holdings).catch(() => "") : "";
+  return [...lines, summary, sold].filter(Boolean).join("\n");
 }
 
 // A full buildStockGrounding() per holding is several sub-fetches each
@@ -134,7 +144,7 @@ export async function buildHoldingsAnalysisGrounding(holdings: HoldingInput[]): 
       { costBasis: isHeld ? h.costBasis : undefined }
     ).catch(() => undefined);
     if (!grounding) return `${h.name}(${h.symbol})：目前查不到完整資料，暫時無法分析`;
-    let holdingLine = "狀態：僅關注，尚未持有";
+    let holdingLine = isSoldInput(h) ? "狀態：已賣出，目前未持有（賣出紀錄見【已賣出紀錄】）" : "狀態：僅關注，尚未持有";
     if (isHeld) {
       // getQuote() is the same 20s-TTL cache buildStockGrounding() itself
       // just read from — a second call here is a cheap in-process hit, not
@@ -152,8 +162,9 @@ export async function buildHoldingsAnalysisGrounding(holdings: HoldingInput[]): 
     return `${grounding.text}\n${holdingLine}`;
   });
 
-  const overflowText = overflow.length > 0 ? await buildHoldingsGrounding(overflow, false, true) : "";
+  const overflowText = overflow.length > 0 ? await buildHoldingsGrounding(overflow, false, true, false) : "";
   // 全部持股的「該賣哪些」彙整：跟輕量清單同一個 formatHoldingRatingSummary()，兩條路徑結論一致。
   const summary = formatHoldingRatingSummary(holdings.map((h) => ratings.get(h.symbol.toUpperCase())));
-  return [richBlocks.join("\n\n---\n\n"), overflowText, summary].filter(Boolean).join("\n\n---\n\n");
+  const sold = await buildSoldGrounding(holdings).catch(() => "");
+  return [richBlocks.join("\n\n---\n\n"), overflowText, summary, sold].filter(Boolean).join("\n\n---\n\n");
 }

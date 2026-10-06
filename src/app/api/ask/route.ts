@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { answerQuestion, type HoldingInput } from "@/lib/ai/ask";
 import type { ChatTurn } from "@/lib/ai/types";
 import { recordModelEvent } from "@/lib/ai/modelStats";
+import { sanitizeSales } from "@/lib/soldRecords";
 
 // Default Node function budget isn't enough for the "分析我的關注清單" path:
 // that fans out a full buildStockGrounding() (quote+chart+chips+fundamentals+
@@ -13,6 +14,7 @@ export const maxDuration = 60;
 const MAX_HISTORY_TURNS = 10;
 const MAX_TURN_LENGTH = 2000;
 const MAX_HOLDINGS = 50;
+const MAX_SALES_PER_HOLDING = 20;
 
 // Mirrors the client's localStorage WatchlistItem shape, but this is
 // unvalidated request input (anyone can POST here, not just the chat
@@ -32,7 +34,8 @@ function parseHoldings(raw: unknown): HoldingInput[] {
     ) {
       const costBasis = typeof entry.costBasis === "number" && Number.isFinite(entry.costBasis) && entry.costBasis >= 0 ? entry.costBasis : undefined;
       const shares = typeof entry.shares === "number" && Number.isFinite(entry.shares) && entry.shares >= 0 ? entry.shares : undefined;
-      holdings.push({ symbol: entry.symbol, market: entry.market, name: entry.name.slice(0, 100), costBasis, shares });
+      const sales = sanitizeSales(entry.sales).slice(-MAX_SALES_PER_HOLDING);
+      holdings.push({ symbol: entry.symbol, market: entry.market, name: entry.name.slice(0, 100), costBasis, shares, ...(sales.length > 0 ? { sales } : {}) });
     }
   }
   return holdings;
