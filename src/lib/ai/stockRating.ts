@@ -12,6 +12,7 @@ import { sectorFactorDirection } from "./grounding/sectorFactors";
 import { computeRatingFeatures, type RatingFeatures } from "./learning/features";
 import type { MarketRegime } from "./learning/regime";
 import { getMarketRegime, getTaiexRet60Pct } from "./learning/regimeData";
+import { readConfirmBase, writeConfirmState } from "./ratingConfirmStore";
 
 /**
  * 單一個股的「本站綜合評等」唯一入口（有 I/O、有快取）。今日建議、AI 問答全市場推薦、
@@ -65,6 +66,12 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     getEarnings(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
   ]);
+  // 評等穩定化（2026-10-06，ratingStability.ts）：新結論需連續 2 個交易日確認（破底立即）。
+  // 回測（docs/backtest/2026-10-stability.md）：籌碼面維持單日＋2日確認最好；改看 N 日累計沒有更好，所以不用。
+  // 翻轉確認的「交易日」用最新一根日K的日期（週末、盤前不會被當成新的一天而提早確認）。
+  const candles = chart?.candles ?? null;
+  const confirmDay = candles?.length ? candles[candles.length - 1].time.slice(0, 10) : taipeiDayKey();
+  const confirmPrev = await readConfirmBase(quote.symbol, confirmDay);
   // 「資料 → 結論」由 ratingCore.ts 唯一組裝（回測工具也呼叫同一個，見該檔說明）。
   const { scored, framework, chase, rating } = computeRatingCore({
     symbol: quote.symbol,
@@ -82,7 +89,10 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     earnings,
     announcements,
     marketRet60Pct: await marketRetPromise,
+    confirmPrev,
+    confirmDay,
   });
+  await writeConfirmState(quote.symbol, rating.confirmState, confirmPrev);
   const [regime, sectorDirection] = await Promise.all([regimePromise, sectorDirPromise]);
   const features = computeRatingFeatures({
     candles: chart?.candles,
@@ -123,10 +133,11 @@ function getStockRatingCached(symbol: string, market?: Market): Promise<StockRat
   // key 刻意不含 market：同一檔從不同入口進來時有的知道市場、有的不知道（問AI關於只帶代號），
   // key 不同就會各算各的、結論可能不一致；台股代號是數字、美股是英文，不會撞。帶台北日期：跨日不沿用。
   return cachedWithDegradedNullTtl<StockRatingResult>(
+    // v5：2026-10-06 評等穩定化：翻轉需連續 2 個交易日確認（ratingStability.ts），理由多了 pendingChange。
     // v4：2026-10-05 果斷二分（不再有等回檔，偏高時附單一拉回加碼價）、弱市況提示、先不要買給改判條件。
     // v3：2026-10-05 擴大回測後：技術面不支持一票否決、急漲改為風險提示不改結論（siteRating.ts）。
     // v2：2026-10-05 加追高防護（chaseGuards.ts）、等回檔字樣改「現價不買，等回到 A～B」。
-    `stock-rating:v4:${sym}:${taipeiDayKey()}`,
+    `stock-rating:v5:${sym}:${taipeiDayKey()}`,
     STOCK_RATING_TTL_MS,
     STOCK_RATING_DEGRADED_TTL_MS,
     () => loadStockRating(sym, market)

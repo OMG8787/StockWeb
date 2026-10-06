@@ -1,3 +1,4 @@
+import { confidenceText } from "./siteRating";
 import { peekCached, writeCached } from "@/lib/data/cache";
 import { cachedWithDegradedPredicate } from "@/lib/data/degradedCache";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
@@ -87,14 +88,12 @@ function actionFormat(stance: TradingStance): string {
   const nextOpen = stance.briefMode === "next-open";
   return [
     "【輸出格式（硬性）】只能回傳一個 JSON 物件本身，不要 markdown code block、不要其他文字：",
-    '{"market":"…","order":["代號",…],"picks":{"代號":{"reason":"…","risk":"…"}},"view":"…","confidence":"高|中|低","confidenceReason":"…","notChase":"…","watch":"…"}',
+    '{"market":"…","picks":{"代號":{"reason":"…","risk":"…"}},"view":"…","notChase":"…","watch":"…"}',
     nextOpen
       ? "- market：一句白話講最近一個交易日收盤後的氣氛與下個交易日要留意的方向（≤30字，不要堆指數數字；大盤概況沒有台股加權指數報價時，不可說台股漲跌或創新高）。"
       : "- market：一句白話講今天氣氛（≤30字，不要堆指數數字；大盤概況沒有台股加權指數當日報價時，不可說台股漲跌或創新高）。",
-    "- order：建議買進名單所有代號依你看好程度由高到低（只能用名單裡的代號）。",
     "- picks：名單裡每一檔都要有。reason＝2~3個最關鍵的數字（≤60字，術語第一次出現帶括號白話，例：三大法人（外資、投信、自營商）買超6,592張、本益比（股價是年獲利幾倍）11.74倍）；risk＝一句風險，只能根據體檢表裡的數字（評等理由有「短線風險」時就寫這句：短線常回檔、宜分批）。",
-    "- view：1~2句表達你自己的排序與把握（2026-10-05 使用者：AI 變太保守、不敢表達）：最看好哪一檔、其次哪一檔、各為什麼（一個關鍵數字），語氣果斷。名單 0 檔時給空字串。",
-    "- confidence＋confidenceReason：把握程度與一句原因。",
+    "- view：1~2句表達你自己的排序與把握（2026-10-05 使用者：AI 變太保守、不敢表達）：最看好哪一檔、其次哪一檔、各為什麼（一個關鍵數字），語氣果斷；名單順序與每檔「本站把握程度」由程式決定，不要自己另寫把握程度。名單 0 檔時給空字串。",
     "- notChase：只針對【先不要買／不建議追（程式已選定）】那一檔寫一句（≤40字）講它哪些面向沒跟上；程式寫沒有要點名的就給空字串。",
     "- watch：一句要注意的風險（不是利多），取材只能來自【近期重大消息】或體檢結果，參考資料沒提到的總經事件一律不可寫。",
     "措辭不可暗示「照建議買會贏大盤」；網站頁首已說明本站評等回測未顯示穩定超越大盤，內文不用重複。不要開場白、客套或免責聲明。",
@@ -195,6 +194,7 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
     holdingLabel: p.rating.rating.holdingLabel,
     reason: p.rating.rating.reason,
     plan: buildPlan(p.rating.rating, stance),
+    confidence: confidenceText(p.rating.rating) || undefined,
   }));
   const ratings = ratedPicks.map((p) => p.rating);
   // 只有輸入完整的這次才存檔當「上一份名單」（不完整的名單不能當之後的基準）。
@@ -206,7 +206,8 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
 
 async function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
   // v2（2026-10-06）：新增 degradedReasons 與凍結時段穩定名單；輸入不完整只快取 1 分鐘。
-  const key = `action-list:v2:${taipeiDayKey()}:${stance.briefMode}`;
+  // v3：2026-10-06 名單依本站把握程度排序、每檔附程式把握程度（confidence）。
+  const key = `action-list:v3:${taipeiDayKey()}:${stance.briefMode}`;
   const isDegraded = (l: ActionListLayer) => (l.degradedReasons?.length ?? 0) > 0;
   if (forceRefresh) {
     const fresh = await computeActionList(stance);

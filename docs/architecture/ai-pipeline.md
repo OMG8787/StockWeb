@@ -34,7 +34,7 @@ flowchart TD
 
   subgraph 評等["評等（唯一）"]
     CORE[ratingCore.ts computeRatingCore<br/>訊號→五面向→價位框架→追高→computeSiteRating]
-    SR[stockRating.ts getStockRating<br/>stock-rating:v4:{代號}:{台北日期} 10 分]
+    SR[stockRating.ts getStockRating<br/>stock-rating:v5:{代號}:{台北日期} 10 分<br/>翻轉2日確認（rating-confirm:v1）]
     HR[holdingRating.ts describeRatingForHolding<br/>含個人成本：停利提示＋持有中出場]
     CORE --> SR --> HR
   end
@@ -61,7 +61,7 @@ flowchart TD
   subgraph AI["AI 呼叫與回答後檢查"]
     PV[provider.ts callAiProviders<br/>繁中正規化 normalizeZhTw]
     GM[gemini.ts 分級＋每日配額<br/>gemini:calls:{太平洋日}:{模型}]
-    PP[ask.ts finalizeAiAnswer<br/>postProcessAiAnswer（清標記→去評等標籤→名稱星號→錯字確認句→numberGuard→ratingConsistencyGuard）<br/>→answerCardIssues→同模型重生一次→仍不過用程式版]
+    PP[ask.ts finalizeAiAnswer<br/>postProcessAiAnswer（清標記→去評等標籤→名稱星號→錯字確認句→numberGuard→ratingConsistencyGuard 先不要買刪價位→guardHeldAnswer 持有建議逐字→ensureRatingChangeExplained 評等變動補說明）<br/>→answerCardIssues→同模型重生一次→仍不過用程式版]
     NG[numberGuard.ts guardAnswerNumbers]
     PV --> GM
   end
@@ -105,7 +105,10 @@ flowchart TD
 
 | 結論／數字 | 唯一來源函式（檔案） | 常數 | 誰用 |
 |---|---|---|---|
-| 評等（建議買進／先不要買、已持有字樣、理由、拉回加碼價、出場價、改判條件） | `computeRatingCore()`（ratingCore.ts）→ `computeSiteRating()`（siteRating.ts） | `QUALIFY_MIN_SUPPORT／QUALIFY_MAX_AGAINST`（actionScoring.ts）、`VETO_FACETS`、`RISK_NOTE_ONLY_GUARDS`、`NEAR_ZONE_PCT` | stockRating.ts（正式站）、4 支回測 |
+| 評等（建議買進／先不要買、已持有字樣、理由、拉回加碼價、出場價、改判條件） | `computeRatingCore()`（ratingCore.ts）→ `computeSiteRating()`（siteRating.ts） | `QUALIFY_MIN_SUPPORT／QUALIFY_MAX_AGAINST`（actionScoring.ts）、`VETO_FACETS`、`RISK_NOTE_ONLY_GUARDS`、`NEAR_ZONE_PCT` | stockRating.ts（正式站）、5 支回測（stability.ts 帶 chipsWindow＋confirmPrev） |
+| 籌碼面近 N 日累計（研究用，正式站未啟用） | `sumChipsWindow()`（chipsWindow.ts） | `CHIPS_WINDOW_DAYS`＝5 | 只有 stability.ts 回測；回測沒有比單日＋2日確認好 |
+| 本站把握程度（只給建議買進；高＝大盤不偏弱且連續≥3日、低＝大盤偏弱且剛轉買≤2日） | `ratingConfidence()`／`confidenceRank()`／`confidenceText()`／`describeConfidenceGrades()`（siteRating.ts）；連續天數＝confirmState.streak（沒有狀態時 `stateFromRatingLog()` 用評等紀錄回推） | `CONFIDENCE_HIGH_MIN_STREAK`＝3、`CONFIDENCE_LOW_MAX_STREAK`＝2 | describeSiteRating 評等行、今日建議排序（selectPickGroups，不再採用 AI order）與逐檔顯示、全市場推薦名單排序、技術篩選評等排序、關注清單僅關注彙整（formatWatchRatingSummary）、問高把握（RULE_HIGH_CONFIDENCE） |
+| 評等翻轉確認（新結論連續 2 個交易日才換，破底立即） | `applyRatingConfirmation()`（ratingStability.ts）→ `computeSiteRating({confirm})`（pendingChange、confirmState）；狀態 `readConfirmBase()／writeConfirmState()`（ratingConfirmStore.ts） | `MAX_GAP_DAYS`＝7、交易日＝最新一根日K日期 | stockRating（正式站）、stability.ts 回測、結論卡主要風險 |
 | 評等快取＋I/O | `getStockRating()`／`getStockRatings()`（stockRating.ts） | `STOCK_RATING_TTL_MS`＝10 分、失敗 60 秒 | 個股資料、持股、今日建議、技術篩選、AI 問答名單行、consistency 評測 |
 | 評等文字（給 AI 與名單） | `describeSiteRating()`（siteRating.ts） | `SITE_RATING_TITLE` | 個股資料、今日建議名單與「先不要買」區、AI 問答全市場名單、持股（未持有） |
 | 價位框架（支撐／壓力／支撐區／出場／不追價） | `ratingPriceFramework()`（ratingCore.ts，興櫃不給）→ `computePriceFramework()`（priceLevels.ts） | `MIN_CANDLES`、`NEAR_ZONE_PCT` | 評等（存在 StockRatingResult.framework）、個股資料【價位參考】（評等失敗時的備援也走同一個） |
@@ -126,7 +129,8 @@ flowchart TD
 | 交易費率 | `lib/tradingCosts.ts`（純資料） | `TW_BUY_COMMISSION_RATE`、`TW_SELL_COMMISSION_RATE`、`TW_SELL_TAX_RATE`、`TW_ROUND_TRIP_COST_PCT` | 關注清單損益（portfolio.ts）、學習獎勵、模擬投資組合 |
 | AI 模擬投資組合買賣 | `planSimOrders()`（決策＋選或不選原因）→`decideFill()`（漲跌停鎖死、五檔成交價、成交量上限、盤後定價）→`executeSimOrders()`／`applySimOrder()`（simPortfolio/rules.ts，純函式）；盤口 `getSimDepth()`（depth.ts，讀 MIS u／w／a／b／f／g／v，用 twse.ts 的 fetchMisRows）；`runSimPortfolio()`（run.ts，I/O） | `SIM_INITIAL_CAPITAL`、`SIM_MAX_POSITIONS`、`SIM_NEW_POSITION_PCT`、`SIM_MAX_POSITION_PCT`、`SIM_ADD_POSITION_PCT`、`SIM_MIN_TRADE_AMOUNT`、`SIM_LIMIT_LOCK_PCT`（讀不到五檔時的保守備援）、`SIM_MAX_VOLUME_SHARE`＝5%、`SIM_FIXED_FILL_TIME`＝14:30、`SIM_SLOTS` | 候選讀 getActionBrief().picks＋getStockRating（source `sim-portfolio`）；持有中讀 describeRatingForHolding＋computeHoldingStop；觸發＝warm-cache 順帶／`/api/cron/sim-portfolio`；顯示＝`/api/sim-portfolio`→首頁卡＋/portfolio |
 | 相似案例＋教訓 | `describeExperience()`（learning/experienceText.ts）→ `lookupSimilar()`／`matchLessons()` | `SIMILAR_CASES_TITLE`、`LESSONS_TITLE` | 個股資料、AI 判斷層 |
-| 評等跟前一交易日不同的說明 | `describeRatingChanges()`（ratingChange.ts，讀評等紀錄） | `RATING_CHANGE_TITLE` | ask.ts |
+| 評等跟前一交易日不同的說明 | `describeRatingChanges()`（ratingChange.ts，讀評等紀錄；持有中另比對已持有大類 續抱／減碼／出場，改變的面向附現在數字）；回答沒交代時 `ensureRatingChangeExplained()` 補程式說明 | `RATING_CHANGE_TITLE`、`RATING_CHANGE_APPENDIX_TITLE`、ask.ts `RATING_CHANGE_MAX`＝15 | ask.ts（個股題、關注清單／持股題、全市場名單） |
+| 持有中持有建議逐字一致 | `guardHeldAnswer()`（ratingConsistencyGuard.ts：讀【持股評等彙整】或評等行『已持有』，改寫矛盾動作／混寫／虧損寫獲利吐回，沒寫就補一行）；彙整賺賠 `holdingPnlTag()`（holdingRating.ts）；停利標籤 `takeProfitHoldingLabel()`（siteRating.ts，單一動作） | `HELD_LABEL_APPENDIX_TITLE` | ask.ts postProcessAiAnswer（評測共用） |
 | 模型標示 | `modelInfo()`（modelName.ts） | — | AI 問答回答、今日建議、快報、AI 判斷層（紀錄 ai.model）、回饋（前端帶回 model）、/scoreboard 各模型區塊 |
 | Gemini 配額 | `premiumCallAllowed()`（gemini.ts） | 每模型每天 18 次、依用途優先序（今日建議＞快報＞AI 判斷） | 所有走非 lite 模型的呼叫（premium 與 standard 退到非 lite 時都經同一個計數） |
 | 個股結論卡（買賣判斷題）、比較題程式結論 | `describeDecisionCard()`、`pickForComparison()`（decisionCard.ts，讀 getStockRating 同一份評等；已持有用 describeRatingForHolding 的結果） | `DECISION_CARD_TITLE`、`COMPARISON_PICK_TITLE` | ask.ts（grounding/stock.ts `decisionCard` 選項） |
@@ -137,14 +141,15 @@ flowchart TD
 
 | 快取 | key | TTL | 版本史／備註 |
 |---|---|---|---|
-| 個股評等 | `stock-rating:v4:{代號}:{台北日期}` | 10 分（失敗 60 秒） | 不含市場（避免同一檔有無市場各算一份）；改評等規則或 StockRatingResult 欄位要升版 |
-| 今日建議程式名單層 | `action-list:v2:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
+| 個股評等 | `stock-rating:v5:{代號}:{台北日期}` | 10 分（失敗 60 秒） | 不含市場（避免同一檔有無市場各算一份）；改評等規則或 StockRatingResult 欄位要升版 |
+| 今日建議程式名單層 | `action-list:v3:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
 | 今日建議上一份名單存檔 | `action-list-last:v1:{資料已定時段代號}` | 62 小時 | 平日 22:00～隔天 08:30、週末同一代號（上一個交易日）；只存輸入完整那次的名單評等；重算時上一份名單的股票只有被重新評等為不建議買進才換掉（`actionStability.ts`）。輸入不完整（`degradedReasons`）的名單只快取 1 分鐘、不存檔 |
 | 今日建議 AI 解說層 | `action-brief-ai:v1:{台北日期}:{模式}:{時點}`＋`…:latest` | 時點值 36 小時、latest 7 天 | 名單或評等字樣變動的股票不沿用舊解說；不跨日 |
 | 今日快報 | `daily-brief:v9:{時點}`＋latest | 同上 | 存檔 `brief-archive:v1:{日期}` 400 天 |
 | AI 判斷層 | `ai-judge:v1:{日期}:{代號}` | 30 小時；失敗冷卻 30 分 | 每天最多 10 次呼叫 |
 | 加權指數日K | `learning:taiex:6m:{台北日期}` | 1 小時（失敗 60 秒） | 市況與弱市況提示共用 |
 | 評等紀錄 | `rating-log:v1:{日期}` hash，field `{代號}#{結論}` | 400 天 | HSETNX：同日同結論只記第一次 |
+| 評等翻轉確認狀態 | `rating-confirm:v1` hash，field＝代號，{cur, base} | 30 天 | 同實例同日同檔 base 放記憶體；狀態沒變不寫；fail open＝不確認 |
 | 學習紀錄 | `learning:v1:eval:{日期}`、`learning:v1:*` 彙總 | 400 天；讀取記憶體 10 分 | |
 | 模型統計 | `ai-model-stats:v1:{日期}` | — | 回饋與使用次數 |
 | AI 模擬投資組合 | `sim-portfolio:v1:state`（單一 JSON：現金、持股、近期交易 400 筆（完整的在封存）、每日淨值、檢討 20 篇、盤後定價委託、冪等時點）＋鎖 `sim-portfolio:v1:lock` 240 秒 | 永久 | 執行一次約 3～4 個 Redis 指令；頁面讀取每個執行個體記憶體 60 秒。要重置就把 key 升版 |

@@ -46,9 +46,11 @@ export function cardFirstSentence(c: Pick<DecisionCardInput, "rating" | "held">)
   return c.held ? c.rating.holdingLabel : c.rating.label;
 }
 
-/** 主要風險（只取一句）：短線風險 → 弱市況 → 第一個不支持面向 → 先不要買的改判條件。 */
+/** 主要風險（只取一句）：待確認的評等變化 → 短線風險 → 弱市況 → 第一個不支持面向 → 先不要買的改判條件。 */
 function mainRisk(c: DecisionCardInput): string {
   const r = c.rating;
+  // 2026-10-06 評等穩定化：今天的資料已指向不同結論、還在 2 日確認期間——使用者最需要先知道「明天可能改判」。
+  if (r.pendingChange) return r.pendingChange;
   if (r.riskNote) return r.riskNote;
   if (r.marketNote) return r.marketNote;
   const against = c.facets.find((f) => f.verdict === "不支持");

@@ -3,6 +3,7 @@ import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_COUNT, type Face
 import { NEAR_ZONE_PCT, type PriceFramework } from "./grounding/priceLevels";
 import { ACTIVE_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardHit, type ChaseGuardId, type ChaseMetrics } from "./chaseGuards";
 import { stripNameMarker } from "./fuzzyName";
+import { applyRatingConfirmation, type ConfirmState } from "./ratingStability";
 
 /**
  * 本站綜合評等（純邏輯、無 I/O，有測試）。
@@ -90,6 +91,17 @@ export interface RatingInput {
   guards?: readonly ChaseGuardId[];
   /** 加權指數近 60 個交易日報酬（%）；有給且 < WEAK_MARKET_RET60_PCT 時，建議買進附弱市況提示（不改結論） */
   marketRet60Pct?: number | null;
+  /**
+   * 翻轉確認（ratingStability.ts）：有給（含 prev＝null）就套「新結論要連續 2 個交易日才換」；
+   * undefined＝不套（舊行為，回測比較用）。day＝這次評等的台北交易日。
+   */
+  confirm?: { prev: ConfirmState | null; day: string };
+}
+
+/** 內部用：翻轉確認期間，強制公布前一交易日的結論（不對外）。 */
+interface ForcedResult {
+  code: RatingCode;
+  holdingCode: HoldingCode;
 }
 
 export interface SiteRating {
@@ -116,13 +128,49 @@ export interface SiteRating {
   marketNote?: string | null;
   /** 先不要買時，什麼條件出現才會改判建議買進（不給買進區間、不給出場價）；買進時 null */
   upgradeCondition?: string | null;
+  /**
+   * 今天的資料指向不同結論、但還在「連續 2 個交易日確認」期間（維持前一交易日結論）時的白話說明；
+   * 沒有是 null（舊快取沒有這欄）。見 ratingStability.ts。
+   */
+  pendingChange?: string | null;
+  /** 翻轉確認狀態（下一個交易日的評等要用；舊快取沒有這欄） */
+  confirmState?: ConfirmState | null;
 }
 
 function fmt(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+/**
+ * 本站綜合評等。有給 input.confirm 時套翻轉確認：今天算出的結論（raw）跟前一交易日公布的大類不同、且還沒連續 2 天，
+ * 就維持前一交易日的結論（label／價位依今天的資料重組），並在 pendingChange／理由寫明「今天的變化、明天仍如此才改判」；
+ * 破底（硬性風險）立即生效。
+ */
 export function computeSiteRating(input: RatingInput): SiteRating {
+  const raw = computeRawSiteRating(input, null);
+  if (!input.confirm) return raw;
+  const brokeDown = !!input.framework && !input.framework.zone;
+  const st = applyRatingConfirmation(input.confirm.prev, {
+    code: raw.code,
+    holdingCode: raw.holdingCode,
+    hardRisk: brokeDown,
+    day: input.confirm.day,
+  });
+  if (st.code === raw.code && st.holdingCode === raw.holdingCode) return { ...raw, pendingChange: null, confirmState: st };
+  const held = computeRawSiteRating(input, { code: st.code, holdingCode: st.holdingCode });
+  const parts = [
+    (st.code === "buy") !== (raw.code === "buy") ? `未持有「${raw.label}」` : "",
+    holdClassOf(st.holdingCode) !== holdClassOf(raw.holdingCode) ? `已持有「${raw.holdingLabel}」` : "",
+  ].filter(Boolean);
+  const pendingChange = `今天的資料指向${parts.join("、") || `「${raw.label}」`}（${raw.reason.split("；")[0]}），本站改判需連續 2 個交易日確認，下一個交易日仍如此才改判，今天維持前一交易日的結論`;
+  return { ...held, reason: `${held.reason}；${pendingChange}`, pendingChange, confirmState: st };
+}
+
+function holdClassOf(h: HoldingCode): "keep" | "reduce" | "exit" {
+  return h === "add" || h === "hold" ? "keep" : h;
+}
+
+function computeRawSiteRating(input: RatingInput, forced: ForcedResult | null): SiteRating {
   const { facets, supportCount, againstCount, signals, framework } = input;
   const chaseHits = input.chase ? evaluateChaseGuards(input.chase, input.guards ?? ACTIVE_CHASE_GUARDS) : [];
   const foreignSell = chaseHits.find((h) => h.id === "foreignSell");
@@ -132,8 +180,10 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   const chipsAgainst = facets.some((f) => f.name === "籌碼面" && f.verdict === "不支持");
   const against = facets.filter((f) => f.verdict === "不支持").map((f) => f.name.replace(/（.*$/, ""));
   const support = facets.filter((f) => f.verdict === "支持").map((f) => f.name.replace(/（.*$/, ""));
-  const qualified =
+  const qualifiedByData =
     supportCount >= QUALIFY_MIN_SUPPORT && againstCount <= QUALIFY_MAX_AGAINST && !chipsAgainst && !foreignSell && vetoed.length === 0;
+  // 翻轉確認期間強制公布前一交易日的結論（computeSiteRating）；破底不會被強制（硬性風險立即生效）。
+  const qualified = forced ? forced.code !== "avoid" : qualifiedByData;
   const overheat = signals.filter((s) => s.tone === "up" && OVERHEAT_SIGNAL_PATTERNS.some((p) => s.label.includes(p)));
   const zone = framework?.zone ? { low: framework.zone.low, high: framework.zone.high } : null;
   const noChase = framework?.noChase.price ?? null;
@@ -148,7 +198,9 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   const shortRisks: string[] = [];
   if (!qualified) {
     code = "avoid";
-    reason = vetoed.length > 0
+    reason = qualifiedByData
+      ? `${score}，今天已達買進門檻，但前一交易日評等為建議先不要買`
+      : vetoed.length > 0
       ? `${score}；${vetoed.map((f) => f.name.replace(/（.*$/, "")).join("、")}不支持（空方訊號多於多方），本站一票否決、不列為買進（擴大回測：技術面不支持的股票 10 日平均落後同類股約 0.4%）`
       : chipsAgainst
       ? `${score}；三大法人賣超（籌碼面不支持），本站不列為買進`
@@ -156,7 +208,7 @@ export function computeSiteRating(input: RatingInput): SiteRating {
         ? `${score}；但${foreignSell.message}，本站不列為買進`
         : `${score}，未達本站買進門檻（至少 ${QUALIFY_MIN_SUPPORT} 項支持、不支持最多 ${QUALIFY_MAX_AGAINST} 項）`;
     if (brokeDown) reason += "；且現價已跌破所有均線與近期低點";
-  } else if (brokeDown) {
+  } else if (brokeDown && !forced) {
     code = "avoid";
     const trigger = framework!.resistances[0]?.price ?? framework!.noChase.price;
     reason = `${score}，但現價已跌破所有均線與近期低點（破底），要等重新站回 ${fmt(trigger)} 以上再考慮`;
@@ -179,11 +231,12 @@ export function computeSiteRating(input: RatingInput): SiteRating {
           : [])
       );
     }
+    const lead = qualifiedByData ? `${score}，體質達買進門檻` : `${score}，前一交易日評等為建議買進`;
     reason = !zone
-      ? `${score}，體質達買進門檻（日K資料不足、未算出參考價位，宜小量分批）`
+      ? `${lead}（日K資料不足、未算出參考價位，宜小量分批）`
       : pullbackAdd != null && framework
-        ? `${score}，體質達買進門檻，現價 ${fmt(framework.price)} 可分批買；若拉回到 ${fmt(pullbackAdd)} 附近可加碼`
-        : `${score}，體質達買進門檻，且現價接近支撐區上緣 ${fmt(zone.high)}，可分批買進`;
+        ? `${lead}，現價 ${fmt(framework.price)} 可分批買；若拉回到 ${fmt(pullbackAdd)} 附近可加碼`
+        : `${lead}，且現價接近支撐區上緣 ${fmt(zone.high)}，可分批買進`;
   }
 
   // 急漲只附風險提示、不改結論（見 RISK_NOTE_ONLY_GUARDS）；結論是先不要買時不用再提示追價風險。
@@ -195,8 +248,11 @@ export function computeSiteRating(input: RatingInput): SiteRating {
     code === "buy" && pullbackAdd != null && framework
       ? `${RATING_LABEL.buy}（現價 ${fmt(framework.price)} 可分批買；若拉回到 ${fmt(pullbackAdd)} 附近可加碼）`
       : RATING_LABEL[code];
-  const holdingCode: HoldingCode =
-    code === "buy" ? (pullbackAdd != null ? "hold" : "add") : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
+  const holdingCode: HoldingCode = forced
+    ? forced.holdingCode === "add" || forced.holdingCode === "hold"
+      ? code === "buy" ? (pullbackAdd != null ? "hold" : "add") : "hold"
+      : forced.holdingCode
+    : code === "buy" ? (pullbackAdd != null ? "hold" : "add") : brokeDown ? "exit" : againstCount >= 2 ? "reduce" : "hold";
   const holdingLabel =
     code === "buy" && pullbackAdd != null
       ? `續抱（拉回到 ${fmt(pullbackAdd)} 附近可加碼）`
@@ -214,6 +270,7 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   const upgradeCondition =
     code === "avoid"
       ? [
+          qualifiedByData && forced ? "下一個交易日仍達買進門檻（本站改判需連續 2 個交易日確認）" : "",
           brokeDown ? `重新站回 ${fmt(framework!.resistances[0]?.price ?? framework!.noChase.price)} 以上` : "",
           vetoed.length > 0 ? "技術面轉為支持（例如站回 20 日均線、空方訊號消失）" : "",
           chipsAgainst || foreignSell ? "三大法人轉為買超" : "",
@@ -278,17 +335,25 @@ export function checkTakeProfit(
   return {
     peakGainPct,
     peakPrice,
-    message: `買進後曾漲到約 ${fmt(peakPrice)}（獲利約 ${Math.round(peakGainPct * 10) / 10}%），現價 ${fmt(price)} 已跌回成本 ${fmt(costBasis)} 以下，獲利全部吐回，建議減碼或出場（停利紀律；買進日未知，最高價以日K中第一次成交到購買價格之後的最高價近似）`,
+    message: `買進後曾漲到約 ${fmt(peakPrice)}（獲利約 ${Math.round(peakGainPct * 10) / 10}%），現價 ${fmt(price)} 已跌回成本 ${fmt(costBasis)} 以下、由賺轉賠，依停利紀律建議減碼（買進日未知，最高價以日K中第一次成交到購買價格之後的最高價近似）`,
   };
 }
 
 /**
  * 依使用者的購買價格調整「已持有」結論（評等本身是全站共用快取、不含個人成本，所以另外套）。
- * 觸發停利提示時：原本是「出場」維持出場，其他一律改成「建議減碼或出場」。
+ * 觸發停利提示時：原本是「出場」維持出場，其他一律改成「建議減碼」。
+ *
+ * 2026-10-06 使用者回報：AI 把程式的持有建議寫成「建議停損／全部賣出」「減碼或出場」，虧損中的股票寫「獲利已吐回」。
+ * 結論字樣只給「一個」動作（不再是「減碼或出場」二選一），括號只講事實（曾獲利多少、現在已跌回成本以下），
+ * 不寫「獲利已吐回」（觸發時現價一定 ≤ 成本＝虧損中，使用者讀起來像還有獲利）。
  */
+export function takeProfitHoldingLabel(check: TakeProfitCheck): string {
+  return `${HOLDING_LABEL.reduce}（買進後曾獲利約 ${Math.round(check.peakGainPct)}%，現已跌回成本以下）`;
+}
+
 export function applyHoldingCost(r: SiteRating, check: TakeProfitCheck | null): SiteRating {
   if (!check || r.holdingCode === "exit") return r;
-  return { ...r, holdingCode: "reduce", holdingLabel: "建議減碼或出場（獲利已吐回）", reason: `${r.reason}；持有中：${check.message}` };
+  return { ...r, holdingCode: "reduce", holdingLabel: takeProfitHoldingLabel(check), reason: `${r.reason}；持有中：${check.message}` };
 }
 
 /** 是否應列進今日建議／全市場推薦名單（建議買進；舊快取的等回檔也算，過渡用）。 */
@@ -297,6 +362,61 @@ export function isRecommendable(r: SiteRating): boolean {
 }
 
 export const SITE_RATING_TITLE = "【本站綜合評等】";
+
+export type RatingConfidence = "高" | "中" | "低";
+
+/** 把握程度「高」需要公布的建議買進已連續這麼多個交易日（含今天）。 */
+export const CONFIDENCE_HIGH_MIN_STREAK = 3;
+/** 剛轉為建議買進（連續 ≤ 這個天數）且大盤偏弱 → 把握程度低。 */
+export const CONFIDENCE_LOW_MAX_STREAK = 2;
+export const CONFIDENCE_ORDER: Record<RatingConfidence, number> = { 高: 0, 中: 1, 低: 2 };
+
+/**
+ * 本站把握程度（只給「建議買進」；程式判定、AI 照抄不可改）。2026-10-06 使用者：「建議及問答的部分，都優先顯示把握程度最高的」，
+ * 13:28 回報：問「有把握程度高的推薦嗎」AI 卻寫「把握程度中」。
+ * 規則（docs/backtest/2026-10-stability.md「把握程度」節，198＋194 檔每日評等，樣本內外 10／20 日超額都單調：高＞中＞低）：
+ * - 高：大盤不偏弱（沒有弱市況提示）且建議買進已連續 ≥ CONFIDENCE_HIGH_MIN_STREAK 個交易日
+ * - 低：大盤偏弱且剛轉為建議買進（連續 ≤ CONFIDENCE_LOW_MAX_STREAK 天）
+ * - 中：其餘
+ * 連續天數來自翻轉確認狀態（confirmState.streak）；沒有狀態（例如沒有 Redis）當作剛轉買（1 天）。
+ */
+export function ratingConfidence(r: SiteRating): { level: RatingConfidence; why: string } | null {
+  if (r.code !== "buy") return null;
+  const streak = r.confirmState?.streak ?? 1;
+  const weak = !!r.marketNote;
+  const days = `已連續 ${streak} 個交易日建議買進`;
+  if (!weak && streak >= CONFIDENCE_HIGH_MIN_STREAK) return { level: "高", why: `大盤不偏弱、${days}` };
+  if (weak && streak <= CONFIDENCE_LOW_MAX_STREAK) return { level: "低", why: `大盤偏弱、${streak <= 1 ? "今天剛轉為建議買進" : days}` };
+  return { level: "中", why: `${weak ? "大盤偏弱" : "大盤不偏弱"}、${streak <= 1 ? "今天剛轉為建議買進" : days}` };
+}
+
+/** 依把握程度排序用（高→中→低→沒有把握程度）；同級維持原順序。 */
+export function confidenceRank(r: SiteRating): number {
+  const c = ratingConfidence(r);
+  return c ? CONFIDENCE_ORDER[c.level] : 3;
+}
+
+/** 程式字樣「本站把握程度：高（…）」，名單與 AI 參考資料共用。 */
+export function confidenceText(r: SiteRating): string {
+  const c = ratingConfidence(r);
+  return c ? `本站把握程度：${c.level}（${c.why}；回測：高＞中＞低，非勝率保證）` : "";
+}
+
+export const CONFIDENCE_GRADES_TITLE = "【本站把握程度分級（程式算好；使用者問把握程度高的，只能照這份回答）】";
+
+/**
+ * 「把握程度高的有哪些」由程式分級回答（2026-10-06 13:28 使用者回報：問高把握卻被答「把握中」）。
+ * 只列建議買進；沒有「高」就照實寫（無），AI 必須照實說目前沒有程式判定為高把握的。
+ */
+export function describeConfidenceGrades(entries: Array<{ name: string; symbol: string; rating: SiteRating }>): string {
+  const by: Record<RatingConfidence, string[]> = { 高: [], 中: [], 低: [] };
+  for (const e of entries) {
+    const c = ratingConfidence(e.rating);
+    if (c) by[c.level].push(`${stripNameMarker(e.name)}(${e.symbol})（${c.why}）`);
+  }
+  const line = (lv: RatingConfidence) => `${lv}：${by[lv].length ? by[lv].join("、") : "（無）"}`;
+  return `${CONFIDENCE_GRADES_TITLE}${line("高")}；${line("中")}；${line("低")}。`;
+}
 
 /** 給 AI 的一行評等（個股資料最上面、全市場名單每檔都用同一格式）。 */
 export function describeSiteRating(name: string, symbol: string, r: SiteRating): string {
@@ -315,7 +435,8 @@ export function describeSiteRating(name: string, symbol: string, r: SiteRating):
       : levels.length > 0
         ? `價位：${levels.join("；")}。`
         : "";
-  return `${SITE_RATING_TITLE}${stripNameMarker(name)}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${tail}`;
+  const conf = confidenceText(r);
+  return `${SITE_RATING_TITLE}${stripNameMarker(name)}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${tail}${conf ? `${conf}。` : ""}`;
 }
 
 /** 模型偶爾把評等標籤原樣抄出（「未持有：「建議買進」」），回答送出前拿掉標籤、只留字樣。 */

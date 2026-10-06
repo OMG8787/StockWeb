@@ -109,12 +109,12 @@ export function describeHoldingStop(stop: HoldingStop, price: number, costBasis?
   const where = `${fmt(stop.price)}（${stop.label}，現價 ${fmt(price)} 下方 ${stop.pctBelow.toFixed(1)}%）`;
   const action =
     stop.kind === "trailing-profit"
-      ? `目前獲利約 ${pnlPct!.toFixed(1)}%（成本 ${fmt(cost!)}），移動停利價 ${where}：收盤跌破就減碼或出場、守住獲利（這價位仍高於成本）`
+      ? `目前獲利約 ${pnlPct!.toFixed(1)}%（成本 ${fmt(cost!)}），移動停利價 ${where}：收盤跌破就出場、守住獲利（這價位仍高於成本）`
       : stop.kind === "protect"
         ? `目前小賺約 ${pnlPct!.toFixed(1)}%（成本 ${fmt(cost!)}），停損價 ${where}：跌破代表獲利吐光並轉為小虧，建議出場`
         : stop.kind === "stop-loss"
           ? `目前虧損約 ${Math.abs(pnlPct!).toFixed(1)}%（成本 ${fmt(cost!)}），停損價 ${where}：收盤跌破就停損出場`
-          : `持有中出場參考價 ${where}：收盤跌破就減碼或出場`;
+          : `持有中出場參考價 ${where}：收盤跌破就出場`;
   const limit = stop.limitDown != null ? `；高於下一個交易日跌停價約 ${fmt(stop.limitDown)}` : "";
   return `${HOLDING_STOP_TITLE}${action}（距現價最多 ${HOLDING_STOP_MAX_PCT * 100}%${limit}）。已持有者的停損／停利價一律用這個數字，不可用評等或【價位參考】裡『買進後跌破 X 出場』那個價（那是給還沒買、準備在買進區間進場的人）。`;
 }

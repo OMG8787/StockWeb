@@ -184,6 +184,8 @@ describe("同一檔股票：各入口結論與價位逐字相同", () => {
         symbol: sym, name: r.name, price: r.price, market: "TW", candles: cs, asOfDay: taipeiDayKey(),
         chips: fx.chips(sym) as never, fundamentals: { peRatio: 10, dividendYield: 5 } as never,
         earnings: { monthlyRevenueYoyPercent: 30 } as never, marketRet60Pct: 3,
+        // 翻轉確認：沒有前一交易日狀態（測試無 Redis），交易日＝最新一根日K
+        confirmPrev: null, confirmDay: cs[cs.length - 1].time.slice(0, 10),
       });
       expect(core.rating).toEqual(r.rating);
       expect(core.framework).toEqual(r.framework);

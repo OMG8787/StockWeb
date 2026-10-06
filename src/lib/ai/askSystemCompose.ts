@@ -54,6 +54,7 @@ import {
   RULE_TRADING_STANCE,
   RULE_RATING_CHANGE,
   RULE_LIST_REFERENCE,
+  RULE_HIGH_CONFIDENCE,
   RULE_DECISION_CARD,
   RULE_MARKET_PULSE,
 } from "./askSystemPrompt";
@@ -123,6 +124,8 @@ export interface AskPromptContext {
   hasTradingStance?: boolean;
   /** 「這幾檔／這些」指代上一則回答的清單 */
   listReference?: boolean;
+  /** 問把握程度高的（附了【本站把握程度分級】） */
+  asksHighConfidence?: boolean;
   /** 主題新聞搜尋的資料區塊文字（有搜尋才有；見 data/topicNews.ts） */
   topicNewsText?: string;
   /** 大盤題的精簡漲跌榜（grounding/movers.ts buildMarketPulseGrounding） */
@@ -187,6 +190,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     dataText.includes(BLOCK_MARKERS.priceLevels) ? RULE_USE_PRICE_FRAMEWORK : "",
     c.stockCount > 0 && !c.marketWide ? RULE_ONLY_ASKED_STOCKS : "",
     c.listReference ? RULE_LIST_REFERENCE : "",
+    c.asksHighConfidence ? RULE_HIGH_CONFIDENCE : "",
     dataText.includes(SITE_RATING_TITLE) ? RULE_FOLLOW_SITE_RATING : "",
     dataText.includes(BLOCK_MARKERS.similarCases) || dataText.includes(BLOCK_MARKERS.lessons) ? RULE_EXPERIENCE : "",
     dataText.includes(BLOCK_MARKERS.aiView) ? RULE_AI_VIEW : "",

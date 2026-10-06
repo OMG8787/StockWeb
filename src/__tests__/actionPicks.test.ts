@@ -104,11 +104,12 @@ describe("renderActionBrief", () => {
     expect(text).not.toMatch(/等回檔|現價不買/);
     expect(text).toContain(`**${NOT_CHASE_TITLE}**：股9(9)`);
   });
-  it("依 AI 排序偏好重排、價位由程式寫（現價可買＋單一加碼價＋出場）", () => {
-    expect(text.indexOf("股3(3)")).toBeLessThan(text.indexOf("股1(1)"));
+  it("順序由程式決定（不採用 AI 排序偏好）、價位由程式寫（現價可買＋單一加碼價＋出場）", () => {
+    expect(text.indexOf("股1(1)")).toBeLessThan(text.indexOf("股3(3)"));
     expect(text).toContain("操作：現價可分批買；拉回到 100 附近可加碼；買進後跌破 92.5 出場。");
     expect(text).toContain("理由：外資買超。風險：RSI偏高。");
-    expect(text).toContain("把握程度：中（量能普通）");
+    // 把握程度由程式判定逐檔顯示，AI 的 confidence 不再顯示（2026-10-06）
+    expect(text).not.toContain("把握程度：中（量能普通）");
   });
   it("大盤偏弱時頁首提示一次", () => {
     expect(text).toContain("**大盤偏弱提示**：近60日加權報酬 +2.3%");

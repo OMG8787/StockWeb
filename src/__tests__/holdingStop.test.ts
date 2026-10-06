@@ -100,7 +100,7 @@ describe("describeRatingForHolding（三條路徑共用的含成本評等）", (
     expect(r.text).toContain("買進後跌破 32.65 出場");
   });
 
-  it("曾獲利 ≥8% 又跌回成本 → 減碼或出場，並列進彙整的『該賣』", () => {
+  it("曾獲利 ≥8% 又跌回成本 → 建議減碼（單一動作），並列進彙整的『該賣』（附目前虧損%）", () => {
     // 成本 40，期間最高 44（+10%），現價 39.5 跌回成本以下
     const c = candlesOf([...Array(10).fill(40), 44, 43, 42, 41, 40, 40, 39.8, 39.6, 39.5, 39.5]);
     const r = describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, market: "TW" }, c);
@@ -112,8 +112,8 @@ describe("describeRatingForHolding（三條路徑共用的含成本評等）", (
       undefined,
     ]);
     expect(summary.startsWith(HOLDING_SUMMARY_TITLE)).toBe(true);
-    expect(summary).toMatch(/該賣）的：A\(1528\)「建議減碼或出場（獲利已吐回）」；/);
-    expect(summary).toContain("不用賣）：B(2409)「續抱」");
+    expect(summary).toMatch(/該賣）的：A\(1528\)「建議減碼（買進後曾獲利約 \d+%，現已跌回成本以下）」（目前虧損約 1\.2%）；/);
+    expect(summary).toMatch(/不用賣）：B\(2409\)「續抱」（目前獲利約 [\d.]+%）/);
   });
 
   it("沒有持有中 → 不產生彙整", () => {

@@ -129,7 +129,8 @@ describe("持有中停利提示", () => {
     const base = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110) });
     const r = applyHoldingCost(base, check);
     expect(r.holdingCode).toBe("reduce");
-    expect(r.holdingLabel).toBe("建議減碼或出場（獲利已吐回）");
+    expect(r.holdingLabel).toBe("建議減碼（買進後曾獲利約 12%，現已跌回成本以下）");
+    expect(r.holdingLabel).not.toMatch(/或出場|獲利已吐回/);
     expect(r.reason).toContain("近似");
     expect(r.label).toBe(base.label); // 未持有結論不變
   });

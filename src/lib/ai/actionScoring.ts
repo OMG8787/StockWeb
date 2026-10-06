@@ -2,6 +2,7 @@ import type { Chips, ChipsRatios, Earnings, Fundamentals, MaterialAnnouncement }
 import type { Signal } from "@/lib/signals";
 import { formatSharesWithLots } from "@/lib/format";
 import { holdingStructureParts } from "./chipsRatiosWording";
+import type { ChipsWindow } from "./chipsWindow";
 
 // pct() 刻意放在這個「最底層」的檔案（不依賴 actionGrounding.ts），雖然它主要是給
 // 文字組裝用的格式化函式——但 technicalFacet/earningsFacet 這兩個評分函式也要用到
@@ -70,6 +71,11 @@ export interface Candidate {
   sources: string[];
   signals: Signal[];
   chips: Chips | null;
+  /**
+   * 近 N 個交易日三大法人累計（chipsWindow.ts）；有給時籌碼面依累計方向評分（單日方向只列參考），
+   * 沒給（美股、資料抓不到）退回單日。
+   */
+  chipsWindow?: ChipsWindow | null;
   /** 大戶／外資持股比例、融資使用率（getChipsRatiosBatch；只有台股有，查不到是 null） */
   chipsRatios: ChipsRatios | null;
   fundamentals: Fundamentals | null;
@@ -110,6 +116,14 @@ function technicalFacet(c: Candidate): Facet {
 }
 
 function chipsFacet(c: Candidate): Facet {
+  const w = c.chipsWindow;
+  if (w && w.days > 1) {
+    // 2026-10-06 評等穩定化研究用（docs/backtest/2026-10-stability.md）：累計版籌碼面；正式站目前不傳 chipsWindow（回測沒有更好）。
+    const today = c.chips?.institutionalNetShares;
+    const detail = `近${w.days}個交易日三大法人累計${formatSharesWithLots(w.institutionalNetShares)}（外資${formatSharesWithLots(w.foreignNetShares)}、投信${formatSharesWithLots(w.trustNetShares)}）${today != null ? `；最近一日三大法人${formatSharesWithLots(today)}（單日僅供參考，評分看累計）` : ""}`;
+    const verdict: Verdict = w.institutionalNetShares > 0 ? "支持" : w.institutionalNetShares < 0 ? "不支持" : "中性";
+    return { name: "籌碼面", verdict, detail };
+  }
   const inst = c.chips?.institutionalNetShares;
   if (inst == null) {
     return { name: "籌碼面", verdict: "無資料", detail: "查無今日三大法人買賣超資料" };

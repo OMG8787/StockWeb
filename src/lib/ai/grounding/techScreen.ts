@@ -2,7 +2,7 @@ import { getTechnicalScreen } from "@/lib/data";
 import type { TechScreenItem } from "@/lib/data";
 import { describeTechState } from "./indicators";
 import { getStockRatings } from "../stockRating";
-import { describeSiteRating } from "../siteRating";
+import { confidenceRank, describeSiteRating } from "../siteRating";
 import {
   KD_NEAR_CROSS_CONVERGING_DAYS,
   KD_NEAR_CROSS_MAX_EST_DAYS,
@@ -63,7 +63,10 @@ async function describeBothGoldenRatings(items: TechScreenItem[]): Promise<strin
   const lines = targets
     .map((t) => ratings.get(t.symbol.toUpperCase()))
     .filter((r) => r != null)
-    .map((r) => describeSiteRating(r.name, r.symbol, r.rating));
+    // 建議買進依本站把握程度高→低排前面（2026-10-06 使用者：優先顯示把握程度最高的），先不要買在後。
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => confidenceRank(a.r.rating) - confidenceRank(b.r.rating) || a.i - b.i)
+    .map(({ r }) => describeSiteRating(r.name, r.symbol, r.rating));
   return `【MACD與KD同時黃金交叉者的本站綜合評等（跟今日建議、個股頁「問AI關於」同一份結論）】技術交叉只是篩選條件，買不買以這裡的評等為準：\n${lines.join("\n")}`;
 }
 

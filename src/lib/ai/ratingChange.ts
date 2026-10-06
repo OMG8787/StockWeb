@@ -26,13 +26,33 @@ export interface CurrentRatingForChange {
   name: string;
   symbol: string;
   price: number;
-  rating: Pick<SiteRating, "code" | "label">;
-  facets: Array<{ name: string; verdict: string }>;
+  rating: Pick<SiteRating, "code" | "label"> & { holdingLabel?: string };
+  /** detail 有給時，改變的面向會附現在的具體數字（例如三大法人合計 -3,200 張） */
+  facets: Array<{ name: string; verdict: string; detail?: string }>;
+  /** 使用者持有中（關注清單有成本）：「已持有」結論（續抱／加碼／減碼／出場）改變也要說明 */
+  held?: boolean;
 }
+
+/** 持有建議的大類（續抱、加碼同屬保留部位；減碼、出場各一類）。 */
+export function holdingClass(label: string | undefined): "keep" | "reduce" | "exit" | null {
+  if (!label) return null;
+  const core = label.replace(/[（(].*$/, "");
+  if (/出場|停損|賣出/.test(core)) return "exit";
+  if (/減碼/.test(core)) return "reduce";
+  return "keep";
+}
+
+/** 面向說明最多附幾個字（太長會稀釋重點）。 */
+const FACET_DETAIL_MAX = 60;
 
 /** 前一天紀錄 vs 今天評等 → 一段說明（沒變回 null）。純函式。 */
 export function describeRatingChange(prev: RatingLogEntry, cur: CurrentRatingForChange): string | null {
-  if (buyNow(prev.code) === buyNow(cur.rating.code)) return null;
+  const buyChanged = buyNow(prev.code) !== buyNow(cur.rating.code);
+  // 2026-10-06 使用者回報：「有些是你昨天建議我賣我才賣、建議我買我才買，今天又不一樣」——持有中的
+  // 續抱→減碼這類變化（買不買大類沒變）也要交代原因。
+  const holdChanged =
+    !!cur.held && holdingClass(prev.holdingLabel) != null && holdingClass(prev.holdingLabel) !== holdingClass(cur.rating.holdingLabel);
+  if (!buyChanged && !holdChanged) return null;
   const reasons: string[] = [];
   if (prev.code === "buy-on-pullback") {
     reasons.push(
@@ -43,7 +63,10 @@ export function describeRatingChange(prev: RatingLogEntry, cur: CurrentRatingFor
     .map((f) => {
       const key = f.name.replace(/（.*$/, "");
       const before = Object.entries(prev.facets ?? {}).find(([k]) => k.replace(/（.*$/, "") === key)?.[1];
-      return before && before !== f.verdict ? `${key}由【${before}】變【${f.verdict}】` : "";
+      if (!before || before === f.verdict) return "";
+      const d = (f.detail ?? "").replace(/\s+/g, " ").trim();
+      const num = d ? `（現在：${d.length > FACET_DETAIL_MAX ? `${d.slice(0, FACET_DETAIL_MAX)}…` : d}）` : "";
+      return `${key}由【${before}】變【${f.verdict}】${num}`;
     })
     .filter(Boolean);
   if (facetChanges.length > 0) reasons.push(`面向改變：${facetChanges.join("、")}`);
@@ -52,7 +75,13 @@ export function describeRatingChange(prev: RatingLogEntry, cur: CurrentRatingFor
     if (Math.abs(pct) >= 1) reasons.push(`股價由 ${prev.price} 變為 ${cur.price}（${pct > 0 ? "+" : ""}${pct}%）`);
   }
   if (reasons.length === 0) reasons.push("各面向評分與價位條件的細微變化，跨過了本站的買進門檻");
-  return `${RATING_CHANGE_TITLE}${cur.name}(${cur.symbol})：${fmtDay(prev.day)}本站評等是「${prev.label}」，現在是「${cur.rating.label}」。原因：${reasons.join("；")}。`;
+  const what = [
+    buyChanged ? `未持有：${fmtDay(prev.day)}「${prev.label}」→現在「${cur.rating.label}」` : "",
+    holdChanged ? `已持有：${fmtDay(prev.day)}「${prev.holdingLabel}」→現在「${cur.rating.holdingLabel}」` : "",
+  ]
+    .filter(Boolean)
+    .join("；");
+  return `${RATING_CHANGE_TITLE}${cur.name}(${cur.symbol})：${what}。原因：${reasons.join("；")}。`;
 }
 
 /** 讀每檔「今天以前最近一天」的評等紀錄（一天有多筆時取最晚那筆）。讀不到回空 Map。 */
@@ -96,4 +125,39 @@ export async function describeRatingChanges(current: CurrentRatingForChange[]): 
     })
     .filter(Boolean)
     .join("\n");
+}
+
+export const RATING_CHANGE_APPENDIX_TITLE = "評等跟前一交易日不同的股票（本站程式說明）";
+/** 回答裡提到該檔後這麼多字內，要有「跟前一天不同」的交代。 */
+const CHANGE_MENTION_WINDOW = 260;
+const CHANGE_MENTION_PATTERN = /前一(?:個)?(?:交易)?日|前一天|昨天|昨日|\d{1,2}\/\d{1,2}|改版|不同|改判|轉為|變為|變成/;
+
+/**
+ * 回答後保證（唯一入口，ask.ts postProcessAiAnswer 呼叫）：參考資料有【評等與前一交易日不同】的股票，回答提到它卻沒交代
+ * 為什麼跟前一天不同時，在回答最後補上程式寫好的說明（確定性、不重生；2026-10-06 使用者：「今天又不一樣，我搞不懂」）。
+ */
+export function ensureRatingChangeExplained(answer: string, grounding: string): { text: string; appended: string[] } {
+  const lines = grounding.split("\n").filter((l) => l.startsWith(RATING_CHANGE_TITLE));
+  if (!answer || lines.length === 0) return { text: answer, appended: [] };
+  const missing: string[] = [];
+  for (const l of lines) {
+    const body = l.slice(RATING_CHANGE_TITLE.length);
+    const m = body.match(/^([^()（）]+?)\(([0-9A-Za-z.\-]+)\)/);
+    if (!m) continue;
+    const keys = [m[2], m[1].trim()].filter((k) => k.length >= 2);
+    let mentioned = false;
+    let explained = false;
+    for (const key of keys) {
+      for (let i = answer.indexOf(key); i >= 0 && !explained; i = answer.indexOf(key, i + 1)) {
+        mentioned = true;
+        if (CHANGE_MENTION_PATTERN.test(answer.slice(i, i + CHANGE_MENTION_WINDOW))) explained = true;
+      }
+    }
+    if (mentioned && !explained) missing.push(body);
+  }
+  if (missing.length === 0) return { text: answer, appended: [] };
+  return {
+    text: `${answer.replace(/\s+$/, "")}\n\n${RATING_CHANGE_APPENDIX_TITLE}：\n${missing.map((b) => `- ${b}`).join("\n")}`,
+    appended: missing.map((b) => b.match(/\(([0-9A-Za-z.\-]+)\)/)?.[1] ?? b),
+  };
 }

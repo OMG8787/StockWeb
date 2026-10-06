@@ -6,7 +6,7 @@ import { describeHoldingTechnical } from "./indicators";
 import { buildSoldGrounding } from "./soldHoldings";
 import { buildStockGrounding } from "./stock";
 import { getStockRatings } from "../stockRating";
-import { describeRatingForHolding, formatHoldingRatingSummary, type HoldingRatingEntry } from "../holdingRating";
+import { describeRatingForHolding, formatHoldingRatingSummary, formatWatchRatingSummary, type HoldingRatingEntry } from "../holdingRating";
 
 /**
  * 逐檔評等（含個人成本）併發上限：評等本身有 10 分鐘快取，冷快取時每檔要抓日K／籌碼／財報，
@@ -164,7 +164,10 @@ export async function buildHoldingsAnalysisGrounding(holdings: HoldingInput[]): 
 
   const overflowText = overflow.length > 0 ? await buildHoldingsGrounding(overflow, false, true, false) : "";
   // 全部持股的「該賣哪些」彙整：跟輕量清單同一個 formatHoldingRatingSummary()，兩條路徑結論一致。
-  const summary = formatHoldingRatingSummary(holdings.map((h) => ratings.get(h.symbol.toUpperCase())));
+  const entries = holdings.map((h) => ratings.get(h.symbol.toUpperCase()));
+  const summary = formatHoldingRatingSummary(entries);
+  // 僅關注（未持有）彙整：依本站把握程度高→低，回答後檢查用它確認每一檔都寫到（2026-10-06 漏掉旺矽）。
+  const watchSummary = formatWatchRatingSummary(entries);
   const sold = await buildSoldGrounding(holdings).catch(() => "");
-  return [richBlocks.join("\n\n---\n\n"), overflowText, summary, sold].filter(Boolean).join("\n\n---\n\n");
+  return [richBlocks.join("\n\n---\n\n"), overflowText, summary, watchSummary, sold].filter(Boolean).join("\n\n---\n\n");
 }

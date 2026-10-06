@@ -7,14 +7,14 @@ import { callAiProviders, type CallAiProvidersOptions } from "@/lib/ai/provider"
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
-import { describeSiteRating, isRecommendable, stripRatingTags } from "./siteRating";
+import { confidenceRank, describeConfidenceGrades, describeSiteRating, isRecommendable, stripRatingTags } from "./siteRating";
 import { getStockRatings, type StockRatingResult } from "./stockRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
 import type { AskResult, HoldingInput } from "./askTypes";
 import { guessSymbolByFuzzyName, guessSymbolsFromText } from "./symbolResolve";
 import { describeFuzzyGuess } from "./fuzzyName";
-import { describeRatingChanges } from "./ratingChange";
+import { describeRatingChanges, ensureRatingChangeExplained } from "./ratingChange";
 import { getStockRating } from "./stockRating";
 import {
   conversationWantsMovers,
@@ -48,7 +48,7 @@ import { composeAskSystemPrompt } from "./askSystemCompose";
 import { getMarketStatus } from "@/lib/marketStatus";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { guardAnswerNumbers } from "./numberGuard";
-import { guardAvoidPriceAdvice } from "./ratingConsistencyGuard";
+import { guardAvoidPriceAdvice, guardHeldAnswer, guardHoldingsCoverage } from "./ratingConsistencyGuard";
 import { modelInfo } from "./modelName";
 
 // `@/lib/ai/ask` 的公開介面刻意保持不變：這兩個型別原本就宣告在這個檔案裡，
@@ -68,9 +68,17 @@ export async function answerQuestion(
   history: ChatTurn[] = [],
   holdings: HoldingInput[] = []
 ): Promise<AskResult> {
-  let targets: Array<{ symbol: string; market: Market | undefined }> = contextSymbol
-    ? [{ symbol: contextSymbol, market: undefined as Market | undefined }]
-    : await guessSymbolsFromText(question);
+  // 「有把握程度高的推薦（股票）嗎」：問的是全市場分級，就算是從個股頁開的對話也不綁在那一檔
+  // （2026-10-06 13:28 使用者回報：在鼎元頁追問高把握推薦，回答只講鼎元、還自己寫把握程度中）。
+  const asksHighConfidence = HIGH_CONFIDENCE_QUESTION_PATTERN.test(question);
+  const asksHighConfidenceList = asksHighConfidence && HIGH_CONFIDENCE_LIST_PATTERN.test(question) && !THIS_STOCK_PATTERN.test(question);
+  const namedInQuestion = contextSymbol && asksHighConfidenceList ? await guessSymbolsFromText(question) : [];
+  let targets: Array<{ symbol: string; market: Market | undefined }> =
+    contextSymbol && !(asksHighConfidenceList && namedInQuestion.length === 0)
+      ? [{ symbol: contextSymbol, market: undefined as Market | undefined }]
+      : contextSymbol
+        ? []
+        : await guessSymbolsFromText(question);
   // 「建議買嗎」「可以買嗎」這種沒指名對象的買賣是非題：對話裡有正在談的個股就是在追問那一檔，
   // 必須在 wantsMovers／全市場推薦判斷之前先找回來（2026-10-04 使用者回報的跳題）。
   if (targets.length === 0 && history.length > 0 && isBareTradeYesNoQuestion(question)) {
@@ -138,7 +146,12 @@ export async function answerQuestion(
   const wantsHoldingsAnalysis = holdings.length > 0 && HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question);
   // 開放式「建議買什麼」→ 範圍是全市場，見 intent.ts wantsMarketWideBuyIdea 的說明。
   const wantsMarketWide =
-    targets.length === 0 && !themeMatch && !unknownTheme && !topicNewsQuery && !wantsHoldingsAnalysis && wantsMarketWideBuyIdea(question);
+    targets.length === 0 &&
+    !themeMatch &&
+    !unknownTheme &&
+    !topicNewsQuery &&
+    !wantsHoldingsAnalysis &&
+    (wantsMarketWideBuyIdea(question) || asksHighConfidenceList);
   // 今日建議頁已經算好的全市場多面向買進候選（30分鐘快取，跟 /action 頁同一份，兩邊答案才會一致）；
   // 冷快取時最多等8秒，逾時就不附，不拖慢聊天回應。
   const actionBriefPromise: Promise<ActionBrief | null> = wantsMarketWide
@@ -272,10 +285,15 @@ export async function answerQuestion(
     : new Map<string, StockRatingResult>();
   // 某檔現在讀不到評等（批次逾時／上游失敗）時，沿用今日建議名單裡同一份評等的字樣，不可當成「沒有建議買進」
   // （2026-10-06 13:17 使用者回報：今日建議有 5 檔，AI 卻答「目前市場上沒有符合建議買進的股票」）。
+  // 依本站把握程度高→低（今日建議名單本身已照這個排，這裡用即時評等再排一次，兩邊一致）。
   const listLines = actionBrief
-    ? actionBrief.picks.flatMap((p) => {
+    ? [...actionBrief.picks]
+        .map((p, i) => ({ p, i, rank: listRatings.get(p.symbol.toUpperCase()) ? confidenceRank(listRatings.get(p.symbol.toUpperCase())!.rating) : 3 }))
+        .sort((a, b) => a.rank - b.rank || a.i - b.i)
+        .map((x) => x.p)
+        .flatMap((p) => {
         const r = listRatings.get(p.symbol.toUpperCase());
-        if (!r) return p.code !== "avoid" ? [`${p.name}(${p.symbol})：${p.label}`] : [];
+        if (!r) return p.code !== "avoid" ? [`${p.name}(${p.symbol})：${p.label}${p.confidence ? `。${p.confidence}` : ""}`] : [];
         return isRecommendable(r.rating) ? [describeSiteRating(r.name, r.symbol, r.rating)] : [];
       })
     : [];
@@ -289,6 +307,17 @@ export async function answerQuestion(
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
+  // 問把握程度高的：程式分級（全市場名單＋這題提到的個股），AI 照這份回答，沒有高的就照實說。
+  const confidenceGradesText = asksHighConfidence
+    ? await Promise.all(stockGroundings.map((g) => getStockRating(g.symbol).catch(() => null)))
+        .then((rs) =>
+          describeConfidenceGrades([
+            ...[...listRatings.values()].filter((r) => isRecommendable(r.rating)),
+            ...rs.filter((r): r is StockRatingResult => r != null && !listRatings.has(r.symbol.toUpperCase())),
+          ])
+        )
+        .catch(() => "")
+    : "";
   // 聚焦 grounding：個股買賣判斷題、沒問到大盤時，只附指數本身（不附總經、市場歷史、夜盤、大盤重大事件），
   // 減少雜訊讓弱模型專心在結論卡與個股資料（2026-10-06「提高 Lite 下限」）。
   const focusedStock = tradeJudgment && stockGroundings.length > 0 && !MARKET_JUDGMENT_PATTERN.test(question);
@@ -306,10 +335,18 @@ export async function answerQuestion(
           .catch(() => "")
       : "";
   // 評等跟前一交易日不同時，附原因讓 AI 主動交代（2026-10-06 使用者：「昨天你不是說南亞不要追高」）。見 ratingChange.ts。
-  const ratingChangeText = await buildRatingChangeText([
-    ...stockGroundings.map((g) => g.symbol),
-    ...(actionBrief?.picks ?? []).map((p) => p.symbol),
-  ]);
+  // 關注清單／持股題也附（2026-10-06 使用者：「昨天建議我賣我才賣、建議我買我才買，今天又不一樣」）：持有中的還比對已持有結論。
+  const heldSymbols = new Set(
+    holdings.filter((h) => h.costBasis != null && (h.shares ?? 0) > 0).map((h) => h.symbol.toUpperCase())
+  );
+  const ratingChangeText = await buildRatingChangeText(
+    [
+      ...stockGroundings.map((g) => g.symbol),
+      ...(holdingsGrounding ? holdingsForGrounding.map((h) => h.symbol) : []),
+      ...(actionBrief?.picks ?? []).map((p) => p.symbol),
+    ],
+    heldSymbols
+  );
   // At least one candidate symbol was parsed out of the question but NONE
   // of them resolved to real data — the single-target case this already
   // handled before multi-symbol support existed. A PARTIAL miss (e.g.
@@ -465,6 +502,7 @@ export async function answerQuestion(
       text: moversGrounding ? `【今日焦點數據（漲幅榜、技術訊號共振股）】\n${moversGrounding}` : "",
       userSafe: false,
     },
+    { text: confidenceGradesText, userSafe: false },
     {
       text: ratingListText ? `【本站綜合評等名單（${actionBrief?.title ?? "今日建議"}同一份，只能從這裡推薦）】\n${ratingListText}` : "",
       userSafe: false,
@@ -537,6 +575,7 @@ ${actionBriefText}` : "",
     ratingListText,
     hasTradingStance: true,
     listReference,
+    asksHighConfidence: !!confidenceGradesText,
     topicNewsText,
     marketPulseText: marketPulse,
     twMarketOpen: getMarketStatus("TW") === "open",
@@ -607,7 +646,8 @@ ${actionBriefText}` : "",
 
 /**
  * AI 回答送出前的程式後處理（唯一入口；跨模型評測 scripts/eval/run.ts 也呼叫這一個，兩邊才不會漂移）：
- * 清內部標記 → 拿掉評等標籤 → 關鍵價位抄錯更正為程式值（numberGuard.ts）→ 先不要買的股票刪掉出場價／買進區間（ratingConsistencyGuard.ts）。
+ * 清內部標記 → 拿掉評等標籤 → 關鍵價位抄錯更正為程式值（numberGuard.ts）→ 先不要買的股票刪掉出場價／買進區間 →
+ * 持有中的持有動作照程式字樣（guardHeldAnswer；兩者都在 ratingConsistencyGuard.ts）→ 評等變動沒交代就補程式說明（ratingChange.ts）。
  */
 export function postProcessAiAnswer(answer: string, grounding: string): string {
   const guarded = guardAnswerNumbers(
@@ -617,25 +657,50 @@ export function postProcessAiAnswer(answer: string, grounding: string): string {
   if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
   const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
   if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
-  return consistent.text;
+  // 持有中：持有動作逐字照程式（不可把減碼升級成停損／全部賣出、不可混寫減碼或出場、虧損不可寫獲利已吐回）。
+  const held = guardHeldAnswer(consistent.text, grounding);
+  if (held.fixes.length > 0 || held.appended.length > 0)
+    console.warn("[ask] 更正持有建議：", JSON.stringify({ fixes: held.fixes, appended: held.appended }));
+  // 關注清單深度分析漏掉的股票補一行程式結論。
+  const covered = guardHoldingsCoverage(held.text, grounding);
+  if (covered.appended.length > 0) console.warn("[ask] 補漏掉的關注清單股票：", JSON.stringify(covered.appended));
+  // 評等跟前一交易日不同、回答卻沒交代的，補上程式說明（ratingChange.ts）。
+  const changed = ensureRatingChangeExplained(covered.text, grounding);
+  if (changed.appended.length > 0) console.warn("[ask] 補評等變動說明：", JSON.stringify(changed.appended));
+  return changed.text;
 }
 
-/** 評等改變說明（只看台股、最多 6 檔；評等讀同一份 10 分鐘快取，不記評等紀錄；3 秒內拿不到就不附）。 */
-const RATING_CHANGE_MAX = 6;
+/**
+ * 評等改變說明（只看台股、最多 RATING_CHANGE_MAX 檔；評等讀同一份 10 分鐘快取，不記評等紀錄；3 秒內拿不到就不附）。
+ * 上限 15：關注清單題要涵蓋整份清單（評等剛被 rateHoldings 算過、快取命中；Redis 只多一個 pipeline）。
+ */
+const RATING_CHANGE_MAX = 15;
 const RATING_CHANGE_WAIT_MS = 3000;
-async function buildRatingChangeText(symbols: string[]): Promise<string> {
+async function buildRatingChangeText(symbols: string[], heldSymbols: Set<string> = new Set()): Promise<string> {
   const tw = [...new Set(symbols.map((s) => s.toUpperCase()))].filter((s) => /^\d{4,6}[A-Z]?$/.test(s)).slice(0, RATING_CHANGE_MAX);
   if (tw.length === 0) return "";
   const work = (async () => {
     const ratings = (await Promise.all(tw.map((s) => getStockRating(s, "TW").catch(() => null)))).filter((r) => r != null);
     return describeRatingChanges(
-      ratings.map((r) => ({ name: r.name, symbol: r.symbol, price: r.price, rating: r.rating, facets: r.facets }))
+      ratings.map((r) => ({
+        name: r.name,
+        symbol: r.symbol,
+        price: r.price,
+        rating: r.rating,
+        facets: r.facets,
+        held: heldSymbols.has(r.symbol.toUpperCase()),
+      }))
     );
   })().catch(() => "");
   return Promise.race([work, new Promise<string>((resolve) => setTimeout(() => resolve(""), RATING_CHANGE_WAIT_MS))]);
 }
 
 // ---------------------------------------------------------------- 回答後檢查＋自動重生（2026-10-06「提高 Lite 下限」）
+
+/** 問「把握程度高的」（推薦／名單）。 */
+const HIGH_CONFIDENCE_QUESTION_PATTERN = /把握(?:程度)?.{0,3}(?:最)?高|高把握|最有把握|把握(?:程度)?.{0,2}(?:最大|最強)/;
+const HIGH_CONFIDENCE_LIST_PATTERN = /股票|哪些|哪幾|哪[檔支]|名單|推薦|標的/;
+const THIS_STOCK_PATTERN = /這[檔支間家]|它|這間公司/;
 
 /** 「建議買嗎」這類短追問：主題在上一句。 */
 const SHORT_FOLLOWUP_MAX_LEN = 8;

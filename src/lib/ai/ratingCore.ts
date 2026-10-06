@@ -4,6 +4,8 @@ import { score, type ScoredCandidate } from "./actionScoring";
 import { computeChaseMetrics, type ChaseGuardId, type ChaseMetrics } from "./chaseGuards";
 import { computePriceFramework, type PriceFramework } from "./grounding/priceLevels";
 import { computeSiteRating, type SiteRating } from "./siteRating";
+import type { ChipsWindow } from "./chipsWindow";
+import type { ConfirmState } from "./ratingStability";
 
 /**
  * 本站綜合評等的「計算核心」（純邏輯、無 I/O，有測試）——**唯一的「資料 → 結論」組裝處**。
@@ -45,6 +47,8 @@ export interface RatingCoreInput {
   /** 台北日期 YYYY-MM-DD（追高指標以這天之前的日K當「之前」） */
   asOfDay: string;
   chips: Chips | null;
+  /** 近 N 日三大法人累計（chipsWindow.ts）；籌碼面依這個評分，沒有就退回單日 */
+  chipsWindow?: ChipsWindow | null;
   chipsRatios?: ChipsRatios | null;
   fundamentals?: Fundamentals | null;
   earnings?: Earnings | null;
@@ -53,6 +57,13 @@ export interface RatingCoreInput {
   marketRet60Pct?: number | null;
   /** 追高防護組合，預設 ACTIVE_CHASE_GUARDS（回測逐條比較時才指定） */
   guards?: readonly ChaseGuardId[];
+  /**
+   * 前一個交易日的翻轉確認狀態（ratingStability.ts）：有給（含 null＝沒有前一天紀錄）就套「連續 2 日確認」；
+   * undefined＝不套（回測比較舊行為用）。
+   */
+  confirmPrev?: ConfirmState | null;
+  /** 翻轉確認用的「交易日」（預設 asOfDay）；正式站用最新一根日K的日期，週末／盤前不會被當成新的一天 */
+  confirmDay?: string;
 }
 
 export interface RatingCoreResult {
@@ -74,6 +85,7 @@ export function computeRatingCore(input: RatingCoreInput): RatingCoreResult {
     sources: [],
     signals,
     chips: input.chips,
+    chipsWindow: input.chipsWindow ?? null,
     chipsRatios: input.chipsRatios ?? null,
     fundamentals: input.fundamentals ?? null,
     earnings: input.earnings ?? null,
@@ -92,6 +104,7 @@ export function computeRatingCore(input: RatingCoreInput): RatingCoreResult {
     chase,
     ...(input.guards ? { guards: input.guards } : {}),
     marketRet60Pct: input.marketRet60Pct,
+    ...(input.confirmPrev !== undefined ? { confirm: { prev: input.confirmPrev, day: input.confirmDay ?? input.asOfDay } } : {}),
   });
   return { signals, scored, framework, chase, rating };
 }

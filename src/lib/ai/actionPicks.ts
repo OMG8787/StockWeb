@@ -1,4 +1,4 @@
-import type { RatingCode, SiteRating } from "./siteRating";
+import { confidenceRank, type RatingCode, type SiteRating } from "./siteRating";
 import type { TradingStance } from "./tradingStance";
 import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_LABEL } from "./actionScoring";
 
@@ -37,12 +37,14 @@ export interface ActionBriefPick {
   reason: string;
   /** 程式組好的操作計畫（價位全部來自評等） */
   plan?: string;
+  /** 本站把握程度（程式字樣「本站把握程度：高（…）」，siteRating.confidenceText；舊快取沒有這欄） */
+  confidence?: string;
   /** AI 判斷層的一行看法——2026-10-06 起不顯示給使用者（冠軍／挑戰者證明前只記錄），保留欄位相容舊快取 */
   aiView?: string | null;
 }
 
 /**
- * 排序＋去重＋上限（只有「建議買進」一組）：面向支持數多→少、不支持少→多、現價貼近支撐（沒有拉回加碼價）
+ * 排序＋去重＋上限（只有「建議買進」一組）：本站把握程度高→中→低（2026-10-06 使用者：「建議及問答的部分，都優先顯示把握程度最高的」）→面向支持數多→少、不支持少→多、現價貼近支撐（沒有拉回加碼價）
  * 優先於已漲離支撐的、同分維持原順序（原順序＝候選名單順序）。同一代號只留第一次出現。
  */
 export function selectPickGroups<T extends PickInput>(picks: T[], limit = PICK_GROUP_LIMIT): { buy: T[] } {
@@ -57,6 +59,7 @@ export function selectPickGroups<T extends PickInput>(picks: T[], limit = PICK_G
     .map((p, i) => ({ p, i }))
     .sort(
       (a, b) =>
+        confidenceRank(a.p.rating) - confidenceRank(b.p.rating) ||
         b.p.rating.supportCount - a.p.rating.supportCount ||
         a.p.rating.againstCount - b.p.rating.againstCount ||
         Number(a.p.rating.pullbackAdd != null) - Number(b.p.rating.pullbackAdd != null) ||
@@ -209,14 +212,16 @@ export function groupedPickLines(
   ai: ActionBriefAiJson | null = null
 ): string[] {
   const nextOpen = stance.briefMode === "next-open";
-  const buy = applyAiOrder(picks.filter((p) => p.code !== "avoid").slice(0, PICK_GROUP_LIMIT), ai?.order);
+  // 順序由程式決定（把握程度高→低，selectPickGroups）；AI 的 order 不再採用（2026-10-06：把握程度高的一律優先顯示）。
+  void ai?.order;
+  const buy = picks.filter((p) => p.code !== "avoid").slice(0, PICK_GROUP_LIMIT);
   const pickLine = (p: ActionBriefPick) => {
     const t = aiPickText(ai, p);
     const reason = str(t?.reason) || p.reason;
     const risk = str(t?.risk);
     // AI 看法接在同一個條列尾端（MarkdownLite 不支援巢狀清單，另起一行會被當成另一檔）。
     return [
-      `- **${p.name}(${p.symbol})**：${p.label}。${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,
+      `- **${p.name}(${p.symbol})**：${p.label}。${p.confidence ? `${sentence(p.confidence)}。` : ""}${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,
     ];
   };
   const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 建議買進（開盤或盤中可買）**` : "**建議買進（現價可分批買）**";
@@ -240,9 +245,8 @@ export function renderActionBrief(input: RenderInput): string {
   out.push(...groupedPickLines(picks, stance, ai));
   const view = str(ai?.view, 220);
   if (view && picks.length > 0) {
-    const conf = ["高", "中", "低"].includes(str(ai?.confidence)) ? str(ai?.confidence) : "";
-    const why = str(ai?.confidenceReason, 80);
-    out.push(`**我的看法**：${sentence(view)}。${conf ? `把握程度：${conf}${why ? `（${sentence(why)}）` : ""}。` : ""}`);
+    // 把握程度改由程式判定、逐檔顯示（siteRating.ratingConfidence），AI 的 confidence 不再顯示（各入口才會一致）。
+    out.push(`**我的看法**：${sentence(view)}。`);
   }
   const nc = input.notChase;
   out.push(
