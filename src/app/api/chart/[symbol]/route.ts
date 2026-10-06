@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getChart, getLastChartFailure } from "@/lib/data";
 import type { ChartRange, Market } from "@/lib/data";
+import { withLivePollWait } from "@/lib/data/livePollContext";
 
 const VALID_RANGES: ChartRange[] = ["today", "5d", "10d", "1m", "3m", "6m", "1y", "2y", "5y", "10y"];
 // A cold 5y/10y TW/TPEx chart fans out into up to 60-120 bounded-concurrency
@@ -23,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ symb
     return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
   }
   try {
-    const chart = await getChart(symbol, range, market);
+    const chart = await withLivePollWait(req, () => getChart(symbol, range, market));
     if (!chart) {
       return NextResponse.json(
         { error: "目前無法取得歷史圖表資料", detail: getLastChartFailure(symbol, range, market) },

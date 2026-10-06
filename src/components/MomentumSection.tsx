@@ -4,6 +4,7 @@ import MarketTabs from "./MarketTabs";
 import MomentumTable from "./MomentumTable";
 import type { MomentumItem } from "@/lib/data";
 import { useFetchOnce } from "@/lib/useFetchOnce";
+import { clientRefreshMs } from "@/lib/autoRefresh";
 
 /**
  * Fetched client-side rather than server-rendered like the boards above it:
@@ -21,8 +22,8 @@ export default function MomentumSection() {
   // 分「還沒有資料（顯示骨架）」跟「有資料（可能是空陣列）」兩種），這裡用
   // useFetchOnce的{data,failed}狀態換算回同樣的語意：failed時當空陣列處理，
   // 其餘情況沿用data.items（還沒抓完時data是null，UI照舊顯示骨架）。
-  const twState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=TW");
-  const usState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=US");
+  const twState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=TW", clientRefreshMs);
+  const usState = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=US", clientRefreshMs);
   const tw = twState.data ? (twState.data.items ?? []) : twState.failed ? [] : null;
   const us = usState.data ? (usState.data.items ?? []) : usState.failed ? [] : null;
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { clientRefreshMs } from "@/lib/autoRefresh";
+import { useLivePolling } from "@/lib/useLivePolling";
 import Link from "next/link";
 import type { NewsFeedItem } from "@/lib/ai/newsfeed";
 import { formatTaipeiDateTime } from "@/lib/format";
@@ -47,6 +49,29 @@ export default function NewsFeedList() {
       cancelled = true;
     };
   }, []);
+
+  // 2026-10-06 待在新聞頁不動也要自動更新：定期重抓第一頁，只把「還沒顯示過」的新項目補在最前面、
+  // 置頂區整組換新；不動使用者已載入的後續頁與捲動位置。節奏同其他用戶端卡片（lib/autoRefresh.ts），
+  // 背景分頁暫停、切回前景立刻補抓（useLivePolling）。重抓失敗就保持畫面不變。
+  useLivePolling({
+    decide: (now) => ({ fetch: true, settle: false, nextCheckMs: clientRefreshMs(now) }),
+    onFetch: async () => {
+      try {
+        const res = await fetch(`/api/news-feed?offset=0&limit=${PAGE_LIMIT}`);
+        if (!res.ok) return;
+        const data: FeedResponse = await res.json();
+        setPinned(data.pinned ?? []);
+        setItems((prev) => {
+          if (prev.length === 0) return prev; // 初次載入還沒完成，交給初次載入
+          const seen = new Set(prev.map((i) => i.id));
+          const fresh = data.items.filter((i) => !seen.has(i.id));
+          return fresh.length > 0 ? [...fresh, ...prev] : prev;
+        });
+      } catch {
+        // 保持畫面
+      }
+    },
+  });
 
   // Recreated whenever `items`/`hasMore` change so the offset and cutoff it
   // captures are always current — this only re-runs on state changes that

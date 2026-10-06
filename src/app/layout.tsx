@@ -3,6 +3,7 @@ import "./globals.css";
 import SiteHeader from "@/components/SiteHeader";
 import ChatWidget from "@/components/ChatWidget";
 import PriceAlertWatcher from "@/components/PriceAlertWatcher";
+import PageAutoRefresh from "@/components/PageAutoRefresh";
 import AuthProvider from "@/components/AuthProvider";
 import WatchlistSync from "@/components/WatchlistSync";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
@@ -55,6 +56,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </footer>
       <ChatWidget />
       <PriceAlertWatcher />
+      <PageAutoRefresh />
       {authEnabled && <WatchlistSync />}
     </>
   );

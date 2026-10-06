@@ -2,6 +2,7 @@
 
 import type { ActionBrief } from "@/lib/ai/actionBrief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
+import { clientRefreshMs } from "@/lib/autoRefresh";
 import { useBriefStance } from "./ActionBriefHeading";
 import MarkdownLite from "./MarkdownLite";
 import { actionBriefTimeLabel } from "@/lib/ai/aiSchedule";
@@ -14,7 +15,7 @@ import { actionBriefTimeLabel } from "@/lib/ai/aiSchedule";
  * per pick), so no collapse/expand treatment is needed here.
  */
 export default function ActionBriefCard() {
-  const { data, failed } = useFetchOnce<{ actionBrief: ActionBrief }>("/api/action-brief");
+  const { data, failed } = useFetchOnce<{ actionBrief: ActionBrief }>("/api/action-brief", clientRefreshMs);
   const brief = data?.actionBrief ?? null;
   // 標題跟著內容走（14:30 後是「明日操作建議」，見 tradingStance.ts）；還沒載入時依現在時段先顯示。
   const stance = useBriefStance();

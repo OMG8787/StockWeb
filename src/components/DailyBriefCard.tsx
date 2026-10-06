@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DailyBrief } from "@/lib/ai/brief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
+import { clientRefreshMs } from "@/lib/autoRefresh";
 import MarkdownLite from "./MarkdownLite";
 import { writtenAtLabel } from "@/lib/ai/aiSchedule";
 
@@ -28,7 +29,7 @@ import { writtenAtLabel } from "@/lib/ai/aiSchedule";
 const COLLAPSED_HEIGHT_PX = 420;
 
 export default function DailyBriefCard() {
-  const { data, failed } = useFetchOnce<{ brief: DailyBrief }>("/api/daily-brief");
+  const { data, failed } = useFetchOnce<{ brief: DailyBrief }>("/api/daily-brief", clientRefreshMs);
   const brief = data?.brief ?? null;
   const [expanded, setExpanded] = useState(false);
   const [overflowing, setOverflowing] = useState(false);

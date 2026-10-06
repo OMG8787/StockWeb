@@ -25,6 +25,9 @@ import {
   setIndicatorSettings,
   type ChartIndicatorSettings,
 } from "@/lib/chartIndicatorSettings";
+import { getPollDecision } from "@/lib/pollingSchedule";
+import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 import SignalTags from "./SignalTags";
 
 function subscribeToIndicatorSettings(callback: () => void) {
@@ -229,6 +232,58 @@ export default function StockChart({
       cancelled = true;
     };
   }, [symbol, market, range]);
+
+  // 盤中自動延伸最新一根（2026-10-06 使用者要求：待在同一頁不動也要即時更新）。節奏跟全站報價輪詢同一套
+  // （getPollDecision：盤中 30 秒、背景分頁暫停、切回前景補抓、14:40 補最後一次）。背景重抓只換資料、
+  // 不顯示載入遮罩、不呼叫 fitContent（不重置使用者的縮放／平移，見 skipFitRef）；失敗或資料沒變就什麼都不做。
+  const rangeRef = useRef(range);
+  const loadingRef = useRef(isLoading);
+  const skipFitRef = useRef(false);
+  const candlesRef = useRef(candles);
+  useEffect(() => {
+    rangeRef.current = range;
+    loadingRef.current = isLoading;
+    candlesRef.current = candles;
+  });
+  useLivePolling({
+    restartKey: `${market}:${symbol}`,
+    decide: (now, settledDayKey) => getPollDecision(market, now, settledDayKey),
+    onFetch: async () => {
+      const polledRange = rangeRef.current;
+      if (loadingRef.current) return; // 使用者剛切換區間，等主抓取完成
+      try {
+        const res = await fetch(
+          `/api/chart/${encodeURIComponent(symbol)}?range=${polledRange}&market=${market}`,
+          livePollInit({ mount: false }) // 背景輪詢：過期值多等一下拿新值（見 lib/livePoll.ts）
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (rangeRef.current !== polledRange || loadingRef.current) return; // 抓的期間使用者切了區間
+        const next = sanitizeCandles(data.candles);
+        const prev = candlesRef.current;
+        const last = next[next.length - 1];
+        const prevLast = prev?.[prev.length - 1];
+        if (
+          prev &&
+          next.length === prev.length &&
+          last &&
+          prevLast &&
+          last.time === prevLast.time &&
+          last.close === prevLast.close &&
+          last.high === prevLast.high &&
+          last.low === prevLast.low &&
+          last.volume === prevLast.volume
+        ) {
+          return; // 沒有新資料
+        }
+        if (next.length === 0) return;
+        skipFitRef.current = true;
+        setCandles(next);
+      } catch {
+        // 保持畫面上最後一次成功的圖
+      }
+    },
+  });
 
   // Which sub-panes (MACD/RSI/KD, each needs its own value-range pane
   // distinct from price) are needed for the CURRENT settings, and at which
@@ -535,7 +590,9 @@ export default function StockChart({
       });
     }
 
-    chartRef.current.timeScale().fitContent();
+    // 背景自動更新（skipFitRef）不重置使用者目前的縮放／平移位置。
+    if (skipFitRef.current) skipFitRef.current = false;
+    else chartRef.current.timeScale().fitContent();
   }, [chartData, themeTick, chartVersion, candles]);
 
   // Same reasoning as activeSubPaneDefs above: every one of these signals (MA

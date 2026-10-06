@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLivePolling } from "@/lib/useLivePolling";
 
 export interface FetchOnceState<T> {
   /** null 直到抓取完成——用它判斷要不要顯示loading骨架。 */
@@ -19,24 +20,41 @@ export interface FetchOnceState<T> {
  * 抓、需要 AbortController 取消進行中的請求）、`StockChart.tsx`（symbol/range/market
  * 變動要重新抓）這三個檔案的抓取邏輯本質上更複雜，硬塞進同一個hook反而會讓hook
  * 本身變得難懂，維持各自獨立實作。
+ *
+ * 2026-10-06 加 `refreshMs`：使用者要求待在同一頁不動也要自動更新。傳入「現在 → 距離下次重抓幾毫秒（null＝
+ * 不重抓）」，底層用 useLivePolling（分頁在背景時暫停、切回前景立刻補抓，跟全站報價輪詢同一套）。
+ * 重抓失敗時保留畫面上已有的資料（不會把正常顯示的卡片換成「無法取得」）；沒傳＝行為跟以前逐字相同。
+ * 節奏統一由 lib/autoRefresh.ts 的 clientRefreshMs 提供。
  */
-export function useFetchOnce<T>(url: string): FetchOnceState<T> {
+export function useFetchOnce<T>(url: string, refreshMs?: (now: Date) => number | null): FetchOnceState<T> {
   const [state, setState] = useState<FetchOnceState<T>>({ data: null, failed: false });
-
+  const latestUrl = useRef(url);
+  // 在 effect 裡更新（宣告在 useLivePolling 前面，所以先於輪詢的第一次抓取執行）。
   useEffect(() => {
-    let cancelled = false;
-    fetch(url)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`fetch failed: ${r.status}`))))
-      .then((data: T) => {
-        if (!cancelled) setState({ data, failed: false });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ data: null, failed: true });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [url]);
+    latestUrl.current = url;
+  });
+
+  useLivePolling({
+    restartKey: url,
+    fetchOnMount: true,
+    decide: (now) => {
+      const ms = refreshMs?.(now) ?? null;
+      // 沒有重抓節奏：只在掛載時抓一次，之後 1 小時才醒來看一眼（不抓）。
+      return ms === null ? { fetch: false, settle: false, nextCheckMs: 60 * 60_000 } : { fetch: true, settle: false, nextCheckMs: ms };
+    },
+    onFetch: async () => {
+      const target = url;
+      try {
+        const r = await fetch(target);
+        if (!r.ok) throw new Error(`fetch failed: ${r.status}`);
+        const data = (await r.json()) as T;
+        if (latestUrl.current === target) setState({ data, failed: false });
+      } catch {
+        // 重抓失敗不蓋掉畫面上已有的資料；第一次就失敗才標記 failed。
+        if (latestUrl.current === target) setState((prev) => (prev.data ? prev : { data: null, failed: true }));
+      }
+    },
+  });
 
   return state;
 }
