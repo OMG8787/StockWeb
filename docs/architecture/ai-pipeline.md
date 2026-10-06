@@ -61,7 +61,7 @@ flowchart TD
   subgraph AI["AI 呼叫與回答後檢查"]
     PV[provider.ts callAiProviders<br/>繁中正規化 normalizeZhTw]
     GM[gemini.ts 分級＋每日配額<br/>gemini:calls:{太平洋日}:{模型}]
-    PP[ask.ts postProcessAiAnswer<br/>清標記→去評等標籤→numberGuard→ratingConsistencyGuard]
+    PP[ask.ts finalizeAiAnswer<br/>postProcessAiAnswer（清標記→去評等標籤→名稱星號→錯字確認句→numberGuard→ratingConsistencyGuard）<br/>→answerCardIssues→同模型重生一次→仍不過用程式版]
     NG[numberGuard.ts guardAnswerNumbers]
     PV --> GM
   end
@@ -119,7 +119,9 @@ flowchart TD
 | 評等跟前一交易日不同的說明 | `describeRatingChanges()`（ratingChange.ts，讀評等紀錄） | `RATING_CHANGE_TITLE` | ask.ts |
 | 模型標示 | `modelInfo()`（modelName.ts） | — | AI 問答回答、今日建議、快報、AI 判斷層（紀錄 ai.model）、回饋（前端帶回 model）、/scoreboard 各模型區塊 |
 | Gemini 配額 | `premiumCallAllowed()`（gemini.ts） | 每模型每天 18 次、依用途優先序（今日建議＞快報＞AI 判斷） | 所有走非 lite 模型的呼叫（premium 與 standard 退到非 lite 時都經同一個計數） |
-| 回答後檢查 | `postProcessAiAnswer()`（ask.ts，評測 run.ts 共用）；`guardAnswerNumbers()`（numberGuard.ts）；`guardAvoidPriceAdvice()`（ratingConsistencyGuard.ts）；`normalizeZhTw()`（provider.ts 內建，所有 AI 呼叫） | — | 見第 5 節矩陣 |
+| 個股結論卡（買賣判斷題）、比較題程式結論 | `describeDecisionCard()`、`pickForComparison()`（decisionCard.ts，讀 getStockRating 同一份評等；已持有用 describeRatingForHolding 的結果） | `DECISION_CARD_TITLE`、`COMPARISON_PICK_TITLE` | ask.ts（grounding/stock.ts `decisionCard` 選項） |
+| 顯示用股名（去「*」標記） | `stripNameMarker()`／`stripNameMarkersInText()`（fuzzyName.ts） | — | describeSiteRating、個股資料、結論卡、回答後處理 |
+| 回答後檢查 | `finalizeAiAnswer()`→`postProcessAiAnswer()`（ask.ts，評測 run.ts 共用，含重生 `regenerateTurns()`）；`answerCardIssues()`（decisionCard.ts：第一句與結論卡一致、建議買進禁等回檔字眼、比較題每檔講到自己的結論、截斷）；`guardAnswerNumbers()`（numberGuard.ts）；`guardAvoidPriceAdvice()`（ratingConsistencyGuard.ts）；`normalizeZhTw()`（provider.ts 內建，所有 AI 呼叫） | — | 見第 5 節矩陣 |
 
 ## 3. 快取一覽（key、TTL、版本）
 
@@ -156,7 +158,7 @@ flowchart TD
 
 | AI 入口 | 繁中正規化 | 清內部標記 | 去評等標籤 | numberGuard（價位抄錯） | 先不要買刪價位 | 結構化輸出 |
 |---|---|---|---|---|---|---|
-| AI 問答（含持股、問AI關於） | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| AI 問答（含持股、問AI關於） | ✓ | ✓ | ✓ | ✓ | ✓ | 結論卡＋回答後檢查不過時同模型重生一次、仍不過用程式版（模型標示「本站程式版」） |
 | 今日建議／明日操作建議 | ✓ | — | — | ✓（AI 只回 JSON 解說，價位由程式寫） | 不需要（先不要買不顯示價位） | JSON |
 | 今日快報 | ✓ | — | — | ✗（見 P-4） | ✗ | — |
 | AI 判斷層 | ✓ | — | — | — | — | JSON，調整幅度程式夾在 ±1 級 |
