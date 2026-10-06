@@ -298,6 +298,103 @@ MCP工具可以用」，讓它優先用MCP工具操作（例如`browser_navigate
 
 ## 工作日誌封存（新到舊）
 
+### 2026-10-04：AI 問答上下文／精簡／歷史脈絡、今日快報與建議精簡＋籌碼面向、全站30秒輪詢與SWR、零花費稽核（多 agent 平行，Opus 正式站複查後修正）
+
+- **AI 問答**：個股資料附近5日逐日 MACD/KD 交叉紀錄；新增不跳題、不承認無法驗證的先前說法、是非題第一句直答、歷史脈絡綜合判斷、精簡（約200字）等規則；關注清單只在談持股時附逐檔損益；短追問接回上文（`cbf7ec6`、`a77e677`、`75b80d4`）。個股【歷史脈絡】（區間報酬、52週位置、法人／融資／外資多日趨勢、營收與EPS多期、指定期間逐日＋程式算好的合計）與大盤【市場歷史與情緒走勢】（指數、VIX百分位、法人／融資連續天數）由 agent 完成（`db415cb`…`8216d09`）。
+- **今日快報／今日建議**：體檢表新增「持股結構面（大戶／外資／融資）」第5面向（`459b869`、`9332ace`）；輸出精簡到快報≤500字、建議≤400字，快取 30→10 分鐘＋過期先回舊資料（`1784580`、`d7fafbd`、`a315405`）。搜尋頁排序新增大戶／外資／融資（`49c785b`）。
+- **效能**：盤中輪詢台美統一30秒、即時快取 TTL 25 秒（`7067368`）；cache.ts 新增 stale-while-revalidate（after() 背景重算、single-flight），首頁冷啟動 20 秒→3.4 秒、/news 10 秒→2.9 秒；背景分頁暫停輪詢；warm-cache 回應期限 25 秒（配合 cron-job.org）。
+- **零花費稽核**：Vercel Hobby／Upstash Free／GitHub Free／Gemini Free／Finnhub Free 皆無付款方式；發現 Vercel 上殘留 ANTHROPIC_API_KEY（按量計費）→ 程式加 `ALLOW_PAID_AI` 閘門（`3849a0e`），使用者已刪除該變數。CLAUDE.md 新增零花費原則、多 agent git 規矩、規則二改「大改動派獨立驗證 agent（預設 Sonnet）、小修正自己驗」、規則五改每10分鐘。
+- **Opus 正式站複查抓到並已修**（`cdef8b9`）：EPS 標籤仍是舊的（快取鍵升 v3）、週末問「上週」抓成前前週且 AI 自行加總算錯（改指剛結束交易週＋程式算好期間合計）、快報寫「收跌0.48萬點」與「合計賣超卻連買」（數字規則＋措辭改「最近已轉為連買」）、今日建議頁首門檻說明與實際規則不符。週末台股報價異常（休市日顯示漲停價、委買賣中價）與首頁關注表格約6秒：修正中。
+- **PROGRESS 整理**：已知問題只留未結案項目、9/22～9/23 工作日誌與 9/11 環境紀錄搬到 PROGRESS-ARCHIVE.md（主檔 1,087→約 570 行）。
+
+### 2026-10-01：/search 搜尋篩選頁排序下拉新增大戶／外資／融資三項（`49c785b`）（Opus正式站複查通過）
+
+`searchStocks()` 的 `sortBy` 增加 `major`/`foreign`/`margin`，後端用 `getChipsRatiosBatch()`（全市場整包快取、純記憶體查表）對篩選後的台股排序，缺資料一律墊底、兩個方向都不變；前端只在台股分頁顯示這三項。Opus 在正式站驗證：台股 1979 筆三項雙向單調、半導體業 207 筆缺資料墊底、關鍵字與切回漲跌幅正常、390px 不破版、console 0 錯誤。
+
+### 2026-10-01：Opus複查順帶修兩個既有bug——關注清單往下拖曳順序沒存、單檔報價失敗null快取60秒（`fd73497`＋`c3a33a5`）
+
+拖曳：往下拖時React搬動被拖那列的DOM觸發`lostpointercapture`，`pointerup`落在一般儲存格、`handlePointerUp`沒被呼叫→順序沒寫進localStorage；改成拖曳期間在window監聽move/up/cancel。報價：`getQuote()`用一般`cached()`，上游偶發失敗的null被寫進記憶體＋Redis存活整個TTL（盤中60秒），關注清單前端1.2秒後的重試必打到同一份null→該檔顯示「資料暫缺」（6610／7893／8069輪流中招，非6610本身問題）；改用`cachedWithDegradedNullTtl`降級TTL 1秒（不在官方清單的代號維持完整TTL防爬蟲放大）。驗證：tsc/eslint/build過；正式站Playwright桌機上下拖、手機觸控上下拖皆重新整理保留，完整回歸0失敗、無503。
+
+### 2026-10-01：關注清單新增依大戶／外資／融資排序＋籌碼三欄改為「大戶／外資／融資」由左到右（`bf741ce`）（Opus正式站複查通過）
+
+使用者要求。`ChipsRatioCells`（全站列表）與個股頁`ChipsRatioSummary`同步改順序；`useChipsRatios.ts`新增`ensureChipsRatios()`（繞過畫面觀察、一次批次取齊整組台股代號，全部有結果才resolve）與`getChipsRatioValue()`。持有中排序選單加三項（沿用方向鈕），僅關注加三顆按鈕（再按切換方向，同「依產業排序」寫進手動順序）；取齊後才排、期間顯示「籌碼資料載入中…」，依本期比例排序，缺資料（美股／興櫃缺項／暫缺）不論方向都排最後。驗證：tsc/eslint/build過；正式站Playwright 16檔台股關注清單三項×兩方向排序正確、與API逐值一致、重新整理順序保留，/、/search、/highlights、個股頁順序一致，390/1440無溢出（僅`/api/quote/6610`興櫃報價503，屬既有資料暫缺）。
+
+### 2026-10-01：K線長區間（5y/10y）單月重試＋已收盤月份記憶體快取（`799b195`）
+
+正式站2330/1470 5y曾連續回503，但本機直連TWSE 61個月全成功→推測Vercel出口IP被個別月份請求限流。`twse.ts`新增`fetchMonthResilient`（單月失敗重試最多3次帶退避、長區間並行降到6、已收盤月份成功後存實例記憶體30分鐘），`getChart`失敗原因記錄並附在`/api/chart`的503 `detail`。部署後正式站2330/1470 5y三輪皆200（冷啟動約3.5秒，之後約0.7秒），這項結案；tpex.ts的長區間尚未套用同樣的重試。
+
+### 2026-10-01：金鑰啟用後Opus正式站複查（FRED／AI供應商層／Finnhub／列表三欄／社群情緒）＋修K線失敗快取（`54f692f`）
+
+台股盤中Playwright複查：總經卡片1440/390無溢出、9項與FRED官方API逐值吻合；AI問答6題全200（1.9~8.7秒）、繁中、有白話；Finnhub新聞有進AI grounding（個股頁本身無新聞區，設計如此）；列表三欄在關注清單／焦點排行／三榜單／搜尋三種排序共89列與`/api/chips-ratios`逐字一致，短表大戶有升降、長表「累積中」、美股表無三欄、390px可橫捲、console零錯誤；AAPL社群情緒卡美股盤前誠實顯示「資料暫缺」，2330無此卡。
+發現：TWSE限流時K線（2330/1470 5y）抓失敗的null被`cached()`寫進Redis存活5分鐘→全站同一區間連續503；`getChart`改用`cachedWithDegradedNullTtl`（失敗30秒）；已部署，舊5分鐘快取過期後複測：2330 5y 10:15:04仍503、約45秒後恢復200，1470 5y兩輪皆200（失敗只卡30秒，確認生效）。1470「當日」因當天0成交Yahoo無分時資料回503屬正常無資料。AI偶有單次措辭瑕疵（漏寫總經資料日期、「優行」錯字），重問即正常，未改提示詞。
+
+### 2026-10-01：美股「社群情緒」接入 Adanos（`16446eb`）
+
+使用者決定美股盤中每天約10次、每月約220次可接受，作為推薦的「情緒」面向。只打 `/{reddit|x|news}/stocks/v1/trending?limit=100&from=7天前`（標頭 `X-API-Key`；一次回近7日最熱最多100檔，含 buzz_score／trend／mentions／bullish_pct／bearish_pct），三來源輪流、Redis `SET NX EX 2400` 跨實例鎖＝盤中約40分鐘1次，只在 `VERCEL_ENV=production`（或本機 `ADANOS_ALLOW_LOCAL=1`）＋美股盤中呼叫，其餘讀14天快照（`sentiment.ts`）；護欄 `adanosQuota.ts`：伺服器回報剩餘≤10停到重置、自計日12／月240（INCR）、無Redis或Redis錯誤一律不呼叫。美股個股頁新增「社群情緒」小卡＋AI grounding＋`RULE_SOCIAL_SENTIMENT`；不在榜上照實顯示「討論很少」、提及<20次不下偏多空結論。
+驗證：tsc/eslint/build過；模擬fetch＋假Redis測鎖、非盤中、預覽、缺金鑰、日12/月240、剩餘≤10、429全擋得住（0次真實呼叫）；真實回應解析正確；390/1440px無溢出；缺金鑰AAPL頁小卡不出現、2330不出現。實測共用4次真實呼叫（10/1當時伺服器 used=6／250）。
+
+### 2026-10-01：AI供應商層接入NVIDIA與Groq（`da17187`＋`d8c5032`）
+
+目的：Gemini免費層常撞429時有免費備援。`callAiProviders`改為 Gemini→NVIDIA(nemotron-3-super)→Groq(gpt-oss-120b，只接得住小請求)→Claude，
+429/5xx/逾時熔斷暫跳過、整條鏈總時限45秒、輸出端繁中把關；缺新金鑰時行為同原本。Groq新聞挑選品質不及Gemini（重複挑同事件、中國用語）故排最後；
+NVIDIA忠於grounding數字但名詞白話解釋較少、深度分析25~37秒。Tavily評估後不做（理由見目前已知問題）。
+驗證：tsc/eslint/build過；本機以假Gemini金鑰實測落到NVIDIA/Groq、無金鑰走原失敗路徑；5種問法對照正式站Gemini。
+
+### 2026-10-01：所有股票列表新增籌碼比例三欄（融資使用率／外資持股／大戶持股(週)＋▲▼升降，`8462f6b`）
+
+使用者要求不用點進個股頁，在搜尋篩選、首頁焦點排行、`/highlights`、關注清單（持有/僅關注）每列直接看到三項比例。新增批次API `/api/chips-ratios?symbols=`（只收台股、≤100檔、精簡tuple格式、`private, max-age=300`）＋`getChipsRatiosBatch`，只從全市場整包快取查表，不對每檔打上游、不進warm-cache；個股頁單檔版改走同一個`assembleRatios`。
+前端`useChipsRatioRow`（`lib/useChipsRatios.ts`）：列進到畫面±600px才登記、80ms內合併成一次請求、以代號為key存模組層store（換排序不會錯位）；搜尋頁1979列只會要捲到的那幾十檔。大戶上一週：長列表只用本站週快照（目前顯示「累積中」，下次集保CSV換週約10/3後自動有升降），≤10列短表與關注清單第二階段`majorPrev=web`小批（≤8檔、並行2）補查集保官網；另修週快照在Redis讀取暫時失敗時會被只有本週的內容覆蓋、以及快照不相鄰（>10天）時仍被當上一週的漏洞。
+驗證：tsc/eslint/build過；對帳28檔批次＝單檔、本機新版單檔與正式站舊版逐字相同；正式站Playwright 1440/390：關注清單持有/僅關注（含上櫃/興櫃/美股）、highlights成交量榜、搜尋兩種排序切換數字與API一致、無溢出、console零錯誤（三輪中第一輪出現6則來源不明503，之後未重現）。盤前測試，首頁焦點排行與漲跌幅榜台股當時是空清單，未實測到資料列（同一個StockTable元件）。
+
+### 2026-10-01：修好冷門股K線圖「Value is null」（`c84a156`）
+根因：TWSE STOCK_DAY 對只有零星/鉅額成交的日子回開高低收 `"--"`，`parseFloat` 得 NaN、JSON 變 null，
+lightweight-charts 繪製丟錯（1470 的1年區間 242 根有 46 根壞；光9月就有26檔上市股中招，長區間更多）。
+新增共用 `src/lib/data/candleSanity.ts`，TWSE/TPEx/Yahoo 產出K線時整根略過不合法K棒，`StockChart.tsx`
+餵圖前再濾一次（不動 `candlesRange`）。驗證：tsc/eslint/build 過；正式站 Playwright 對 1470/1538/5906
+全10區間、2330/6488/AAPL 回歸、全開8個技術線疊圖，console 零 pageerror、圖表皆正常畫出。
+
+### 2026-10-01：FRED總體經濟＋Finnhub美股備援（`00864a8`；Finnhub部分被併進`c84a156`）
+
+首頁大盤指數下方新增「美國總體經濟」卡片（`MacroCard`，Suspense串流），AI大盤概況（聊天／快報／今日建議）同步帶入9項FRED序列＋`RULE_MACRO_DATA`：DFF、DGS10、DGS2、T10Y2Y、CPI年增率（CPIAUCSL自算，已對FRED官方pc1吻合3.35%）、UNRATE、DTWEXBGS（非DXY）、VIXCLS、DCOILWTICO；日資料快取3h、月資料12h、缺項20分，不進warm-cache。
+美股財報/基本面改「Yahoo為主、Finnhub備援」（實測兩邊EPS口徑不同，AAPL 2.02 vs 1.91，不換主來源），美股個股新聞再補Finnhub 4則；順修負EPS驚喜被寫成「優於市場預期-0.89%」。
+Adanos（免費每月僅250次）、SEC API（官方EDGAR免費即可）、Hugging Face（金鑰無Inference權限403、冷啟動慢）評估後不接。
+驗證：tsc/eslint/build過；本機有金鑰9項全抓到、快取命中0ms、模擬Yahoo被擋時Finnhub補上；清空金鑰的production build首頁200且卡片不出現、AI概況文字與舊版逐字相同；390/1440px截圖無溢出。**正式站需在Vercel加`FRED_API_KEY`、`FINNHUB_API_KEY`才會生效**，尚待Opus正式站驗證。
+
+### 2026-09-30：個股頁新增「籌碼比例」摘要（融資使用率／外資持股比例／大戶持股比例＋升降，Opus正式站複查通過）
+
+使用者要求像看盤軟體一樣一眼看到融資、外資、大戶比例與每日升降，放在個股頁報價正下方（台股限定，美股不顯示）。
+來源：融資＝TWSE rwd `MI_MARGN`（取代晚一天且無日期的openapi版，含次一營業日限額）／TPEx `MarginPurchaseQuota`；外資＝TWSE `MI_QFIIS`／TPEx `www/zh-tw/insti/qfii`（兩者都能帶date查前一交易日）；
+大戶＝集保CSV第15級（週資料），上一週優先用本站週快照、沒有時查集保官網個股頁（`majorHolders.ts`）。AI grounding同步帶入三項比例與已算好的升降＋`RULE_CHIPS_RATIOS`。
+對帳環球晶6488與截圖完全吻合（前日融資16,064張/13.44%、外資122,238張/25.56%、大戶71.09%/45人/34.0萬張；集保CSV官方比例71.08是截斷，本站自算四捨五入）；tsc/eslint/build通過、本機390/1440px截圖無溢出，待Opus正式站驗證。
+Opus正式站Playwright複查：6488/2330/7893/AAPL/1470/8431畫面與`/api/chips-ratios`一致、無NaN/溢出；唯一問題是AI回答大戶題沒講「集保每週公布的週資料」與週別，已加強`RULE_CHIPS_RATIOS`（必講週資料＋週別、名詞解釋不可省略）。
+
+### 2026-09-30：AI問答「建議買什麼」改成從全市場找，不再只從關注清單挑（`134fb6c`＋`9e302c1`，Opus正式站複查通過）
+
+使用者反映開放式買進建議都只從關注清單回答。根因：「建議買甚麼／有什麼可以布局」沒被
+`MOVERS_INTENT_PATTERN`接住 → 沒附任何全市場資料，加上前端每題預設帶關注清單、提示詞永遠有
+「逐檔講重點」規則，模型只剩關注清單可用。修法：`intent.ts`新增`wantsMarketWideBuyIdea`（明講
+「我的關注清單／我持有的」時不觸發）並納入`wantsMovers`；`ask.ts`命中時附上與`/action`同一份
+全市場多面向候選（`getActionBrief()`，30分鐘快取、逾時8秒放棄），並加`RULE_MARKET_WIDE_RECOMMENDATION`。
+`tsc`/`eslint`通過。
+Opus正式站Playwright複查抓到一個回歸：「我的關注清單裡建議買哪檔」也被附上全市場焦點資料，回答先列出清單外的
+台灣精材再自己改口——根因是`conversationWantsMovers`用了沒排除限定範圍的裸正規式，`9e302c1`改用
+`wantsMarketWideBuyIdea()`。複測：三種開放式問法都推薦全市場標的（快取熱時與`/action`同一份中美晶/南茂），
+限定題只談清單三檔，單一個股與「分析我的關注清單」按鈕行為不變，個股頁抽查數字吻合。注意：今日建議快取冷時
+聊天只等8秒就放棄附名單，那一題只會用今日焦點數據推薦（設計如此，非bug）。
+
+### 2026-09-27：「當日」切換race condition Opus正式站複查通過，正式結案
+
+Opus agent用Playwright在正式站`/stock/2330`監聽console/pageerror，做多組快速連點（完全不等待、
+40ms、150~800ms間隔，當日↔3個月/6個月/5日/1年/10年/1個月），再正常速度逐一切換10個區間並截圖。
+全程0個console錯誤，`Invalid date string`不再出現；當日為折線圖、其餘9個區間K棒正常顯示。
+
+### 2026-09-27：修好K線圖快速切換到/離開「當日」的console錯誤（`d3c2268`）
+
+使用者指名要求修復已知問題清單裡記錄的這個race condition。根因：資料形狀判斷（daily
+純日期字串 vs today完整ISO時間戳）用即時range，但candles刻意保留舊range資料到新fetch
+完成，中間會用錯的range去解讀舊資料格式。修法：新增`candlesRange` state跟candles綁定
+更新，格式判斷改用它。`tsc`/`eslint`/`build`皆通過，已派Opus agent複查。
+
 ### 2026-09-23：全站地毯式優化——3項結構優化＋4項延伸拆分＋8項bug修復，Opus複查全通過
 
 延續前一輪「地毯式檢查」要求：先做3項小優化（universe warm-up集中成`ensureTwUniverseWarm()`、
