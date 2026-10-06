@@ -203,7 +203,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
   return (
     <header className="border-b border-(--gridline) bg-(--surface-1)">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
-        <Link href="/" className="flex items-center gap-2 shrink-0">
+        <Link href="/" prefetch={false} className="flex items-center gap-2 shrink-0">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-(--accent) text-white font-bold text-sm">
             SR
           </span>
@@ -215,6 +215,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={false}
               className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)"
             >
               {item.label}
@@ -299,6 +300,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
           <Link
             key={item.href}
             href={item.href}
+            prefetch={false}
             className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)"
           >
             {item.label}

@@ -98,7 +98,7 @@ function StockRow({
         <WatchlistButton symbol={item.symbol} market={item.market} name={item.name} />
       </td>
       <td className="sticky-name py-2.5 pr-2.5 sm:pr-4">
-        <Link href={`/stock/${item.symbol}?market=${item.market}`} className="font-medium hover:text-(--accent)">
+        <Link href={`/stock/${item.symbol}?market=${item.market}`} prefetch={false} className="font-medium hover:text-(--accent)">
           {item.name}
           <span className="ml-1.5 text-(--text-muted) tabular-nums">{item.symbol}</span>
         </Link>

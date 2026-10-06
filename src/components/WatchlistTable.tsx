@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import Link from "next/link";
 import type { Market, SearchItem } from "@/lib/data";
 import { formatAmount, formatAmountChange, formatPercent, formatPrice, formatVolume, priceDirectionClass } from "@/lib/format";
-import { hasHolding, hasManualUnheldOrder, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
+import { hasHolding, hasManualUnheldOrder, hasSoldState, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
+import type { SaleRecord } from "@/lib/soldRecords";
+import { visibleSales } from "@/lib/soldRecords";
+import SoldTable from "./SoldTable";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
 import { ensureChipsRatios, getChipsRatioValue, useChipsRatioRow, type ChipsRatioPick } from "@/lib/useChipsRatios";
@@ -42,6 +45,8 @@ export interface HoldingItem extends WatchlistQuote {
   costBasis?: number;
   shares?: number;
   order?: number;
+  /** 賣出紀錄（見 lib/soldRecords.ts）；已賣出分組與部分賣出都靠它 */
+  sales?: SaleRecord[];
 }
 
 /** 抓不到報價時那一列顯示的字樣，與全站「抓不到就誠實說沒有」的慣例一致。 */
@@ -140,7 +145,10 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
   // 僅關注清單之後（拖曳或按過「依產業排序」，見 lib/watchlist.ts 的
   // hasManualUnheldOrder），才改回完全照 order 顯示——否則每次重新整理都會把
   // 使用者剛調好的順序強制打回產業排序。
-  const unheldItems = items.filter((i) => !hasHolding(i));
+  // 已賣出（股數 0、購買價格保留、有賣出紀錄）自成一組，不再混在僅關注裡。
+  const soldItems = items.filter(hasSoldState);
+  const saleItems = items.filter((i) => visibleSales(i).length > 0);
+  const unheldItems = items.filter((i) => !hasHolding(i) && !hasSoldState(i));
   const market = items[0].market; // 一張表只會有同一個市場（上層已用 MarketTabs 分開）
   const unheld = hasManualUnheldOrder(market) ? unheldItems.sort(byOrder) : sortByFineIndustry(unheldItems);
 
@@ -218,6 +226,7 @@ export default function WatchlistTable({ items, emptyLabel }: { items: HoldingIt
       {held.length > 0 && (
         <DraggableGroup title={`持有中（${held.length}）`} items={held} sortable market={held[0].market} group="held" />
       )}
+      {saleItems.length > 0 && <SoldTable items={saleItems} />}
       <DraggableGroup title={`僅關注（未持有）（${unheld.length}）`} items={unheld} market={market} group="unheld" />
     </div>
   );
@@ -629,13 +638,27 @@ function HoldingRow({
     [chipsRowRef]
   );
 
-  function commit() {
+  function commit(fromBlur = false) {
     const sharesNum = shares.trim() === "" ? undefined : Number(shares);
     const costNum = costBasis.trim() === "" ? undefined : Number(costBasis);
-    updateHolding(item.symbol, item.market, {
-      shares: sharesNum != null && Number.isFinite(sharesNum) && sharesNum >= 0 ? sharesNum : undefined,
-      costBasis: costNum != null && Number.isFinite(costNum) && costNum >= 0 ? costNum : undefined,
-    });
+    const sharesOk = sharesNum != null && Number.isFinite(sharesNum) && sharesNum >= 0 ? sharesNum : undefined;
+    // 持有中的股數欄被清成空白、但購買價格還在：多半是「全選刪掉要重打新股數」的中間狀態，先不動
+    // （不然會整檔被清空、連賣出紀錄的來源股數都丟了）；離開欄位時把畫面還原成目前的股數。
+    // 整檔要清掉請把兩欄都清空。
+    if (sharesOk === undefined && costNum !== undefined && hasHolding(item)) {
+      if (fromBlur) setShares(item.shares?.toString() ?? "");
+      return;
+    }
+    updateHolding(
+      item.symbol,
+      item.market,
+      {
+        shares: sharesOk,
+        costBasis: costNum != null && Number.isFinite(costNum) && costNum >= 0 ? costNum : undefined,
+      },
+      // 股數減少時，這個價格就是自動記下的賣出價（當下現價；抓不到＝null，由使用者補填）
+      { price: item.price }
+    );
   }
 
   // 2026-09-21 Opus 規則二實測抓到的真實bug：填好持有股數/購買價格後，如果在
@@ -695,6 +718,7 @@ function HoldingRow({
         {/* 名稱一行、代碼＋市場小字在下一行：比原本「名稱 代碼 [台股]」同一行省約 80px，桌機才塞得下不橫向捲動。 */}
         <Link
           href={`/stock/${item.symbol}?market=${item.market}`}
+          prefetch={false}
           className="block whitespace-nowrap font-medium hover:text-(--accent)"
           title={`${item.name} ${item.symbol}（${item.market === "TW" ? "台股" : "美股"}）`}
         >
@@ -736,7 +760,7 @@ function HoldingRow({
           min="0"
           value={shares}
           onChange={(e) => setShares(e.target.value)}
-          onBlur={commit}
+          onBlur={() => commit(true)}
           placeholder="—"
           className="w-16 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
         />
@@ -748,7 +772,7 @@ function HoldingRow({
           step="0.01"
           value={costBasis}
           onChange={(e) => setCostBasis(e.target.value)}
-          onBlur={commit}
+          onBlur={() => commit(true)}
           placeholder="—"
           className="w-16 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
         />
