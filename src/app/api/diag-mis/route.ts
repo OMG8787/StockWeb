@@ -18,13 +18,14 @@ async function probe(label: string, exCh: string, extra = "") {
 }
 
 export async function GET() {
+  const rnd = () => String(1000 + Math.floor(Math.random() * 8999));
   const results = await Promise.all([
-    probe("V1 單檔", "tse_2317.tw"),
-    probe("V2 2317|2330", "tse_2317.tw|tse_2330.tw"),
-    probe("V3 2330|2317", "tse_2330.tw|tse_2317.tw"),
-    probe("V4 2317|8069", "tse_2317.tw|otc_8069.tw"),
-    probe("V5 單檔+額外參數", "tse_2317.tw", `&x=${Math.random()}`),
-    probe("V6 2317|2603|2454", "tse_2317.tw|tse_2603.tw|tse_2454.tw"),
+    probe("W1 單檔", "tse_2317.tw"),
+    probe("W2 重複代號", "tse_2317.tw|tse_2317.tw"),
+    probe("W3 加t00", "tse_2317.tw|tse_t00.tw"),
+    probe("W4 加隨機不存在代號", `tse_2317.tw|tse_${rnd()}.tw`),
+    probe("W5 加隨機不存在代號B", `tse_${rnd()}.tw|tse_2317.tw`),
+    probe("W6 delay=1", "tse_2317.tw", "&delay=1"),
   ]);
   return NextResponse.json({ now: new Date().toISOString(), results });
 }
