@@ -68,6 +68,9 @@ export interface SimPortfolioView {
   asOf: string;
 }
 
+/** 比例 → 百分比（去掉浮點尾數，例如 0.001425 → 0.1425）。 */
+const asPct = (rate: number) => Math.round(rate * 100 * 1e6) / 1e6;
+
 const RULES: SimPortfolioView["rules"] = {
   maxPositions: SIM_MAX_POSITIONS,
   newPositionPct: SIM_NEW_POSITION_PCT * 100,
@@ -75,9 +78,9 @@ const RULES: SimPortfolioView["rules"] = {
   addPositionPct: SIM_ADD_POSITION_PCT * 100,
   minTradeAmount: SIM_MIN_TRADE_AMOUNT,
   limitLockPct: SIM_LIMIT_LOCK_PCT,
-  buyFeeRate: TW_BUY_COMMISSION_RATE * 100,
-  sellFeeRate: TW_SELL_COMMISSION_RATE * 100,
-  sellTaxRate: TW_SELL_TAX_RATE * 100,
+  buyFeeRate: asPct(TW_BUY_COMMISSION_RATE),
+  sellFeeRate: asPct(TW_SELL_COMMISSION_RATE),
+  sellTaxRate: asPct(TW_SELL_TAX_RATE),
   benchmark: SIM_BENCHMARK_ETF,
   slots: SIM_SLOTS.map((s) => ({ label: s.label, fill: s.fill })),
 };

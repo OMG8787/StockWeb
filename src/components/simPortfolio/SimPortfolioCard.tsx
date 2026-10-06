@@ -37,8 +37,8 @@ export default function SimPortfolioCard() {
             <Stat label="今日" value={pct(perf.dayReturnPct)} cls={tone(perf.dayReturnPct)} />
             <Stat label={`累計（${data.startDay} 起）`} value={pct(perf.totalReturnPct)} cls={tone(perf.totalReturnPct)} />
             <Stat
-              label={`vs 0050（${pct(perf.etfReturnPct)}）`}
-              value={perf.vsEtfPct == null ? "—" : `${perf.vsEtfPct > 0 ? "+" : ""}${perf.vsEtfPct.toFixed(2)} 個百分點`}
+              label={`vs 0050（0050 ${pct(perf.etfReturnPct)}）`}
+              value={perf.vsEtfPct == null ? "—" : `${perf.vsEtfPct > 0 ? "+" : ""}${perf.vsEtfPct.toFixed(2)} 點`}
               cls={tone(perf.vsEtfPct)}
             />
           </div>
