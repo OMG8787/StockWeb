@@ -123,11 +123,10 @@ export const EVAL_CASES: EvalCase[] = [
   // ---------------- 全市場推薦／篩選
   {
     id: "market-wide",
-    title: "全市場推薦：只推有評等的、分組、附 0050 對照、講為什麼",
+    title: "全市場推薦：只推有評等的、分組、講為什麼（10/7 起不再附固定 0050 免責句）",
     question: "今天有什麼股票推薦買進？",
     checks: [
       { kind: "onlyRatedSymbols" },
-      { kind: "require", name: "附 0050 對照句", any: ["0050"] },
       { kind: "require", name: "表達把握程度", any: ["把握程度"] },
     ],
     source: "使用者回報 2026-10-04 22:31「還要說為什麼建議買」＋ RULE_MARKET_WIDE_RECOMMENDATION",
@@ -137,7 +136,7 @@ export const EVAL_CASES: EvalCase[] = [
     id: "next-week-buy",
     title: "下週開盤建議買入（全市場、時段立場）",
     question: "下週開盤建議買入的股票。",
-    checks: [{ kind: "onlyRatedSymbols" }, { kind: "require", name: "附 0050 對照句", any: ["0050"] }],
+    checks: [{ kind: "onlyRatedSymbols" }],
     source: "使用者回報 2026-10-04 22:31",
     tags: ["全市場", "時段"],
   },
