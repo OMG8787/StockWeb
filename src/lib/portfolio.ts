@@ -1,4 +1,5 @@
 import type { Market } from "@/lib/data";
+import { TW_BUY_COMMISSION_RATE, TW_SELL_COMMISSION_RATE, TW_SELL_TAX_RATE } from "./tradingCosts";
 
 /**
  * Shared fee-aware holding math — used by both WatchlistTable.tsx (the
@@ -17,9 +18,7 @@ import type { Market } from "@/lib/data";
  * structure across US brokers (many are already zero-commission), so
  * guessing a number would be more misleading than showing none.
  */
-const TW_BUY_COMMISSION_RATE = 0.001425;
-const TW_SELL_COMMISSION_RATE = 0.001425;
-const TW_SELL_TAX_RATE = 0.003;
+// 費率本身的唯一來源在 lib/tradingCosts.ts（模擬投資組合、學習獎勵共用同一組）。
 
 /**
  * Real TW brokerages don't charge the raw fractional-NTD fee a straight

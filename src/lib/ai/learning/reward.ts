@@ -1,4 +1,5 @@
 import type { RatingCode } from "../siteRating";
+import { TW_ROUND_TRIP_COST_PCT } from "@/lib/tradingCosts";
 
 /**
  * 評等獎勵（純邏輯、無 I/O，有測試）。每筆評等滿 1／5／20 個交易日後算一次：
@@ -16,8 +17,8 @@ import type { RatingCode } from "../siteRating";
  *     超額 < 0（說不買後確實落後大盤）→ rw＝−ex（正）；其餘（小漲、在門檻內）→ 0。沒交易，不扣成本與回撤。
  */
 
-/** 來回交易成本（%）：手續費 0.1425%×2（未計折扣）＋證交稅 0.3%。 */
-export const TRADE_COST_PCT = 0.585;
+/** 來回交易成本（%）：手續費 0.1425%×2（未計折扣）＋證交稅 0.3%＝0.585（費率唯一來源 lib/tradingCosts.ts）。 */
+export const TRADE_COST_PCT = TW_ROUND_TRIP_COST_PCT;
 /** 最大回撤懲罰係數：回撤 1% 扣 0.5 分。 */
 export const REWARD_MDD_PENALTY = 0.5;
 /** 「不買卻大漲」的超額門檻（%）。 */
@@ -85,4 +86,14 @@ export function computeOutcome(
     brw: brw == null ? null : r2(brw),
     rw: rw == null ? null : r2(rw),
   };
+}
+
+/**
+ * AI 模擬投資組合一筆「已平倉」交易的獎勵（%）：扣完買賣手續費與證交稅後的實際報酬，減去同期加權指數報酬。
+ * 跟評等獎勵同一個概念（對大盤超額），只是成本已經實際扣在損益裡、不再另扣 TRADE_COST_PCT；
+ * 指數抓不到時回 null（不計入）。見 lib/simPortfolio/rules.ts。
+ */
+export function tradeReward(netReturnPct: number, indexReturnPct: number | null): number | null {
+  if (!Number.isFinite(netReturnPct) || indexReturnPct == null || !Number.isFinite(indexReturnPct)) return null;
+  return r2(netReturnPct - indexReturnPct);
 }

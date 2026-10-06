@@ -33,13 +33,14 @@ export function ratingLogField(symbol: string, code: RatingCode): string {
 }
 const RATING_LOG_TTL_SECONDS = 400 * 86_400;
 
-export type RatingSource = "today-brief" | "ai-ask" | "stock-button" | "tech-screen" | "other";
+export type RatingSource = "today-brief" | "ai-ask" | "stock-button" | "tech-screen" | "sim-portfolio" | "other";
 
 export const RATING_SOURCE_LABEL: Record<RatingSource, string> = {
   "today-brief": "今日建議",
   "ai-ask": "AI問答",
   "stock-button": "個股按鈕（問AI關於）",
   "tech-screen": "AI問答技術篩選",
+  "sim-portfolio": "AI模擬投資組合",
   other: "其他",
 };
 

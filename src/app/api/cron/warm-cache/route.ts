@@ -17,6 +17,7 @@ import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { runLearningUpdate } from "@/lib/ai/learning/learningStore";
+import { runSimPortfolio } from "@/lib/simPortfolio/run";
 
 // Triggered every few minutes by an external scheduler (see
 // .github/workflows/warm-cache.yml — Vercel's own Cron is limited to once a
@@ -130,6 +131,9 @@ export async function GET(req: NextRequest) {
       // AI 學習循環的每日工作（評等紀錄算獎勵、更新權重／相似案例／成績看板）：盤中與當天已做完時立刻略過，
       // 實際只有收盤後第一次預熱會跑（一天一次，見 learning/learningStore.ts）。
       warm("learning (daily)", runLearningUpdate().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`)),
+      // AI 模擬投資組合（lib/simPortfolio）：只在 09:30／13:00／13:35 起的時點、且當天該時點還沒做過才交易（冪等＋鎖），
+      // 其餘時間不打 Redis 直接略過。13:35 那次另寫一段 AI 檢討（一天一次 lite 呼叫）。
+      warm("sim portfolio", runSimPortfolio().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`)),
     ]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finishedInTime = await Promise.race([
