@@ -21,6 +21,7 @@ const NAV_ITEMS: Array<{ href: string; label: string }> = [
   { href: "/", label: "首頁" },
   { href: "/action", label: "今日建議" },
   { href: "/highlights", label: "每日焦點" },
+  { href: "/portfolio", label: "AI 模擬組合" },
   { href: "/news", label: "重大新聞" },
   { href: "/search", label: "搜尋 / 篩選" },
 ];

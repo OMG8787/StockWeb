@@ -1,4 +1,4 @@
-import { getIndices, getQuotesBatch } from "@/lib/data";
+import { getIndices, getQuote, getQuotesBatch } from "@/lib/data";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import {
   computePerformance,
@@ -43,6 +43,8 @@ export interface SimPortfolioView {
   startDay?: string;
   initialCapital: number;
   cash?: number;
+  /** 對照組起點（0050 價格、加權指數） */
+  base?: { etf: number | null; index: number | null };
   perf?: SimPerformance;
   holdings?: SimHoldingView[];
   trades?: SimTrade[];
@@ -91,8 +93,15 @@ export async function getSimPortfolioView(opts: { tradeLimit?: number } = {}): P
     getQuotesBatch(symbols.map((symbol) => ({ market: "TW" as const, symbol }))).catch(() => symbols.map(() => null)),
     getIndices().catch(() => []),
   ]);
+  // 批次報價對個別股票可能回 null（全市場表缺那一檔）：改用單檔報價補，再不行才用上次執行的價格（不用成本價頂替）。
+  await Promise.all(
+    symbols.map(async (s, i) => {
+      if (!quotes[i] || !(quotes[i]!.price > 0)) quotes[i] = await getQuote(s, "TW").catch(() => null);
+    })
+  );
   const prices = new Map<string, number>();
   const changes = new Map<string, number>();
+  for (const h of state.holdings) if (h.lastPrice && h.lastPrice > 0) prices.set(h.symbol, h.lastPrice);
   symbols.forEach((s, i) => {
     const q = quotes[i];
     if (q && q.price > 0) {
@@ -131,6 +140,7 @@ export async function getSimPortfolioView(opts: { tradeLimit?: number } = {}): P
     startDay: state.startDay,
     initialCapital: state.initialCapital,
     cash: state.cash,
+    base: state.base,
     perf,
     holdings,
     trades: state.trades.slice(0, opts.tradeLimit ?? state.trades.length),

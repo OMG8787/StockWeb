@@ -76,7 +76,13 @@ flowchart TD
     LJ[learningStore.ts runLearningUpdate<br/>ratingLogToEval→learning:v1:eval:{日期}]
     EX[learning/experienceText.ts<br/>相似案例＋教訓]
     SB[/scoreboard、/api/learning]
+    SP[simPortfolio/run.ts AI 模擬投資組合<br/>sim-portfolio:v1:state；09:30／13:00／13:35]
+    SPR[simPortfolio/review.ts 收盤後 AI 檢討<br/>learning:v1:sim-review:{日期}]
   end
+  AB -->|名單代號| SP
+  SR -->|source sim-portfolio| SP
+  HR --> SP
+  SP --> SPR
   SR -->|source| RL
   AJ --> RL
   RL --> LJ --> SB
@@ -114,7 +120,9 @@ flowchart TD
 | 弱市況提示 | `marketReturnPct()`（regime.ts）＋`weakMarketNote()`（siteRating.ts） | `WEAK_MARKET_RET60_PCT`＝5（backtest `REGIME_RET60_PCT`／`REGIME_A_PCT` 直接 import 它） | 評等 marketNote、今日建議頁首、回測市況分段 |
 | 評等紀錄 key／field | `ratingLogKey()`／`ratingLogField()`（ratingLog.ts） | `RATING_LOG_KEY_PREFIX`＝`rating-log:v1:` | ratingLog、aiJudge（寫 ai 欄位）、learningStore、ratingChange |
 | 評等紀錄 → 學習紀錄欄位對應 | `ratingLogToEval()`（learningStore.ts） | — | 每日學習工作 |
-| 獎勵 | `computeOutcome()`、`conclusionReward()`（learning/reward.ts） | 成本 0.585%、回撤懲罰 0.5 | 學習工作、backtest/weights.ts |
+| 獎勵 | `computeOutcome()`、`conclusionReward()`、`tradeReward()`（learning/reward.ts） | 成本 `TRADE_COST_PCT`＝`TW_ROUND_TRIP_COST_PCT`（0.585%）、回撤懲罰 0.5 | 學習工作、backtest/weights.ts、模擬投資組合平倉 |
+| 交易費率 | `lib/tradingCosts.ts`（純資料） | `TW_BUY_COMMISSION_RATE`、`TW_SELL_COMMISSION_RATE`、`TW_SELL_TAX_RATE`、`TW_ROUND_TRIP_COST_PCT` | 關注清單損益（portfolio.ts）、學習獎勵、模擬投資組合 |
+| AI 模擬投資組合買賣 | `planSimOrders()`／`applySimOrder()`（simPortfolio/rules.ts，純函式）；`runSimPortfolio()`（run.ts，I/O） | `SIM_INITIAL_CAPITAL`、`SIM_MAX_POSITIONS`、`SIM_NEW_POSITION_PCT`、`SIM_MAX_POSITION_PCT`、`SIM_ADD_POSITION_PCT`、`SIM_MIN_TRADE_AMOUNT`、`SIM_LIMIT_LOCK_PCT`、`SIM_SLOTS` | 候選讀 getActionBrief().picks＋getStockRating（source `sim-portfolio`）；持有中讀 describeRatingForHolding＋computeHoldingStop；觸發＝warm-cache 順帶／`/api/cron/sim-portfolio`；顯示＝`/api/sim-portfolio`→首頁卡＋/portfolio |
 | 相似案例＋教訓 | `describeExperience()`（learning/experienceText.ts）→ `lookupSimilar()`／`matchLessons()` | `SIMILAR_CASES_TITLE`、`LESSONS_TITLE` | 個股資料、AI 判斷層 |
 | 評等跟前一交易日不同的說明 | `describeRatingChanges()`（ratingChange.ts，讀評等紀錄） | `RATING_CHANGE_TITLE` | ask.ts |
 | 模型標示 | `modelInfo()`（modelName.ts） | — | AI 問答回答、今日建議、快報、AI 判斷層（紀錄 ai.model）、回饋（前端帶回 model）、/scoreboard 各模型區塊 |
@@ -137,6 +145,8 @@ flowchart TD
 | 評等紀錄 | `rating-log:v1:{日期}` hash，field `{代號}#{結論}` | 400 天 | HSETNX：同日同結論只記第一次 |
 | 學習紀錄 | `learning:v1:eval:{日期}`、`learning:v1:*` 彙總 | 400 天；讀取記憶體 10 分 | |
 | 模型統計 | `ai-model-stats:v1:{日期}` | — | 回饋與使用次數 |
+| AI 模擬投資組合 | `sim-portfolio:v1:state`（單一 JSON：現金、持股、交易最多 400 筆、每日淨值、檢討 20 篇、冪等時點）＋鎖 `sim-portfolio:v1:lock` 240 秒 | 永久 | 執行一次約 3～4 個 Redis 指令；頁面讀取每個執行個體記憶體 60 秒。要重置就把 key 升版 |
+| 模擬組合檢討 | `learning:v1:sim-review:{日期}` | 400 天 | 含程式整理的事實（facts）與 AI 文字 |
 | 回饋 | `ask-feedback:v1`（list） | — | 含 model（AI 回覆回饋）、rating=site（全網站回報） |
 
 ## 4. 入口 × 使用的來源矩陣
@@ -161,6 +171,7 @@ flowchart TD
 | AI 問答（含持股、問AI關於） | ✓ | ✓ | ✓ | ✓ | ✓ | 結論卡＋回答後檢查不過時同模型重生一次、仍不過用程式版（模型標示「本站程式版」） |
 | 今日建議／明日操作建議 | ✓ | — | — | ✓（AI 只回 JSON 解說，價位由程式寫） | 不需要（先不要買不顯示價位） | JSON |
 | 今日快報 | ✓ | — | — | ✗（見 P-4） | ✗ | — |
+| 模擬組合每日檢討 | ✓ | — | — | ✗（只寫檢討、不給價位建議；事實由程式整理，AI 失敗用程式版） | — | — |
 | AI 判斷層 | ✓ | — | — | — | — | JSON，調整幅度程式夾在 ±1 級 |
 | 新聞分類 | 關閉（純分類） | — | — | — | — | JSON |
 

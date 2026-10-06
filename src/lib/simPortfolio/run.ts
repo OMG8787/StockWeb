@@ -137,6 +137,7 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
     // 存這次的持有中出場價（下一個時點比對）；新買進的也算一次。
     const stopBySymbol = new Map(held.map((r) => [r.symbol, r.newStop]));
     for (const h of state.holdings) {
+      if (prices.has(h.symbol)) h.lastPrice = prices.get(h.symbol);
       if (stopBySymbol.has(h.symbol)) h.stopPrice = stopBySymbol.get(h.symbol) ?? null;
       else {
         const candles = await dailyCandles(h.symbol);

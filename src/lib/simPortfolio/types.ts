@@ -26,6 +26,8 @@ export interface SimHolding {
   lastAddDay?: string;
   /** 最近一次檢視的評等字樣（持有中） */
   lastLabel?: string;
+  /** 最近一次執行時用的價格（頁面抓不到即時報價時退回這個，不用成本價頂替） */
+  lastPrice?: number;
 }
 
 export type SimSide = "buy" | "sell";

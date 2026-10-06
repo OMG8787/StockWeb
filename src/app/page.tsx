@@ -4,6 +4,7 @@ import MarketTabs from "@/components/MarketTabs";
 import MacroCard from "@/components/MacroCard";
 import WatchlistSection from "@/components/WatchlistSection";
 import DailyBriefCard from "@/components/DailyBriefCard";
+import SimPortfolioCard from "@/components/simPortfolio/SimPortfolioCard";
 import LiveIndices from "@/components/LiveIndices";
 import LiveMoversBoard from "@/components/LiveMoversBoard";
 import TaifexFuturesCard from "@/components/TaifexFuturesCard";
@@ -88,6 +89,8 @@ export default function HomePage() {
       </section>
 
       <DailyBriefCard />
+
+      <SimPortfolioCard />
 
       <WatchlistSection />
 
