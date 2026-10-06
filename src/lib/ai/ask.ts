@@ -9,6 +9,7 @@ import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
 import { confidenceRank, describeConfidenceGrades, describeSiteRating, isRecommendable, stripRatingTags, TAKE_PROFIT_PEAK_GAIN_PCT } from "./siteRating";
 import { HOLDING_STOP_MAX_PCT } from "./holdingStop";
+import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT } from "./actionScoring";
 import { getStockRatings, type StockRatingResult } from "./stockRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
@@ -65,14 +66,16 @@ function taipeiTodayForAsk(): { year: number; month: number; day: number } {
 }
 
 /** 方法／原則題的程式說明（數字來自唯一來源常數；AI 照這套講，不可另編規則、不可改答某一檔）。 */
-const METHOD_QUESTION_NOTE = `【本站持有判斷方式（方法題：直接用下列方式完整回答，不可反問使用者要查哪一檔、不可改成分析某一檔、不可點名任何個股）】
+const METHOD_QUESTION_NOTE = `【本站判斷方式（方法題：直接用下列方式完整回答，不可反問使用者要查哪一檔、不可改成分析某一檔、不可點名任何個股）】
 - 每檔每天用五個面向（技術、籌碼、持股結構、基本、財報）重算本站綜合評等；持有中的結論只有一個動作：續抱、可分批加碼、建議減碼、建議出場。
+- 買進門檻（未持有）：支持面向至少 ${QUALIFY_MIN_SUPPORT} 項、不支持最多 ${QUALIFY_MAX_AGAINST} 項，且籌碼面不是不支持（三大法人賣超）、技術面不是不支持（空方訊號多於多方，一票否決）；過了就是「建議買進」，沒過就是「建議先不要買」並列出改判條件。
+- 把握程度（只對建議買進）：大盤不偏弱且已連續 3 個交易日以上建議買進＝高；大盤偏弱且剛轉建議買進＝低；其餘＝中。
 - 評等改變要連續 2 個交易日都成立才改判（避免一天的雜訊來回翻）；跌破停損價則立即生效。
 - 停損：持有中出場參考價取近端支撐（均線／近 10 日低），離現價最多約 ${Math.round(HOLDING_STOP_MAX_PCT * 100)}%、且高於跌停價；收盤跌破就出場。
 - 停利：買進後曾獲利 ${TAKE_PROFIT_PEAK_GAIN_PCT}% 以上、之後跌回成本以下 → 建議減碼（需填買進日期才判斷）；獲利中用移動停利價，收盤跌破就出場、守住獲利。
 - 想看某一檔現在該放著還是出場，請問「XX 要續抱還是賣?」或在關注清單填成本與股數後按分析。`;
 
-const METHOD_ANSWER_PATTERN = /連續 ?2 ?個交易日|停損|出場參考/;
+const METHOD_ANSWER_PATTERN = /連續 ?2 ?個交易日|停損|出場參考|支持面向|門檻/;
 
 export async function answerQuestion(
   question: string,

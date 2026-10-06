@@ -286,6 +286,7 @@ describe("isMethodQuestion", () => {
   it("方法題沒有指代詞才算", () => {
     expect(isMethodQuestion("你怎麼判斷是要放著還是認賠出場?")).toBe(true);
     expect(isMethodQuestion("停損要怎麼設")).toBe(true);
+    expect(isMethodQuestion("本站綜合評等未達買進門檻，是甚麼門檻?評估項目有哪些?")).toBe(true);
     expect(isMethodQuestion("這檔怎麼判斷要不要賣")).toBe(false);
     expect(isMethodQuestion("鴻海能買嗎")).toBe(false);
   });
