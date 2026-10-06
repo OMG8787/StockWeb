@@ -456,6 +456,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **首頁卡片一直標示「Gemini Flash Lite；較強模型今日額度用完」**：本機 agent 測試與正式站共用同一把金鑰，吃掉非 lite 每日 20 次配額；且思考模型時限太短逾時。本機已強制只用 lite（premiumAllowedHere）。→ 工作日誌 2026-10-06（續3），搜尋「premiumAllowedHere」。
 - **今日建議名單在資料沒變時（盤前／深夜）反覆換股**：上游失敗被吞成空清單且殘缺結果照常快取。凍結時段保留上一份名單（actionStability.ts）。→ 工作日誌 2026-10-06（續3），搜尋「盤前名單跳動」。
 - **正式站 AI 問答用股名問卻答成大盤、resolvedTargets 為空**：先檢查是不是測試端編碼——Git Bash 的 curl 送中文 JSON 會變亂碼，改用 Python urllib（UTF-8）送。→ 工作日誌 2026-10-06（續3），搜尋「誤報」。
+- **同一檔評等短時間內翻來翻去（早上建議買進、傍晚先不要買）**：除了單日法人雜訊（已用連 2 日確認），還有上游偶發抓不到日K／法人表時，缺資料算出的評等被當正常結果快取 10 分鐘並寫紀錄。已改：重抓一次、仍缺回 null（`461ef02` isCoreInputMissing）。
 - **刪 git worktree 資料夾時把主 repo 的 node_modules 一起刪掉**：worktree 裡的 node_modules 是指向主 repo 的 junction，`rm -rf`／`Remove-Item -Recurse` 會刪到目標內容；先 `cmd /c rmdir <worktree>
 ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-baseline。
 - **盤中畫面報價落後 30 秒～2 分鐘**：TTL＜輪詢間隔＋SWR 只等 1.5 秒回舊值、MIS 同網址回上游快取。→ 工作日誌 2026-10-06（續3），搜尋「x-live-poll」。
