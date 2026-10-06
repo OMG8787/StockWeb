@@ -31,6 +31,8 @@ const CASE_GAP_MS = 6000;
 const RETRY_WAITS_MS = [30_000, 65_000];
 /** 評測給寬一點的逾時，量的是品質；實際延遲另外記錄在報告裡。 */
 const EVAL_TIMEOUT_MS = 60_000;
+/** 組參考資料時不放行輔助 AI 呼叫（省額度；改前改後要用同一設定比較）。 */
+const NO_AUX_AI = process.argv.includes("--no-aux-ai");
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -79,7 +81,10 @@ async function captureCase(c: EvalCase): Promise<Captured | { error: string }> {
   let phase: Phase = "after-close";
   setAiEvalInterceptor((system, messages, options) => {
     // 評測自己的強制呼叫、以及 AI 判斷層／新聞分類等其他用途照常放行，只截下 AI 問答那一次。
-    if (options.forceProvider || !system.startsWith(SYSTEM_ROLE)) return undefined;
+    if (options.forceProvider) return undefined;
+    // --no-aux-ai：組參考資料時的其他 AI 呼叫（AI 判斷層、今日建議解說等）一律擋下，不吃免費額度（Gemini 共用金鑰）。
+    if (!system.startsWith(SYSTEM_ROLE))
+      return NO_AUX_AI ? ({ answer: "", usedAi: false, failureReason: "eval aux blocked" } satisfies ProviderResult) : undefined;
     cap = { system, messages: messages.map((m) => ({ ...m })), options: { ...options } };
     return { answer: "", usedAi: false, failureReason: "eval capture" } satisfies ProviderResult;
   });
@@ -304,7 +309,8 @@ async function main() {
     for (const r of records) {
       if (!r.ok || !r.finalAnswer) continue;
       // 不讓模型評自己：Gemini 系列的回答交給 NVIDIA 評，其他交給 Gemini 評。
-      const judgeWith = r.variant.startsWith("gemini") ? "nvidia" : "gemini";
+      // --judge-with nvidia：全部交給 NVIDIA 評（省 Gemini 額度；NVIDIA 自評有偏差，只當參考）。
+      const judgeWith = arg("judge-with") ?? (r.variant.startsWith("gemini") ? "nvidia" : "gemini");
       const q = cases.find((c) => c.id === r.caseId)?.question ?? "";
       r.judge = await judge(q, r.finalAnswer, judgeWith).catch(() => undefined);
       if (r.judge) r.judge = { ...r.judge, by: judgeWith };

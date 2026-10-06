@@ -22,6 +22,8 @@ npx tsx scripts/eval/run.ts --only buy-twse,compare-tw   # 只跑幾題（改某
 npx tsx scripts/eval/run.ts --variants gemini,nvidia      # 指定模型組
 npx tsx scripts/eval/run.ts --variants gemini:gemini-3.5-flash-lite   # 直接指定某個 Gemini 模型
 npx tsx scripts/eval/run.ts --judge                 # 另加 LLM 評審（1～5 分，輔助參考）
+npx tsx scripts/eval/run.ts --judge --judge-with nvidia   # 評審全部交給 NVIDIA（省 Gemini 額度）
+npx tsx scripts/eval/run.ts --no-aux-ai             # 組參考資料時擋下 AI 判斷層等輔助呼叫（省額度；改前改後設定要相同）
 npx tsx scripts/eval/run.ts --gemini-auto           # Gemini 用正式流程的自動挑選（預設固定 lite，原因見 run.ts）
 npx tsx scripts/eval/run.ts --out 2026-10-05-before # 自訂輸出檔名（改動前後各跑一次方便比較）
 ```
