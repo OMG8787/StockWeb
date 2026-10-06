@@ -121,7 +121,7 @@ export const INDICATOR_DEFS: IndicatorDef[] = [
     label: "KDJ",
     pane: "sub",
     legend: {
-      title: "KDJ(9,3,3)",
+      title: "KDJ(9,3,3) 券商常用算法",
       items: [
         { name: "k", label: "K", color: KD_K_COLOR, digits: 1 },
         { name: "d", label: "D", color: KD_D_COLOR, digits: 1 },

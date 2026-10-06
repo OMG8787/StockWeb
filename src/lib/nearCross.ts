@@ -36,12 +36,16 @@ export interface NearCrossReading {
 }
 
 // ---- KD（9,3,3）的「即將交叉」門檻：本站自訂經驗值，不是權威標準 ----
-/** D 值與 K 值差距在幾點以內才算「很接近」（KD 為 0~100 刻度）。 */
-export const KD_NEAR_CROSS_MAX_GAP = 5;
+// 2026-10-07：KD 預設改為券商遞迴版（kdFormula.ts）後，用回測重新校準（scripts/backtest/kdNearCross.ts，
+// docs/backtest/2026-10-kd-formula.md）。校準規則：命中＝訊號後 3 個交易日內 K 真的往預測方向穿越 D；
+// 在樣本內挑「命中率不低於舊 SMA 版現行品質（81.1%）、且訊號頻率最接近舊版」的組合，樣本外確認。
+// 舊 SMA 版門檻為 gap 5／收斂 2 天／外推 3 天。
+/** D 值與 K 值差距在幾點以內才算「很接近」（KD 為 0~100 刻度）。（遞迴版 K、D 差距較小，由 5 收緊為 4） */
+export const KD_NEAR_CROSS_MAX_GAP = 4;
 /** 差距要連續縮小幾天。 */
 export const KD_NEAR_CROSS_CONVERGING_DAYS = 2;
-/** 照目前速度外推，最多幾個交易日內會交叉。 */
-export const KD_NEAR_CROSS_MAX_EST_DAYS = 3;
+/** 照目前速度外推，最多幾個交易日內會交叉。（由 3 收緊為 2） */
+export const KD_NEAR_CROSS_MAX_EST_DAYS = 2;
 
 // ---- MACD（12,26,9）的「即將交叉」門檻：本站自訂經驗值，不是權威標準 ----
 /** 柱狀體（DIF−訊號線）絕對值要連續縮小幾天。 */

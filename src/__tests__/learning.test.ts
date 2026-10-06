@@ -49,6 +49,13 @@ describe("features 分桶與依據鍵", () => {
     expect(b).toContain("chase:surge");
     expect(featureBases(undefined)).toEqual([]);
   });
+  it("KD 依據只認遞迴版（kdm=r）：舊 SMA 紀錄（沒有 kdm）不產生 k／kx 依據，避免兩種算法混進同一組統計", () => {
+    const old = featureBases(feat({ k: 25, kx: "g" }));
+    expect(old.some((x) => x.startsWith("k:") || x.startsWith("kx:"))).toBe(false);
+    const cur = featureBases(feat({ k: 25, kx: "g", kdm: "r" }));
+    expect(cur.some((x) => x.startsWith("k:"))).toBe(true);
+    expect(cur).toContain("kx:黃金交叉");
+  });
   it("similarKey 缺市況或 RSI 回 null", () => {
     expect(similarKey(feat(), "bull")).toBe("bull|50~70|0~5");
     expect(similarKey(feat(), null)).toBeNull();

@@ -219,10 +219,9 @@ function computeBollingerSignal(candles: Candle[], currentPrice: number): Signal
 }
 
 /**
- * %K = (close − trailing-N low) / (trailing-N high − trailing-N low) × 100,
- * then smoothed twice by a 3-period SMA (the conventional "slow" KD: the
- * once-smoothed series is %K, the twice-smoothed series is %D) — matches
- * the (9,3,3) parameters most charting platforms default to.
+ * RSV = (close − trailing-9 low) / (trailing-9 high − trailing-9 low) × 100，
+ * 再平滑成 K、D。**預設算法＝台灣券商／看盤軟體慣用的遞迴版（K＝2/3×前K＋1/3×RSV、D 同理，初值 50）**，
+ * 舊的「3 日簡單平均兩次」版保留為 method="sma"。算法與預設的唯一來源見 lib/kdFormula.ts。
  */
 export type KdZone = "low" | "mid" | "high";
 

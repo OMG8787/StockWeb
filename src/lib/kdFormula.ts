@@ -1,12 +1,17 @@
 /**
  * KD（9,3,3）的兩種平滑算法（2026-10-07 使用者問「現在的 KD 跟券商 App 差異在哪」）：
- *  - "sma"（本站現行、預設）：K＝RSV 的 3 日簡單平均、D＝K 的 3 日簡單平均。
- *  - "recursive"（台灣券商／看盤軟體慣用）：K＝2/3×前K＋1/3×RSV、D＝2/3×前D＋1/3×K，K、D 初值 50。
- * 預設永遠是 "sma"，正式站所有呼叫端不傳參數就不變；"recursive" 目前只供回測比較（scripts/backtest/kdFormula.ts）。
+ *  - "recursive"（台灣券商／看盤軟體慣用，**2026-10-07 起正式站預設**）：K＝2/3×前K＋1/3×RSV、D＝2/3×前D＋1/3×K，K、D 初值 50。
+ *  - "sma"（舊算法，只留給回測比較）：K＝RSV 的 3 日簡單平均、D＝K 的 3 日簡單平均。
+ * 換預設的依據：docs/backtest/2026-10-kd-formula.md——兩者預測力差異不顯著，但使用者常拿券商 App 對照
+ * （SMA 版有 22.5% 的日子 K 與 D 的上下關係跟 App 不同），且遞迴版假交叉較少（5 日內被推翻 55% vs 75%）。
+ * **全站 KD 的預設只有這一個常數**（signals.computeKd／indicators.computeKdSeries／評等／技術篩選／圖表都吃它），
+ * 要改算法只改這裡；舊算法算出的快取／學習紀錄靠快取鍵版本與 RatingFeatures.kdm 隔開，不可混用。
+ * 遞迴版初值 50 的影響隨根數衰減（(2/3)^(根數-9)）：評等用 63 根約 3e-10、圖表用暖機 K 線，可忽略；
+ * 根數很少（< 25 根）時 K、D 會被初值拉向 50，只是近似。
  */
 export type KdMethod = "sma" | "recursive";
 
-export const KD_DEFAULT_METHOD: KdMethod = "sma";
+export const KD_DEFAULT_METHOD: KdMethod = "recursive";
 
 /** 遞迴版的初值（券商慣用 50）。 */
 export const KD_RECURSIVE_SEED = 50;

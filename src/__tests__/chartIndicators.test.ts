@@ -28,7 +28,7 @@ describe("KDJ（9,3,3）", () => {
       const a = kRef(i), b = kRef(i - 1), c = kRef(i - 2);
       return a != null && b != null && c != null ? (a + b + c) / 3 : null;
     };
-    const kd = computeKdSeries(candles);
+    const kd = computeKdSeries(candles, "sma"); // 舊 SMA 算法（2026-10-07 起預設改為券商遞迴版，見 kdFormula.test.ts）
     expect(kd.k.length).toBeGreaterThan(40);
     for (const p of kd.k) expect(p.value).toBeCloseTo(kRef(candles.findIndex((c) => c.time === p.time))!, 8);
     for (const p of kd.d) expect(p.value).toBeCloseTo(dRef(candles.findIndex((c) => c.time === p.time))!, 8);

@@ -1,4 +1,5 @@
 import type { Candle, Chips, ChipsRatios, Earnings } from "@/lib/data/types";
+import { KD_DEFAULT_METHOD } from "@/lib/kdFormula";
 import { computeIndicatorState } from "@/lib/signals";
 import type { ChaseMetrics } from "../chaseGuards";
 import { NEAR_ZONE_PCT, type PriceFramework } from "../grounding/priceLevels";
@@ -31,6 +32,12 @@ export interface RatingFeatures {
   /** KD 的 K 值、今天 KD 交叉（g＝黃金、d＝死亡） */
   k: number | null;
   kx: "g" | "d" | null;
+  /**
+   * k／kx 用哪種 KD 算法算的：2026-10-07 起一律寫 "r"（券商遞迴版，見 kdFormula.ts）。
+   * 沒有這個欄位的舊紀錄＝舊 SMA 版 KD，數值與交叉日期都跟遞迴版不同，**不可混進同一組統計**：
+   * featureBases() 對沒有 kdm 的紀錄不產生 `k:`／`kx:` 判斷依據（等於 KD 這個依據從 0 樣本重新累積，權重中性起步）。
+   */
+  kdm?: "r";
   /** MACD 今天交叉、DIF 在 0 軸上（1）或下（0） */
   mx: "g" | "d" | null;
   m0: 1 | 0 | null;
@@ -92,6 +99,7 @@ export function computeRatingFeatures(input: FeatureInput): RatingFeatures {
     vr: ind?.volumeRatio != null ? Math.round(ind.volumeRatio * 100) / 100 : null,
     k: r1(ind?.kd?.k),
     kx: ind?.kd?.cross === "golden" ? "g" : ind?.kd?.cross === "death" ? "d" : null,
+    ...(KD_DEFAULT_METHOD === "recursive" ? { kdm: "r" as const } : {}),
     mx: ind?.macdCross === "golden" ? "g" : ind?.macdCross === "death" ? "d" : null,
     m0: ind?.macdAboveZero == null ? null : ind.macdAboveZero ? 1 : 0,
     ii: sign(chips?.institutionalNetShares),
@@ -181,10 +189,11 @@ export function featureBases(
   const out: string[] = [];
   if (f) {
     for (const key of ["rsi", "r5", "r20", "b20", "b60", "vr", "k", "ry"] as const) {
+      if (key === "k" && f.kdm !== "r") continue; // 舊 SMA 版 KD 的 K 值，不與遞迴版混用（見 RatingFeatures.kdm）
       const b = bucketOf(key, f[key]);
       if (b) out.push(`${key}:${b}`);
     }
-    if (f.kx) out.push(`kx:${f.kx === "g" ? "黃金交叉" : "死亡交叉"}`);
+    if (f.kx && f.kdm === "r") out.push(`kx:${f.kx === "g" ? "黃金交叉" : "死亡交叉"}`);
     if (f.mx) out.push(`mx:${f.mx === "g" ? "黃金交叉" : "死亡交叉"}`);
     if (f.m0 != null) out.push(`m0:${f.m0 ? "零軸上" : "零軸下"}`);
     for (const key of ["ii", "fi", "ti"] as const) {

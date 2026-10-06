@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@/lib/data/types";
 import { computeKdSeries } from "@/lib/indicators";
-import { currentKdMethod, kdFromRsv, withKdMethod } from "@/lib/kdFormula";
-import { computeKd } from "@/lib/signals";
+import { currentKdMethod, KD_DEFAULT_METHOD, kdFromRsv, withKdMethod } from "@/lib/kdFormula";
+import { computeIndicatorState, computeKd } from "@/lib/signals";
 
 function makeCandles(n: number, closeAt: (i: number) => number): Candle[] {
   return Array.from({ length: n }, (_, i) => {
@@ -13,7 +13,7 @@ function makeCandles(n: number, closeAt: (i: number) => number): Candle[] {
 }
 const wave = (i: number) => 100 + 20 * Math.sin(i / 4.77) + i * 0.05;
 
-describe("KD 算法參數：sma（現行預設）／recursive（券商遞迴）", () => {
+describe("KD 算法參數：recursive（券商遞迴，2026-10-07 起預設）／sma（舊算法）", () => {
   it("遞迴版對照手算：RSV 80,60,40,100、初值 50 → K 60,60,53.333,68.889、D 53.333,55.556,54.815,59.506", () => {
     const { k, d } = kdFromRsv([80, 60, 40, 100], "recursive");
     [60, 60, 53.3333, 68.8889].forEach((v, i) => expect(k[i]).toBeCloseTo(v, 3));
@@ -27,13 +27,16 @@ describe("KD 算法參數：sma（現行預設）／recursive（券商遞迴）"
     expect(d).toHaveLength(1);
   });
 
-  it("預設不變：computeKd／computeKdSeries 不傳參數＝sma，且與明確指定 sma 逐值相同", () => {
+  it("預設＝recursive：computeKd／computeKdSeries／computeIndicatorState 不傳參數，與明確指定 recursive 逐值相同，且不同於 sma", () => {
     const candles = makeCandles(120, wave);
     for (let n = 15; n <= candles.length; n++) {
-      expect(computeKd(candles.slice(0, n))).toEqual(computeKd(candles.slice(0, n), "sma"));
+      expect(computeKd(candles.slice(0, n))).toEqual(computeKd(candles.slice(0, n), "recursive"));
     }
-    expect(computeKdSeries(candles)).toEqual(computeKdSeries(candles, "sma"));
-    expect(currentKdMethod()).toBe("sma");
+    expect(computeKdSeries(candles)).toEqual(computeKdSeries(candles, "recursive"));
+    expect(computeIndicatorState(candles, candles.at(-1)!.close)?.kd).toEqual(computeKd(candles, "recursive"));
+    expect(computeKd(candles)).not.toEqual(computeKd(candles, "sma"));
+    expect(KD_DEFAULT_METHOD).toBe("recursive");
+    expect(currentKdMethod()).toBe("recursive");
   });
 
   it("computeKd(recursive) 對照獨立遞迴實作（從第 9 根起、初值 50）", () => {
@@ -59,11 +62,11 @@ describe("KD 算法參數：sma（現行預設）／recursive（券商遞迴）"
 
   it("withKdMethod 只在執行期間切換、結束（含例外）一律還原", () => {
     const candles = makeCandles(60, wave);
-    const viaScope = withKdMethod("recursive", () => computeKd(candles));
-    expect(viaScope).toEqual(computeKd(candles, "recursive"));
+    const viaScope = withKdMethod("sma", () => computeKd(candles));
+    expect(viaScope).toEqual(computeKd(candles, "sma"));
     expect(viaScope).not.toEqual(computeKd(candles));
-    expect(currentKdMethod()).toBe("sma");
-    expect(() => withKdMethod("recursive", () => { throw new Error("x"); })).toThrow();
-    expect(currentKdMethod()).toBe("sma");
+    expect(currentKdMethod()).toBe("recursive");
+    expect(() => withKdMethod("sma", () => { throw new Error("x"); })).toThrow();
+    expect(currentKdMethod()).toBe("recursive");
   });
 });

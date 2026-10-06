@@ -46,7 +46,7 @@ const MOMENTUM_CHART_CONCURRENCY = 20;
  */
 export async function getMultiSignalStocks(market: Market, minSignals = 2): Promise<MomentumItem[]> {
   // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
-  return cached(`momentum:${market}:${minSignals}`, sessionAwareTtl(market, MOMENTUM_TTL_MS), async () => {
+  return cached(`momentum:${market}:${minSignals}:v2`, sessionAwareTtl(market, MOMENTUM_TTL_MS), async () => {
     const pool = await universeFor(market);
     const quoteMap = await getMarketQuoteMap(market);
     const avgVolumeMap = await getTrailingAverageVolumeMap(market);

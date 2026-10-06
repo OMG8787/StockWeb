@@ -124,7 +124,7 @@ export interface KdSeries {
 }
 
 /** (9,3,3) stochastic oscillator — same method/parameters as
- *  lib/signals.ts's computeKdCross, returning the full %K/%D series instead
+ *  lib/signals.ts's computeKd (預設算法＝券商遞迴版，見 lib/kdFormula.ts), returning the full %K/%D series instead
  *  of only the latest cross. */
 export function computeKdSeries(candles: Candle[], method: KdMethod = KD_DEFAULT_METHOD): KdSeries {
   const PERIOD = 9;
