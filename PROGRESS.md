@@ -383,13 +383,14 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **環境變數裡有付費服務金鑰就被自動使用**：按量計費的供應商必須另有 opt-in 開關（Claude 需 `ALLOW_PAID_AI=true`）；新增服務前先確認免費。→ CLAUDE.md「專案最高原則：零花費」。
 - **GitHub Actions 預熱排程沒照「每5分鐘」跑**：免費排程常延遲數小時或丟棄，不能當主力；主力是 SWR（過期先回舊資料、背景重算），預熱改由 cron-job.org 觸發，回應期限 25 秒以配合其 30 秒逾時。→ 工作日誌 2026-10-04，搜尋「cron-job」。
 
-## 接手狀態（CLAUDE.md 規則十；隨時更新，最後更新 2026-10-06 13:50 台北）
+## 接手狀態（CLAUDE.md 規則十；隨時更新，最後更新 2026-10-06 14:35 台北）
 
-**進行中的 agent**
-1. 評測改前改後比較（Sonnet）：等本機 mis.twse 解封（最晚 14:30）→ 補改前 7 題（list-reference、yes-no、second-opinion、holding-target、stance-after-hours-fixed、stance-weekend、earlier-claim-chase）→ 改後完整 33 題（gemini-flash-lite-latest＋NVIDIA、評審 NVIDIA）→ compare；退步就 revert `51b4087`／`976672c` 相關。改前基準在 worktree C:/Users/88691/Documents/Claude/Stock-web-baseline（2a14948）與 docs/eval/2026-10-06-lite-before.*；完成後刪該 worktree（使用者同意刪）。跑完要通知評等穩定化 agent。
-2. 報價即時性＋全站自動刷新（Sonnet）：報價已上線（`c701bb6`、`243a869`、`850c719`、`81c1b6f`；MIS 多節點新舊不一→落後就重打挑最新）；量測後刪暫時診斷端點；接著做全站共用自動刷新（首頁快報／今日建議卡、/action、個股頁籌碼基本面財報新聞評等、走勢圖延伸、/news、/scoreboard；盤中約 60 秒、盤後 10 分鐘、背景分頁暫停、不清掉輸入與 AI 對話）。
-3. 評等穩定化（Opus）【全部改動（A 連 2 日確認＋程式把握程度：高＝大盤不弱且建議買進連續≥3 日，樣本外 20日 +1.01% t2.63；B；C；名單≠評等、「這3檔」指代、漏股補行）已在 wt-stab rebase 到 033b8b5，npm test 434 過，評測新增 holdings-labels、list-reference-digits、high-confidence；**待評測 agent 跑完後循序評測再合併**】【A 回測完成：籌碼維持單日＋新結論連 2 交易日確認（破底立即）；翻轉 4.64→1.32 次／月、持有建議 5.85→2.03；建議買進樣本內 20日 +0.76→+1.20%（t 1.80→2.33）、樣本外 20日 −0.40→−0.23；報告 docs/backtest/2026-10-stability.md；待評測後上線】：worktree scratchpad/wt-stab（分支 stab-work）。B／C（持有建議逐字照程式、停利標籤改單一動作、虧損不寫獲利吐回、多檔回答附評等變動說明）patch 在 scratchpad/bc.patch，**等評測 agent 跑完才跑 3 題評測、通過才 push**；A（籌碼面近 5 日累計 chipsWindow.ts＋新結論連 2 日確認 ratingStability.ts、stock-rating v5）FinMind 每日法人資料下載中，樣本內外回測通過（超額不變差、翻轉次數下降：初步 4.6→1.3 次／月）才上線。
-4. AI 模擬投資組合 100 萬：**已完成上線**（`3e33491`、`cea32ce`、`c1e0bf2`；首頁卡＋/portfolio；09:30／13:00／13:35 由 warm-cache 自動執行，無需新增 cron；10/6 收盤淨值 996,262、−0.37% vs 0050 +0.56%）。**14:30 追加（已交回原 agent）**：13:30～14:30 盤後定價交易以 14:30 收盤價成交（先記委託中、收盤後結算，零股走盤後零股）；漲跌停鎖死（MIS 漲跌停價＋五檔）買不到／賣不掉並記原因；買用 ask、賣用 bid；單筆不超過當日量一定比例。**成交價查證（14:50）**：10/6 六筆買進價對照 Yahoo 1 分K，5 筆落在成交當分鐘高低區間內，緯穎 2,255 比 10:10 那分鐘（2,260）低一檔、與前後分鐘價相同（報價略落後，屬可接受；改用最佳賣價後會更貼近實際）。**14:45 追加**：交易與決策紀錄全部永久保存（現況交易只留 400 筆、檢討 400 天、沒記沒買的原因）→按月封存交易＋每時點決策紀錄（候選、選誰、沒選原因、完整評等快照）、淨值與持股快照、檢討不過期、/portfolio 可看更早月份、scripts/check-sim-portfolio.py。待辦：接上全站自動刷新（useSimPortfolio.ts TODO）；正式站未設 CRON_SECRET（cron 路由靠冪等防重複，評估是否請使用者設定）。
+**進行中／暫停的工作（2026-10-06 14:30 額度將滿時存檔）**
+1. 評測改前改後比較（Sonnet，可能被中斷）：等本機 mis.twse 解封（13:43 起再封鎖）→ 補改前 7 題（list-reference、yes-no、second-opinion、holding-target、stance-after-hours-fixed、stance-weekend、earlier-claim-chase）→ 改後完整 33 題（gemini-flash-lite-latest＋NVIDIA、`--judge-with nvidia`）→ `--compare`；退步就修或 revert `51b4087`／`976672c`。改前基準：worktree C:/Users/88691/Documents/Claude/Stock-web-baseline（2a14948）＋docs/eval/2026-10-06-lite-before.*；完成後刪該 worktree。**一次只開一個評測程序**。
+2. 評等穩定化＋把握程度＋持有字樣＋評等變動說明（程式全部完成、**未上線**）：worktree `scratchpad/wt-stab`（分支 stab-work，rebase 到 033b8b5，wip commit df7c0f4、5b0e30a、5a9306f、cdbe8c7），npm test 434 過。**下一步**：評測 agent 跑完後，循序跑改前（主分支）／改後（wt-stab，需複製 .env.local、跑完刪）：holdings-deep、holdings-sell、holding-target＋新題 holdings-labels、list-reference-digits、high-confidence；通過→整理 commit、rebase 到最新主分支、push；正式站抽測關注分析 1 題＋個股持有 1 題；刪 wt-stab。內容摘要：連 2 交易日確認（翻轉 4.64→1.32 次／月；20日 +0.76→+1.20% t2.33；樣本外仍負但改善）、程式把握程度（高＝大盤不弱且建議買進連續≥3日；樣本外 20日 高 +1.01% t2.63／中 −0.57／低 −1.55）、今日建議與各清單依把握程度排序（action-list v3、stock-rating v5、rating-confirm:v1）、停利標籤改單一動作＋guardHeldAnswer、ratingChange 擴充＋ensureRatingChangeExplained、「這3檔」指代、guardHoldingsCoverage。報告 docs/backtest/2026-10-stability.md。
+3. 報價＋全站自動刷新（Sonnet）：自動刷新已上線（PageAutoRefresh、autoRefresh.ts）；`033b8b5` 批次失敗再試；`a32ec8e` 導覽／列表 prefetch 關閉——**待驗換頁速度**（各頁 5 秒內），變慢就改成只關列表連結。可能有 scratchpad/quote-wip.patch。10/7 盤中：量資料年齡、測 MIS「依 ex_ch 字串各自快取」假說。
+4. 關注清單「已賣出」（Sonnet）：已上線 `a339401`（部署狀態見 git log 後 gh statuses），本機 Playwright 14 項過，**待正式站驗證**。
+5. AI 模擬投資組合：已完成（`3e33491`、`cea32ce`、`c1e0bf2`、`1d39da4` 真實化、`10290a0` 永久保存）；待 14:35 結算時點確認封存寫入與盤後定價結算；10/7 盤中確認五檔成交價與漲跌停判斷。
 
 **排隊中（依序）**
 1. 評測 agent 跑完 → 評等穩定化 B／C 評測與上線。
