@@ -270,11 +270,14 @@ export async function answerQuestion(
         () => new Map<string, StockRatingResult>()
       )
     : new Map<string, StockRatingResult>();
+  // 某檔現在讀不到評等（批次逾時／上游失敗）時，沿用今日建議名單裡同一份評等的字樣，不可當成「沒有建議買進」
+  // （2026-10-06 13:17 使用者回報：今日建議有 5 檔，AI 卻答「目前市場上沒有符合建議買進的股票」）。
   const listLines = actionBrief
-    ? actionBrief.picks
-        .map((p) => listRatings.get(p.symbol.toUpperCase()))
-        .filter((r): r is StockRatingResult => !!r && isRecommendable(r.rating))
-        .map((r) => describeSiteRating(r.name, r.symbol, r.rating))
+    ? actionBrief.picks.flatMap((p) => {
+        const r = listRatings.get(p.symbol.toUpperCase());
+        if (!r) return p.code !== "avoid" ? [`${p.name}(${p.symbol})：${p.label}`] : [];
+        return isRecommendable(r.rating) ? [describeSiteRating(r.name, r.symbol, r.rating)] : [];
+      })
     : [];
   const ratingListText = actionBrief
     ? listLines.length > 0
