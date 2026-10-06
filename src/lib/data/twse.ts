@@ -50,6 +50,16 @@ export function misTradeTimeIso(row: { d?: string; t?: string; tlong?: string },
   return new Date(ms).toISOString();
 }
 
+/**
+ * MIS getStockInfo 的請求網址（上市／上櫃／指數共用，tpex.ts 也用這個）。`exCh` 是 "tse_2330.tw|otc_6488.tw" 這種
+ * 管線分隔清單。**一定要帶 `_=<現在毫秒>` 防快取參數**：MIS 的官方網頁每次請求都帶它，網址完全相同的
+ * 請求會被上游（或中間的代理）回快取內容——2026-10-06 盤中實測，不帶時 2317（高流動股）的成交時間
+ * （tlong）常落後 40~70 秒、成交量連續一分鐘不動，輪詢拿到的是「新抓取的舊資料」。
+ */
+export function misQuoteUrl(exCh: string, now: number = Date.now()): string {
+  return `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${now}`;
+}
+
 /** MIS 的 `d`（YYYYMMDD）→ ISO 日期；格式不對就 undefined。twse.ts/tpex.ts 共用。 */
 export function misDateToIso(d: string | undefined): string | undefined {
   return d && /^\d{8}$/.test(d) ? `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}` : undefined;
@@ -131,7 +141,7 @@ function rowToQuote(row: MisRow): Quote | null {
 }
 
 export async function fetchTwseQuote(stockNo: string): Promise<Quote> {
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=tse_${stockNo}.tw&json=1&delay=0`;
+  const url = misQuoteUrl(`tse_${stockNo}.tw`);
   const res = await fetchWithTimeout(url, 4000, {
     headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
   });
@@ -191,7 +201,7 @@ export async function fetchTwseQuotesBatch(stockNos: string[]): Promise<Map<stri
   const chunks = chunk(stockNos, QUOTE_BATCH_CHUNK_SIZE);
   const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
     const chExpr = group.map((s) => `tse_${s}.tw`).join("|");
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
+    const url = misQuoteUrl(chExpr);
     try {
       const res = await fetchWithTimeout(url, 6000, {
         headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },

@@ -6,7 +6,7 @@ import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
-import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso, misTradeTimeIso } from "./twse";
+import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso, misQuoteUrl, misTradeTimeIso } from "./twse";
 
 // TPEx (Taipei Exchange / 證券櫃檯買賣中心) public data endpoints for 上櫃
 // (OTC mainboard) stocks. Confirmed live during this module's construction —
@@ -385,7 +385,7 @@ function rowToOtcQuote(row: MisRow): Quote | null {
 const OTC_QUOTE_BATCH_CHUNK_SIZE = 50;
 
 export async function fetchTpexQuote(stockNo: string): Promise<Quote> {
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=otc_${stockNo}.tw&json=1&delay=0`;
+  const url = misQuoteUrl(`otc_${stockNo}.tw`);
   const res = await fetchWithTimeout(url, 4000, {
     headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
   });
@@ -405,7 +405,7 @@ export async function fetchTpexQuotesBatch(stockNos: string[]): Promise<Map<stri
   const chunks = chunk(stockNos, OTC_QUOTE_BATCH_CHUNK_SIZE);
   const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
     const chExpr = group.map((s) => `otc_${s}.tw`).join("|");
-    const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${chExpr}&json=1&delay=0`;
+    const url = misQuoteUrl(chExpr);
     try {
       const res = await fetchWithTimeout(url, 6000, {
         headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
