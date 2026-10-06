@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Quote } from "@/lib/data/types";
 
-const fetchBatch = vi.fn<(symbols: string[]) => Promise<Map<string, Quote>>>();
-vi.mock("@/lib/data/twse", () => ({ fetchTwseQuotesBatch: (s: string[]) => fetchBatch(s) }));
+const fetchBatch = vi.fn<(symbols: string[], opts?: unknown) => Promise<Map<string, Quote>>>();
+vi.mock("@/lib/data/twse", () => ({ fetchTwseQuotesBatch: (s: string[], o?: unknown) => fetchBatch(s, o) }));
 vi.mock("@/lib/data/twOffHoursQuote", () => ({ reconcileTwListedQuoteMap: async (m: Map<string, Quote>) => m }));
 
 import { getListedQuotesLive } from "@/lib/data/listedQuoteBatch";
@@ -23,7 +23,7 @@ describe("getListedQuotesLive：關注清單上市報價只抓指定幾檔", () 
     fetchBatch.mockResolvedValue(new Map([["2317", q("2317", 1)]]));
     const m = await getListedQuotesLive(["2330", "2317", "2330"]);
     expect(fetchBatch).toHaveBeenCalledTimes(1);
-    expect(fetchBatch).toHaveBeenCalledWith(["2317", "2330"]);
+    expect(fetchBatch).toHaveBeenCalledWith(["2317", "2330"], { retryStale: true });
     expect(m.get("2317")?.price).toBe(1);
   });
 

@@ -30,7 +30,7 @@ export function getListedQuotesLive(symbols: string[]): Promise<Map<string, Quot
   if (hit && now - hit.at <= FRESH_MS) return hit.promise;
 
   const promise = (async () => {
-    const map = await fetchTwseQuotesBatch(unique).catch(() => new Map<string, Quote>());
+    const map = await fetchTwseQuotesBatch(unique, { retryStale: true }).catch(() => new Map<string, Quote>());
     if (map.size === 0) return map;
     return reconcileTwListedQuoteMap(map, () => "TWSE").catch(() => map);
   })();

@@ -1,12 +1,12 @@
 import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
 import https from "node:https";
 import tls from "node:tls";
-import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
+import { chunk, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
-import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso, misQuoteUrl, misTradeTimeIso } from "./twse";
+import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, fetchMisRows, misDateToIso, misTradeTimeIso } from "./twse";
 
 // TPEx (Taipei Exchange / 證券櫃檯買賣中心) public data endpoints for 上櫃
 // (OTC mainboard) stocks. Confirmed live during this module's construction —
@@ -385,12 +385,9 @@ function rowToOtcQuote(row: MisRow): Quote | null {
 const OTC_QUOTE_BATCH_CHUNK_SIZE = 50;
 
 export async function fetchTpexQuote(stockNo: string): Promise<Quote> {
-  const url = misQuoteUrl(`otc_${stockNo}.tw`);
-  const res = await fetchWithTimeout(url, 4000, {
-    headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-  });
-  const data = (await res.json()) as { msgArray?: MisRow[] };
-  const row = data.msgArray?.[0];
+  // 單檔：開 retryStale（MIS 後端節點新舊不一，見 twse.ts fetchMisRows）。
+  const rows = await fetchMisRows<MisRow>(`otc_${stockNo}.tw`, 4000, { retryStale: true });
+  const row = rows[0];
   const quote = row && rowToOtcQuote(row);
   if (!quote) throw new Error(`No TPEx quote for ${stockNo}`);
   return quote;
@@ -405,13 +402,8 @@ export async function fetchTpexQuotesBatch(stockNos: string[]): Promise<Map<stri
   const chunks = chunk(stockNos, OTC_QUOTE_BATCH_CHUNK_SIZE);
   const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
     const chExpr = group.map((s) => `otc_${s}.tw`).join("|");
-    const url = misQuoteUrl(chExpr);
     try {
-      const res = await fetchWithTimeout(url, 6000, {
-        headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-      });
-      const data = (await res.json()) as { msgArray?: MisRow[] };
-      return data.msgArray ?? [];
+      return await fetchMisRows<MisRow>(chExpr, 6000); // 全市場表用：不重打（見 twse.ts fetchMisRows）
     } catch {
       return [];
     }

@@ -4,6 +4,7 @@ import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
+import { isTwQuoteWindow } from "@/lib/pollingSchedule";
 
 // TWSE (Taiwan Stock Exchange) public data endpoints. No API key required.
 // - Real-time-ish quote (delayed): mis.twse.com.tw "getStockInfo"
@@ -52,12 +53,86 @@ export function misTradeTimeIso(row: { d?: string; t?: string; tlong?: string },
 
 /**
  * MIS getStockInfo 的請求網址（上市／上櫃／指數共用，tpex.ts 也用這個）。`exCh` 是 "tse_2330.tw|otc_6488.tw" 這種
- * 管線分隔清單。**一定要帶 `_=<現在毫秒>` 防快取參數**：MIS 的官方網頁每次請求都帶它，網址完全相同的
- * 請求會被上游（或中間的代理）回快取內容——2026-10-06 盤中實測，不帶時 2317（高流動股）的成交時間
- * （tlong）常落後 40~70 秒、成交量連續一分鐘不動，輪詢拿到的是「新抓取的舊資料」。
+ * 管線分隔清單。帶 `_=<現在毫秒>` 跟 MIS 官方網頁一致（2026-10-06 在正式站實測：有無這個參數、
+ * 瀏覽器 UA、session cookie 回的資料完全相同，**落後不是快取造成的**，見 fetchMisRows）。
  */
 export function misQuoteUrl(exCh: string, now: number = Date.now()): string {
   return `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${exCh}&json=1&delay=0&_=${now}`;
+}
+
+/**
+ * MIS 回應裡「這份快照是幾點的」（queryTime.sysDate＋sysTime，台北時間）→ epoch 毫秒；缺值回 undefined。
+ */
+export function misSnapshotMs(data: { queryTime?: { sysDate?: string; sysTime?: string } }): number | undefined {
+  const { sysDate, sysTime } = data.queryTime ?? {};
+  if (!sysDate || !sysTime || !/^\d{8}$/.test(sysDate) || !/^\d{1,2}:\d{2}:\d{2}$/.test(sysTime)) return undefined;
+  const [h, m, s] = sysTime.split(":");
+  const ms = Date.parse(`${sysDate.slice(0, 4)}-${sysDate.slice(4, 6)}-${sysDate.slice(6, 8)}T${h.padStart(2, "0")}:${m}:${s}+08:00`);
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+/**
+ * 2026-10-06 使用者「盤中報價不夠即時」追查的第二層根因：MIS 後端有多台節點，**資料新舊不一**。
+ * 在正式站函式內直接連打 MIS（2317，每次 `_` 都不同）：同一支股票，09:57:24 回 sysTime 09:57:18，
+ * 09:57:54 卻回 sysTime 09:56:02（比上一次還舊、落後 112 秒）；有無 `_`、瀏覽器 UA、session cookie 結果相同，
+ * 所以不是我們或 CDN 的快取，是打到落後的節點。對策：只在盤中、只對「指定幾檔」的請求（單檔、關注清單批次，
+ * 不含全市場 40 塊）——回應快照時間比「這個 instance 看過最新的 MIS 快照」落後超過 STALE_TOLERANCE_MS 時，
+ * 立刻再打（最多 MIS_STALE_RETRIES 次、間隔 MIS_STALE_RETRY_GAP_MS），挑快照最新的那份回傳。
+ * 不會因此無限重打：重試次數有上限，且只有「確定落後」才重試。
+ */
+const MIS_STALE_TOLERANCE_MS = 15_000;
+const MIS_STALE_RETRIES = 2;
+const MIS_STALE_RETRY_GAP_MS = 250;
+/**
+ * 連續撮合時段（開盤後 1 分鐘～收盤前 5 分鐘）內，快照比現在落後超過這麼久就視為落後節點
+ * （不需要參考任何歷史：冷啟動的 instance 第一次請求就打到落後節點時也能擋）。健康節點實測
+ * 落後現在 0~20 秒；13:25 之後與 09:01 之前快照可能暫停更新，不套用這條。
+ */
+const MIS_WALL_CLOCK_STALE_MS = 35_000;
+function inContinuousTrading(ms: number): boolean {
+  if (!isTwQuoteWindow(new Date(ms))) return false;
+  const taipei = new Date(ms + 8 * 3_600_000);
+  const minutes = taipei.getUTCHours() * 60 + taipei.getUTCMinutes();
+  return minutes >= 9 * 60 + 1 && minutes <= 13 * 60 + 25;
+}
+/** 這個 instance 看過最新的 MIS 快照時間（跨請求共用）。 */
+let freshestMisSnapshotMs = 0;
+
+/** 測試用：重置模組內的「最新快照」記憶。 */
+export function resetMisSnapshotMemory(): void {
+  freshestMisSnapshotMs = 0;
+}
+
+/**
+ * 抓 MIS 一個 ex_ch 清單的列。`retryStale` 為 true 且在盤中時，遇到落後的節點會重打並挑最新快照。
+ * 失敗（逾時、HTTP 錯誤）照舊往外丟，由呼叫端處理。
+ */
+export async function fetchMisRows<T = MisRow>(
+  exCh: string,
+  timeoutMs: number,
+  opts: { retryStale?: boolean } = {}
+): Promise<T[]> {
+  const startedAt = Date.now();
+  const useGuard = opts.retryStale === true && isTwQuoteWindow(new Date(startedAt));
+  let best: { rows: T[]; snapshot: number } | undefined;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetchWithTimeout(misQuoteUrl(exCh), timeoutMs, {
+      headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
+    });
+    const data = (await res.json()) as { msgArray?: T[]; queryTime?: { sysDate?: string; sysTime?: string } };
+    const rows = data.msgArray ?? [];
+    const snapshot = misSnapshotMs(data);
+    if (snapshot === undefined) return rows; // 沒有快照時間：沒辦法判斷新舊，照用
+    if (!best || snapshot > best.snapshot) best = { rows, snapshot };
+    freshestMisSnapshotMs = Math.max(freshestMisSnapshotMs, snapshot);
+    const behind =
+      freshestMisSnapshotMs - best.snapshot > MIS_STALE_TOLERANCE_MS ||
+      (inContinuousTrading(Date.now()) && Date.now() - best.snapshot > MIS_WALL_CLOCK_STALE_MS);
+    // 已經耗掉大半逾時額度就不再重打（輪詢請求最多等 6 秒）。
+    const tooSlow = Date.now() - startedAt > timeoutMs / 2;
+    if (!useGuard || !behind || attempt >= MIS_STALE_RETRIES || tooSlow) return best.rows;
+    await new Promise((r) => setTimeout(r, MIS_STALE_RETRY_GAP_MS));
+  }
 }
 
 /** MIS 的 `d`（YYYYMMDD）→ ISO 日期；格式不對就 undefined。twse.ts/tpex.ts 共用。 */
@@ -141,12 +216,8 @@ function rowToQuote(row: MisRow): Quote | null {
 }
 
 export async function fetchTwseQuote(stockNo: string): Promise<Quote> {
-  const url = misQuoteUrl(`tse_${stockNo}.tw`);
-  const res = await fetchWithTimeout(url, 4000, {
-    headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-  });
-  const data = (await res.json()) as { msgArray?: MisRow[] };
-  const row = data.msgArray?.[0];
+  const rows = await fetchMisRows<MisRow>(`tse_${stockNo}.tw`, 4000, { retryStale: true });
+  const row = rows[0];
   const quote = row && rowToQuote(row);
   if (!quote) throw new Error(`No TWSE quote for ${stockNo}`);
   return quote;
@@ -194,20 +265,16 @@ const QUOTE_BATCH_CHUNK_SIZE = 50;
  */
 export const MIS_BATCH_CONCURRENCY = 8;
 
-export async function fetchTwseQuotesBatch(stockNos: string[]): Promise<Map<string, Quote>> {
+/** `retryStale`：只有「指定幾檔」的呼叫端（關注清單）開，全市場表不開（40 塊重打會變成請求風暴），見 fetchMisRows。 */
+export async function fetchTwseQuotesBatch(stockNos: string[], opts: { retryStale?: boolean } = {}): Promise<Map<string, Quote>> {
   const map = new Map<string, Quote>();
   if (stockNos.length === 0) return map;
 
   const chunks = chunk(stockNos, QUOTE_BATCH_CHUNK_SIZE);
   const results = await mapWithConcurrency(chunks, MIS_BATCH_CONCURRENCY, async (group) => {
     const chExpr = group.map((s) => `tse_${s}.tw`).join("|");
-    const url = misQuoteUrl(chExpr);
     try {
-      const res = await fetchWithTimeout(url, 6000, {
-        headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
-      });
-      const data = (await res.json()) as { msgArray?: MisRow[] };
-      return data.msgArray ?? [];
+      return await fetchMisRows<MisRow>(chExpr, 6000, opts);
     } catch {
       return [];
     }
