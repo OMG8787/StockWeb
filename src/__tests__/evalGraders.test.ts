@@ -53,4 +53,12 @@ describe("eval graders", () => {
     expect(wk.find((c) => c.rule === "週末不說今天行情")?.pass).toBe(false);
     expect(firstSentences("A。B！C", 2)).toBe("A。B！");
   });
+
+  it("marginSignalMention：有訊號要講出名稱；中性不適用", () => {
+    const base = { caseDef: {} as EvalCase, zhFixedCount: 0, phase: "intraday" as const, rawAnswer: "" };
+    const grounding = "籌碼 融資融券組合判讀（程式依單日數字算好，10/05單日數字，不是趨勢）：【追高風險】股價上漲…。依據：股價+2%";
+    expect(gradeCheck({ kind: "marginSignalMention" }, { ...base, grounding, finalAnswer: "籌碼面有追高風險，融資增加。" }).pass).toBe(true);
+    expect(gradeCheck({ kind: "marginSignalMention" }, { ...base, grounding, finalAnswer: "籌碼面偏多。" }).pass).toBe(false);
+    expect(gradeCheck({ kind: "marginSignalMention" }, { ...base, grounding: "沒有該區塊", finalAnswer: "籌碼面偏多。" }).pass).toBe(true);
+  });
 });

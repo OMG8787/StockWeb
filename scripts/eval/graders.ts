@@ -1,6 +1,7 @@
 // 跨模型 AI 品質評測的自動評分器（純函式、無 I/O；測試見 src/__tests__/evalGraders.test.ts）。
 // 主分數一律以這裡的程式規則為準；LLM 評審（run.ts --judge）只是輔助參考。
 import { extractKeyLevels, guardAnswerNumbers } from "@/lib/ai/numberGuard";
+import { MARGIN_SIGNAL_TITLE } from "@/lib/ai/marginSignalData";
 import type { CheckResult, CheckSpec, EvalCase } from "./types";
 
 export type Phase = "pre-open" | "intraday" | "after-hours-fixed" | "after-close" | "weekend";
@@ -205,6 +206,11 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
       // 「推薦」的股票都要有【本站綜合評等】：回答裡出現的代號必須是評等名單裡的（0050 對照句除外）。
       const extra = mentionedSymbols(ans).filter((c) => !ratings.has(c) && c !== "0050");
       return { rule: "只推有評等的股票", pass: extra.length === 0, detail: extra.join("、") || undefined };
+    }
+    case "marginSignalMention": {
+      const m = g.grounding.match(new RegExp(`${MARGIN_SIGNAL_TITLE}（[^）]*）：【([^】]+)】`));
+      if (!m) return { rule: "講出融資融券組合判讀", pass: true, detail: "當日該檔無非中性訊號，不適用" };
+      return { rule: "講出融資融券組合判讀", pass: plain(ans).includes(m[1]), detail: plain(ans).includes(m[1]) ? undefined : `應提到「${m[1]}」` };
     }
     case "require": {
       const ok = spec.any.some((p) => new RegExp(p, "m").test(plain(ans)));

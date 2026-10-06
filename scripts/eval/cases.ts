@@ -426,4 +426,20 @@ export const EVAL_CASES: EvalCase[] = [
     source: "使用者📝 2026-10-06 13:28「我問把握程度高，這裡又回覆說把握程度中」",
     tags: ["全市場", "把握程度"],
   },
+  {
+    id: "margin-signal-chips",
+    title: "融資融券怎麼看：程式算好的組合判讀（聯電 10/5 股價跌＋融資大減＝籌碼沉澱）要講出訊號名稱，不可自己編相反方向",
+    question: "聯電今天的融資融券怎麼看？",
+    checks: [{ kind: "marginSignalMention" }, { kind: "onlySymbols", allowed: ["2303"] }, { kind: "noStopLossUnheld" }],
+    source: "使用者待辦 2026-10-04（融資融券組合判讀，marginSignal.ts）",
+    tags: ["個股", "籌碼", "融資融券"],
+  },
+  {
+    id: "margin-signal-buy",
+    title: "買不買：評等照抄，且程式算好的融資融券組合判讀（智邦 10/5 股價漲＋融資大增＝追高風險）要在籌碼面帶到",
+    question: "智邦可以買嗎？",
+    checks: [{ kind: "ratingFirst", symbol: "2345" }, { kind: "marginSignalMention" }, { kind: "onlySymbols", allowed: ["2345"] }, { kind: "noStopLossUnheld" }],
+    source: "使用者待辦 2026-10-04（融資融券組合判讀，marginSignal.ts）",
+    tags: ["個股", "籌碼", "融資融券"],
+  },
 ];

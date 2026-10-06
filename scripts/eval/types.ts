@@ -26,6 +26,8 @@ export type CheckSpec =
   | { kind: "holdingVerdicts"; symbols: string[] }
   /** 「賣掉哪些」列出的檔數要跟程式評等減碼／出場的完全相同。 */
   | { kind: "sellListMatches"; symbols: string[] }
+  /** 參考資料有「融資融券組合判讀」【訊號】時，回答要講出訊號名稱；沒有訊號（中性）就不適用、視為通過。 */
+  | { kind: "marginSignalMention" }
   /** 未持有不可用「停損」二字。 */
   | { kind: "noStopLossUnheld" };
 
