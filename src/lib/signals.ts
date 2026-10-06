@@ -9,6 +9,7 @@ import {
   MACD_NEAR_CROSS_MAX_EST_DAYS,
   type NearCrossReading,
 } from "@/lib/nearCross";
+import { currentKdMethod, kdFromRsv, type KdMethod } from "@/lib/kdFormula";
 
 export interface Signal {
   label: string;
@@ -203,22 +204,6 @@ const KD_CROSS_LABEL: Record<"golden" | "death", Record<KdZone, string>> = {
   },
 };
 
-/** Trailing simple moving average — returns one value per input index, null
- *  wherever there isn't yet a full window (keeps the caller's indices
- *  aligned with the input array instead of needing separate offset math). */
-function sma(values: number[], period: number): (number | null)[] {
-  const result: (number | null)[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (i < period - 1) {
-      result.push(null);
-      continue;
-    }
-    const slice = values.slice(i - period + 1, i + 1);
-    result.push(slice.reduce((a, b) => a + b, 0) / period);
-  }
-  return result;
-}
-
 function computeBollingerSignal(candles: Candle[], currentPrice: number): Signal | null {
   const PERIOD = 20;
   if (candles.length < PERIOD) return null;
@@ -262,7 +247,10 @@ const KD_SMOOTH = 3;
  * dSeries 只是前面比 kSeries 短（需要多 SMOOTH-1 天暖機），從尾端對齊即可同日配對。
  * 根數不足時回 null。computeKd（今日交叉）與「即將交叉」判斷共用這一份計算。
  */
-function computeKdSeries(candles: Candle[]): { kSeries: number[]; dSeries: number[] } | null {
+function computeKdSeries(
+  candles: Candle[],
+  method: KdMethod = currentKdMethod()
+): { kSeries: number[]; dSeries: number[] } | null {
   const PERIOD = KD_PERIOD;
   const SMOOTH = KD_SMOOTH;
   if (candles.length < PERIOD + SMOOTH * 2) return null;
@@ -276,13 +264,12 @@ function computeKdSeries(candles: Candle[]): { kSeries: number[]; dSeries: numbe
     return range > 0 ? ((c.close - lowestLow) / range) * 100 : 50;
   });
   const validRawK = rawK.filter((v): v is number => v !== null);
-  const kSeries = sma(validRawK, SMOOTH).filter((v): v is number => v !== null);
-  const dSeries = sma(kSeries, SMOOTH).filter((v): v is number => v !== null);
+  const { k: kSeries, d: dSeries } = kdFromRsv(validRawK, method);
   return { kSeries, dSeries };
 }
 
-export function computeKd(candles: Candle[]): KdReading | null {
-  const series = computeKdSeries(candles);
+export function computeKd(candles: Candle[], method: KdMethod = currentKdMethod()): KdReading | null {
+  const series = computeKdSeries(candles, method);
   if (!series) return null;
   const { kSeries, dSeries } = series;
 

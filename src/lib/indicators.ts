@@ -1,5 +1,6 @@
 import type { Candle } from "@/lib/data/types";
 import { computeMacdLines, MACD_MIN_BARS } from "@/lib/ema";
+import { KD_DEFAULT_METHOD, kdFromRsv, type KdMethod } from "@/lib/kdFormula";
 
 // Full-series versions of the same indicators lib/signals.ts already
 // computes for the text signal tags (same formulas, same parameters — kept
@@ -125,7 +126,7 @@ export interface KdSeries {
 /** (9,3,3) stochastic oscillator — same method/parameters as
  *  lib/signals.ts's computeKdCross, returning the full %K/%D series instead
  *  of only the latest cross. */
-export function computeKdSeries(candles: Candle[]): KdSeries {
+export function computeKdSeries(candles: Candle[], method: KdMethod = KD_DEFAULT_METHOD): KdSeries {
   const PERIOD = 9;
   const SMOOTH = 3;
   if (candles.length < PERIOD + SMOOTH * 2) return { k: [], d: [], j: [] };
@@ -141,6 +142,13 @@ export function computeKdSeries(candles: Candle[]): KdSeries {
   const firstValidIndex = rawK.findIndex((v) => v !== null);
   if (firstValidIndex === -1) return { k: [], d: [], j: [] };
   const validRawK = rawK.slice(firstValidIndex) as number[];
+  if (method === "recursive") {
+    // 券商慣用遞迴版：K、D 與 RSV 等長，第 j 個值對應 K 線 firstValidIndex + j。
+    const { k: rk, d: rd } = kdFromRsv(validRawK, method);
+    const k: IndicatorPoint[] = rk.map((v, j) => ({ time: candles[firstValidIndex + j].time, value: v }));
+    const d: IndicatorPoint[] = rd.map((v, j) => ({ time: candles[firstValidIndex + j].time, value: v }));
+    return { k, d, j: d.map((p, j) => ({ time: p.time, value: 3 * rk[j] - 2 * p.value })) };
+  }
   const kValues = sma(validRawK, SMOOTH);
   const kValuesCompact = kValues.filter((v): v is number => v !== null);
   const dValues = sma(kValuesCompact, SMOOTH);
