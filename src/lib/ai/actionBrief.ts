@@ -204,7 +204,8 @@ export async function getActionBrief(forceRefresh = false): Promise<ActionBrief>
 ${stance.stanceLine}
 
 ${list.grounding}` }], {
-          timeoutMs: 25000,
+          timeoutMs: 40000,
+          totalBudgetMs: 40000, // 思考模型可用 65%≈26 秒（原 25 秒只剩 16 秒，實測 3-flash-preview 小題就要 10 秒，常逾時退回 lite）；名單另抓＋這段＜maxDuration 60
           maxOutputTokens: 1600,
           // 每天少量、價值高：用非 lite 思考模型（有每日配額，用完自動退回 lite，見 gemini.ts）。
           geminiTier: "premium",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GEMINI_THINKING_ALLOWANCE, geminiGenerationConfig, isGeminiThinkingModel, rankGeminiModels } from "@/lib/ai/gemini";
+import { GEMINI_THINKING_ALLOWANCE, geminiGenerationConfig, isGeminiThinkingModel, premiumAllowedHere, rankGeminiModels } from "@/lib/ai/gemini";
 
 // 2026-10-05 這把金鑰的實際 ListModels（節錄）
 const LISTED =
@@ -36,5 +36,13 @@ describe("rankGeminiModels（Gemini 模型分級）", () => {
     const lite = geminiGenerationConfig("gemini-flash-lite-latest", 1000);
     expect(lite.maxOutputTokens).toBe(1000);
     expect(lite).not.toHaveProperty("thinkingConfig");
+  });
+});
+
+describe("premiumAllowedHere", () => {
+  it("只有正式站或明確開啟才用非 lite（本機測試不吃正式站配額）", () => {
+    expect(premiumAllowedHere({ VERCEL: "1" })).toBe(true);
+    expect(premiumAllowedHere({})).toBe(false);
+    expect(premiumAllowedHere({ GEMINI_PREMIUM_LOCAL: "true" })).toBe(true);
   });
 });

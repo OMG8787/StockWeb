@@ -135,6 +135,15 @@ function markDead(model: string): void {
   }
 }
 
+/**
+ * 非 lite 模型只在正式站（Vercel）使用；本機開發／評測／agent 測試一律走 lite，除非明確設 GEMINI_PREMIUM_LOCAL=true。
+ * 原因（2026-10-06 使用者回報「怎麼都沒有好的模型生成的」）：本機與正式站共用同一把金鑰，免費層每模型每天只有 20 次，
+ * 本機測試會吃掉正式站今日建議／快報的名額（當天早上 3 個非 lite 模型有 2 個已回 429）。
+ */
+export function premiumAllowedHere(env: Record<string, string | undefined> = process.env): boolean {
+  return env.VERCEL === "1" || env.GEMINI_PREMIUM_LOCAL === "true";
+}
+
 // ── 非 lite 模型每日配額 ──
 function pacificDay(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(now);
@@ -295,7 +304,7 @@ export async function askGeminiWithModel(
   apiKey: string,
   options: GeminiCallOptions = {}
 ): Promise<{ text: string; model: string }> {
-  const tier = options.tier ?? "standard";
+  const tier = premiumAllowedHere() ? options.tier ?? "standard" : "standard";
   const cacheKey = `${apiKey.slice(-8)}:${tier}`;
   const known = knownGoodModel.get(cacheKey);
   const candidates = await listCandidateModels(apiKey, tier);
