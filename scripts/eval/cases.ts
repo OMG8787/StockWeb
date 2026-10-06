@@ -384,6 +384,21 @@ export const EVAL_CASES: EvalCase[] = [
     tags: ["持股", "一致性"],
   },
   {
+    id: "method-question",
+    title: "方法題「怎麼判斷要放著還是認賠出場」：講本站判斷方式，不可改答上一則清單裡的某一檔",
+    question: "你怎麼判斷是要放著還是認賠出場?",
+    history: [
+      { role: "user", content: "明天要買什麼台股" },
+      { role: "assistant", content: "建議買進的有：宏璟(2527)、台表科(6278)、啟碁(6285)、華通(2313)、德淵(4720)。" },
+    ],
+    checks: [
+      { kind: "onlySymbols", allowed: [] },
+      { kind: "require", name: "講到連續 2 個交易日確認或停損規則", any: ["連續 ?2 ?個交易日", "停損", "出場參考"] },
+    ],
+    source: "使用者📝 2026-10-06 17:10（被答成啟碁的個股分析：「這不是我提問要的答案」）",
+    tags: ["對話", "意圖"],
+  },
+  {
     id: "list-reference-digits",
     title: "「這3檔分別建議買還是不買」：每檔照自己的評等，不可用「沒進名單」推成先不要買",
     question: "這3檔分別建議買還是不買?原因?",

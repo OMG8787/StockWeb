@@ -129,6 +129,17 @@ export function isBareTradeYesNoQuestion(question: string): boolean {
   );
 }
 
+/**
+ * 方法／原則題（「你怎麼判斷是要放著還是認賠出場?」「停損要怎麼設」）：問的是判斷方式，不是某一檔。
+ * 沒有指代詞（這檔／它／那支…）時，不可把上一則回答裡的股票當成追問目標
+ * （2026-10-06 17:10 使用者回報：被答成啟碁的個股分析，「這不是我提問要的答案」）。
+ */
+const METHOD_QUESTION_PATTERN = /怎麼判斷|如何判斷|怎樣判斷|判斷標準|依據什麼|根據什麼|什麼原則|有什麼原則|怎麼決定|如何決定|要怎麼設|怎麼設定|什麼時候(?:該|要|應該)/;
+const STOCK_PRONOUN_PATTERN = /這檔|那檔|這支|那支|這隻|那隻|它|牠|這家|那家|這間|這個股|該股/;
+export function isMethodQuestion(question: string): boolean {
+  return METHOD_QUESTION_PATTERN.test(question) && !STOCK_PRONOUN_PATTERN.test(question);
+}
+
 export function conversationWantsMovers(question: string, history: ChatTurn[]): boolean {
   // 用 wantsMarketWideBuyIdea（不是裸的 BUY_IDEA_INTENT_PATTERN）：「我的關注清單裡建議買哪檔」
   // 這種明講限定範圍的問法如果也附上全市場焦點資料，模型會先列出清單外的股票再自己改口

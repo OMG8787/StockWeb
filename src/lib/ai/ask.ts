@@ -7,7 +7,8 @@ import { callAiProviders, type CallAiProvidersOptions } from "@/lib/ai/provider"
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
-import { confidenceRank, describeConfidenceGrades, describeSiteRating, isRecommendable, stripRatingTags } from "./siteRating";
+import { confidenceRank, describeConfidenceGrades, describeSiteRating, isRecommendable, stripRatingTags, TAKE_PROFIT_PEAK_GAIN_PCT } from "./siteRating";
+import { HOLDING_STOP_MAX_PCT } from "./holdingStop";
 import { getStockRatings, type StockRatingResult } from "./stockRating";
 import { isNearTaiexFuturesSettlement } from "@/lib/marketCalendar";
 import type { ChatTurn } from "@/lib/ai/types";
@@ -24,6 +25,7 @@ import {
   wantsMarketWideBuyIdea,
   resolveFollowupTargets,
   isBareTradeYesNoQuestion,
+  isMethodQuestion,
   isListReferenceQuestion,
   resolveListReferenceTargets,
   HOLDINGS_ANALYSIS_INTENT_PATTERN,
@@ -62,6 +64,16 @@ function taipeiTodayForAsk(): { year: number; month: number; day: number } {
   return { year, month, day };
 }
 
+/** 方法／原則題的程式說明（數字來自唯一來源常數；AI 照這套講，不可另編規則、不可改答某一檔）。 */
+const METHOD_QUESTION_NOTE = `【本站持有判斷方式（方法題：直接用下列方式完整回答，不可反問使用者要查哪一檔、不可改成分析某一檔、不可點名任何個股）】
+- 每檔每天用五個面向（技術、籌碼、持股結構、基本、財報）重算本站綜合評等；持有中的結論只有一個動作：續抱、可分批加碼、建議減碼、建議出場。
+- 評等改變要連續 2 個交易日都成立才改判（避免一天的雜訊來回翻）；跌破停損價則立即生效。
+- 停損：持有中出場參考價取近端支撐（均線／近 10 日低），離現價最多約 ${Math.round(HOLDING_STOP_MAX_PCT * 100)}%、且高於跌停價；收盤跌破就出場。
+- 停利：買進後曾獲利 ${TAKE_PROFIT_PEAK_GAIN_PCT}% 以上、之後跌回成本以下 → 建議減碼（需填買進日期才判斷）；獲利中用移動停利價，收盤跌破就出場、守住獲利。
+- 想看某一檔現在該放著還是出場，請問「XX 要續抱還是賣?」或在關注清單填成本與股數後按分析。`;
+
+const METHOD_ANSWER_PATTERN = /連續 ?2 ?個交易日|停損|出場參考/;
+
 export async function answerQuestion(
   question: string,
   contextSymbol?: string,
@@ -81,7 +93,9 @@ export async function answerQuestion(
         : await guessSymbolsFromText(question);
   // 「建議買嗎」「可以買嗎」這種沒指名對象的買賣是非題：對話裡有正在談的個股就是在追問那一檔，
   // 必須在 wantsMovers／全市場推薦判斷之前先找回來（2026-10-04 使用者回報的跳題）。
-  if (targets.length === 0 && history.length > 0 && isBareTradeYesNoQuestion(question)) {
+  // 方法／原則題不套用上一則的股票（見 intent.ts isMethodQuestion）。
+  const methodQuestion = isMethodQuestion(question);
+  if (targets.length === 0 && history.length > 0 && !methodQuestion && isBareTradeYesNoQuestion(question)) {
     targets = await resolveFollowupTargets(question, history);
   }
   // 「這幾檔／這些／名單裡有你看好的嗎」：指上一則 AI 回答列出的整份清單（2026-10-05 使用者回報
@@ -130,12 +144,12 @@ export async function answerQuestion(
   // 找回來當成目標，否則會完全沒有個股資料、誤答成「查不到這檔股票的資料」。
   // 刻意排在 themeMatch/wantsMovers/wantsTechScreen 之後判斷，確保全市場篩選類
   // 問題永遠優先，不會被誤解成在問某一檔。
-  if (targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && !topicNewsQuery && history.length > 0) {
+  if (targets.length === 0 && !methodQuestion && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && !topicNewsQuery && history.length > 0) {
     targets = await resolveFollowupTargets(question, history);
   }
   // 錯字（「建鼎呢?」→ 健鼎）：完全比對不到、也不是篩選／主題／追問時，猜最可能的一檔直接分析，
   // 並要求 AI 開頭先確認（2026-10-05 使用者回報直接回「資料庫中沒有建鼎」）。見 fuzzyName.ts。
-  if (!contextSymbol && targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen) {
+  if (!contextSymbol && targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen && !methodQuestion) {
     const guess = await guessSymbolByFuzzyName(question).catch(() => null);
     if (guess) {
       targets = [{ symbol: guess.best.symbol, market: guess.best.market }];
@@ -486,6 +500,7 @@ export async function answerQuestion(
     { text: stockGroundingText, userSafe: true },
     { text: comparisonText, userSafe: false },
     { text: fuzzyNote, userSafe: false },
+    { text: methodQuestion && targets.length === 0 ? METHOD_QUESTION_NOTE : "", userSafe: false },
     { text: ratingChangeText, userSafe: false },
     { text: notFoundNote, userSafe: false },
     { text: partialNotFoundNote, userSafe: false },
@@ -627,12 +642,14 @@ ${actionBriefText}` : "",
       },
     });
     if (checked.issues.length > 0) console.warn("[ask] 回答後檢查：", checked.outcome, JSON.stringify(checked.issues));
+    // 方法題：模型沒講到判斷方式（例如反問「要查哪一檔」）就改用程式版說明（NVIDIA 評測實測會反問）。
+    const methodFallback = methodQuestion && targets.length === 0 && !METHOD_ANSWER_PATTERN.test(checked.answer);
     return {
-      answer: checked.answer,
+      answer: methodFallback ? METHOD_QUESTION_NOTE.replace(/^【[^】]*】\n/, "") : checked.answer,
       groundedSymbol,
       resolvedTargets: targets.map((t) => t.symbol),
       usedAi: true,
-      model: checked.outcome === "program" ? PROGRAM_MODEL : modelInfo(result.model),
+      model: checked.outcome === "program" || methodFallback ? PROGRAM_MODEL : modelInfo(result.model),
     };
   }
 

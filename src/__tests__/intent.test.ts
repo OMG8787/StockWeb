@@ -280,3 +280,13 @@ describe("「這幾檔／這些」指代上一則回答的整份清單（2026-10
     expect(await resolveListReferenceTargets([{ role: "assistant", content: "沒有股票" }])).toEqual([]);
   });
 });
+
+import { isMethodQuestion } from "@/lib/ai/intent";
+describe("isMethodQuestion", () => {
+  it("方法題沒有指代詞才算", () => {
+    expect(isMethodQuestion("你怎麼判斷是要放著還是認賠出場?")).toBe(true);
+    expect(isMethodQuestion("停損要怎麼設")).toBe(true);
+    expect(isMethodQuestion("這檔怎麼判斷要不要賣")).toBe(false);
+    expect(isMethodQuestion("鴻海能買嗎")).toBe(false);
+  });
+});
