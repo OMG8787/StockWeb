@@ -15,7 +15,7 @@ import {
 import type { Candle, ChartRange } from "@/lib/data";
 import { sanitizeCandles } from "@/lib/data/candleSanity";
 import { computeSignals } from "@/lib/signals";
-import { applyIndicatorData, INDICATOR_DEFS, type IndicatorSeries } from "@/lib/chartIndicatorDefs";
+import { applyIndicatorData, INDICATOR_DEFS, trimIndicatorData, type IndicatorSeries } from "@/lib/chartIndicatorDefs";
 import { formatPrice, formatVolume } from "@/lib/format";
 import { readChartPalette, subscribeToTheme } from "@/lib/theme";
 import {
@@ -102,6 +102,9 @@ export default function StockChart({
   // 額外state記住「candles實際的資料形狀」，資料形狀判斷永遠跟資料本身
   // 綁在一起更新，不會有中間態。
   const [candlesRange, setCandlesRange] = useState<ChartRange>("3m");
+  // 指標暖機用的更早日K（API `warmup=1`，見 lib/data/chart.ts CHART_WARMUP_RANGE）：只拿來算
+  // MA／MACD／KD／RSI，不畫K線；跟 candles 在同一個 handler 一起更新，不會錯位。
+  const [warmupCandles, setWarmupCandles] = useState<Candle[]>([]);
   const isCandlesIntraday = candlesRange === "today";
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -121,8 +124,6 @@ export default function StockChart({
     getIndicatorSettings,
     () => DEFAULT_INDICATOR_SETTINGS
   );
-  const [showSettings, setShowSettings] = useState(false);
-  const settingsRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -141,6 +142,11 @@ export default function StockChart({
   // 這裡不需要知道細節。
   const indicatorSeriesRef = useRef<Partial<Record<keyof ChartIndicatorSettings, Record<string, IndicatorSeries>>>>({});
   const candleMapRef = useRef<Map<string, Candle>>(new Map());
+  // 副圖標題＋數值圖例（DOM 疊在各副圖左上角）：資料依 時間→數值 存起來，十字線移動時查表。
+  const legendLayerRef = useRef<HTMLDivElement | null>(null);
+  const legendApiRef = useRef<{ render: (timeKey: string | null) => void; layout: () => void } | null>(null);
+  const indicatorValuesRef = useRef<Record<string, Record<string, Map<string, number>>>>({});
+  const indicatorLastRef = useRef<Record<string, Record<string, number>>>({});
   const currency = market === "TW" ? "TWD" : "USD";
   // Live values for the crosshair callback, which is registered once but
   // has to keep reflecting the current theme and the current symbol.
@@ -149,28 +155,6 @@ export default function StockChart({
   useEffect(() => {
     formatRef.current = { currency, market };
   }, [currency, market]);
-
-  // 2026-09-23 Opus地毯式巡檢抓到：「技術線」設定選單原本只能靠再點一次
-  // ⚙按鈕才會收合，點選單以外的地方或按Esc都沒反應，選單會一直蓋住K線圖
-  // 右側的價格軸。比照SiteHeader.tsx搜尋建議清單「點外面收起」的既有做法，
-  // 補上點外部/按Esc關閉。
-  useEffect(() => {
-    if (!showSettings) return;
-    function onPointerDown(e: MouseEvent | TouchEvent) {
-      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setShowSettings(false);
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setShowSettings(false);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("touchstart", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("touchstart", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [showSettings]);
 
   function toggleIndicator(key: keyof ChartIndicatorSettings) {
     // No local setState call needed: setIndicatorSettings() writes to
@@ -204,7 +188,7 @@ export default function StockChart({
     // equivalent external-store refactor available.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    fetch(`/api/chart/${encodeURIComponent(symbol)}?range=${range}&market=${market}`)
+    fetch(`/api/chart/${encodeURIComponent(symbol)}?range=${range}&market=${market}&warmup=1`)
       .then(async (res) => {
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.error ?? "圖表資料暫時無法取得");
@@ -216,6 +200,7 @@ export default function StockChart({
         // 防止舊快取或未來新資料源漏網的 null/NaN 讓 lightweight-charts 丟出
         // "Value is null" 整張圖畫不出來；指標/訊號也都吃這份已清理的 candles。
         setCandles(sanitizeCandles(data.candles));
+        setWarmupCandles(sanitizeCandles(data.warmupCandles ?? []));
         setCandlesRange(range);
         setError(null);
       })
@@ -399,6 +384,61 @@ export default function StockChart({
       const paneIndex = i + 1;
       indicatorSeriesRef.current[def.key] = def.createSeries(chart, palette, paneIndex);
     });
+    // 副圖高度：價格主圖（含量能）佔大頭，每個副圖約 150px 等分；沒設的話 lightweight-charts
+    // 預設每個 pane 平分高度，主圖會被壓扁（2026-10-06 使用者回報看不清楚）。
+    if (activeSubPaneDefs.length > 0) {
+      const panes = chart.panes();
+      panes[0]?.setStretchFactor(3.2);
+      for (let i = 1; i < panes.length; i++) panes[i].setStretchFactor(1);
+    }
+
+    // 副圖標題＋數值圖例：DOM 疊層，位置跟著各 pane 的實際位置算（pane 高度會隨視窗縮放）。
+    const legendLayer = legendLayerRef.current;
+    const legendEls: Record<string, HTMLDivElement> = {};
+    if (legendLayer) {
+      legendLayer.replaceChildren();
+      activeSubPaneDefs.forEach((def) => {
+        const el = document.createElement("div");
+        el.className = "absolute left-2 text-xs tabular-nums whitespace-nowrap";
+        el.style.pointerEvents = "none";
+        legendLayer.appendChild(el);
+        legendEls[def.key] = el;
+      });
+    }
+    const fmtLegend = (v: number | undefined, digits: number) => (v === undefined ? "—" : v.toFixed(digits));
+    legendApiRef.current = {
+      render(timeKey) {
+        activeSubPaneDefs.forEach((def) => {
+          const el = legendEls[def.key];
+          if (!el || !def.legend) return;
+          const byTime = indicatorValuesRef.current[def.key];
+          const last = indicatorLastRef.current[def.key];
+          const items = def.legend.items
+            .map((it) => {
+              const v = timeKey ? byTime?.[it.name]?.get(timeKey) : last?.[it.name];
+              return `<span style="color:${it.color};margin-left:8px">${it.label} ${fmtLegend(v, it.digits ?? 2)}</span>`;
+            })
+            .join("");
+          el.innerHTML = `<span style="color:var(--text-secondary);font-weight:600">${def.legend.title}</span>${items}`;
+        });
+      },
+      layout() {
+        const container = containerRef.current;
+        if (!container) return;
+        const panes = chart.panes();
+        const base = container.getBoundingClientRect().top;
+        activeSubPaneDefs.forEach((def, i) => {
+          const el = legendEls[def.key];
+          const paneEl = panes[i + 1]?.getHTMLElement();
+          if (!el || !paneEl) return;
+          el.style.top = `${paneEl.getBoundingClientRect().top - base + 4}px`;
+        });
+      },
+    };
+    legendApiRef.current.render(null);
+    const resizeObserver = new ResizeObserver(() => legendApiRef.current?.layout());
+    if (containerRef.current) resizeObserver.observe(containerRef.current);
+    const layoutRaf = requestAnimationFrame(() => legendApiRef.current?.layout());
 
     chart.subscribeCrosshairMove((param) => {
       const tooltip = tooltipRef.current;
@@ -407,8 +447,10 @@ export default function StockChart({
 
       if (!param.point || !param.time || param.point.x < 0 || param.point.y < 0) {
         tooltip.style.opacity = "0";
+        legendApiRef.current?.render(null);
         return;
       }
+      legendApiRef.current?.render(timeToKey(param.time));
       const candle = candleMapRef.current.get(timeToKey(param.time));
       if (!candle) {
         tooltip.style.opacity = "0";
@@ -473,6 +515,9 @@ export default function StockChart({
     setChartVersion((v) => v + 1);
 
     return () => {
+      cancelAnimationFrame(layoutRaf);
+      resizeObserver.disconnect();
+      legendApiRef.current = null;
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
@@ -583,17 +628,36 @@ export default function StockChart({
     // chart-load scale (at most a few thousand candles even for "10年") and
     // avoids having to track partial-update state per series.
     if (candles) {
+      // 暖機K線＋顯示K線一起算，算完只留顯示區間內的點（見 trimIndicatorData）。當日走勢沒有暖機也沒有指標。
+      const allCandles = isCandlesIntraday || warmupCandles.length === 0 ? candles : [...warmupCandles, ...candles];
+      const fromTime = candles[0]?.time ?? "";
+      const values: Record<string, Record<string, Map<string, number>>> = {};
+      const lasts: Record<string, Record<string, number>> = {};
       INDICATOR_DEFS.forEach((def) => {
         const seriesMap = indicatorSeriesRef.current[def.key];
         if (!seriesMap) return;
-        applyIndicatorData(seriesMap, def.computeData(candles, paletteRef.current));
+        const data = trimIndicatorData(def.computeData(allCandles, paletteRef.current), fromTime);
+        applyIndicatorData(seriesMap, data);
+        if (def.legend) {
+          values[def.key] = {};
+          lasts[def.key] = {};
+          for (const [name, points] of Object.entries(data)) {
+            values[def.key][name] = new Map(points.map((p) => [p.time, p.value]));
+            const lastPoint = points[points.length - 1];
+            if (lastPoint) lasts[def.key][name] = lastPoint.value;
+          }
+        }
       });
+      indicatorValuesRef.current = values;
+      indicatorLastRef.current = lasts;
+      legendApiRef.current?.render(null);
+      legendApiRef.current?.layout();
     }
 
     // 背景自動更新（skipFitRef）不重置使用者目前的縮放／平移位置。
     if (skipFitRef.current) skipFitRef.current = false;
     else chartRef.current.timeScale().fitContent();
-  }, [chartData, themeTick, chartVersion, candles]);
+  }, [chartData, themeTick, chartVersion, candles, warmupCandles, isCandlesIntraday]);
 
   // Same reasoning as activeSubPaneDefs above: every one of these signals (MA
   // alignment, RSI, MACD, volume-vs-trailing-average) is defined in terms of
@@ -607,7 +671,7 @@ export default function StockChart({
 
   // Sub-panes each need real vertical room of their own, or MACD/RSI/KD
   // render squashed into a sliver under the price pane.
-  const chartHeight = 360 + activeSubPaneDefs.length * 130;
+  const chartHeight = 380 + activeSubPaneDefs.length * 150;
 
   return (
     <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
@@ -627,33 +691,32 @@ export default function StockChart({
             </button>
           ))}
         </div>
-        {/* Hidden for "today" rather than shown-but-inert: every one of
-            these indicators is computed over daily bars (see activeSubPaneDefs'
-            comment), so none of them would actually appear on an intraday
-            chart even with a box checked — a visible-but-nonfunctional
-            control is more confusing than no control at all. */}
-        {!isIntraday && (
-        <div className="relative" ref={settingsRef}>
-          <button
-            onClick={() => setShowSettings((v) => !v)}
-            className="rounded-md border border-(--gridline) px-3 py-1.5 text-sm font-medium text-(--text-secondary) hover:bg-(--page-plane)"
-          >
-            ⚙ 技術線
-          </button>
-          {showSettings && (
-            <div className="absolute right-0 z-20 mt-1 w-44 rounded-md border border-(--gridline) bg-(--surface-1) p-2 shadow-lg">
-              <p className="mb-1 px-1 text-[13px] text-(--text-muted)">套用到所有股票的圖表</p>
-              {INDICATOR_DEFS.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-(--page-plane)">
-                  <input type="checkbox" checked={indicators[key]} onChange={() => toggleIndicator(key)} />
-                  {label}
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-        )}
       </div>
+      {/* 技術指標開關（2026-10-06 使用者回報找不到 MACD／KD：原本藏在「⚙ 技術線」下拉裡）。
+          直接攤成小按鈕放在週期列正下方；設定照舊存 localStorage（chartIndicatorSettings），所有股票共用。
+          「當日」是分時圖，日線指標沒有意義，改顯示說明文字而不是放一排按了沒反應的按鈕。 */}
+      {isIntraday ? (
+        <p className="mb-3 text-[13px] text-(--text-muted)">當日走勢為分時圖，不顯示日線技術指標（MA／布林／MACD／KDJ／RSI）；切換到「5日」以上即可開啟。</p>
+      ) : (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[13px] text-(--text-muted)">技術指標</span>
+          {INDICATOR_DEFS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={indicators[key]}
+              onClick={() => toggleIndicator(key)}
+              className={`rounded-full border px-2.5 py-1 text-[13px] font-medium transition-colors ${
+                indicators[key]
+                  ? "border-(--accent) bg-(--accent) text-white"
+                  : "border-(--gridline) text-(--text-secondary) hover:bg-(--page-plane)"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {signals.length > 0 && (
         <div className="mb-3">
           <SignalTags signals={signals} />
@@ -661,6 +724,7 @@ export default function StockChart({
       )}
       <div className="relative w-full" style={{ height: chartHeight }}>
         <div ref={containerRef} className="absolute inset-0" />
+        <div ref={legendLayerRef} className="pointer-events-none absolute inset-0 z-[5]" />
         <div
           ref={tooltipRef}
           className="pointer-events-none absolute z-10 rounded-md border border-(--gridline) bg-(--surface-2) px-3 py-2 text-xs shadow-lg opacity-0 transition-opacity"

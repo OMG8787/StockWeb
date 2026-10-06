@@ -118,6 +118,8 @@ export function computeMacdSeries(candles: Candle[]): MacdSeries {
 export interface KdSeries {
   k: IndicatorPoint[];
   d: IndicatorPoint[];
+  /** J = 3K − 2D（KDJ 的 J 線，可超出 0～100）；只有 K、D 同一天都有值的日子才有點。 */
+  j: IndicatorPoint[];
 }
 
 /** (9,3,3) stochastic oscillator — same method/parameters as
@@ -126,7 +128,7 @@ export interface KdSeries {
 export function computeKdSeries(candles: Candle[]): KdSeries {
   const PERIOD = 9;
   const SMOOTH = 3;
-  if (candles.length < PERIOD + SMOOTH * 2) return { k: [], d: [] };
+  if (candles.length < PERIOD + SMOOTH * 2) return { k: [], d: [], j: [] };
 
   const rawK: (number | null)[] = candles.map((c, i) => {
     if (i < PERIOD - 1) return null;
@@ -137,7 +139,7 @@ export function computeKdSeries(candles: Candle[]): KdSeries {
     return range > 0 ? ((c.close - lowestLow) / range) * 100 : 50;
   });
   const firstValidIndex = rawK.findIndex((v) => v !== null);
-  if (firstValidIndex === -1) return { k: [], d: [] };
+  if (firstValidIndex === -1) return { k: [], d: [], j: [] };
   const validRawK = rawK.slice(firstValidIndex) as number[];
   const kValues = sma(validRawK, SMOOTH);
   const kValuesCompact = kValues.filter((v): v is number => v !== null);
@@ -166,5 +168,11 @@ export function computeKdSeries(candles: Candle[]): KdSeries {
     if (v == null || candleIndex >= candles.length) continue;
     d.push({ time: candles[candleIndex].time, value: v });
   }
-  return { k, d };
+  const kByTime = new Map(k.map((p) => [p.time, p.value]));
+  const j: IndicatorPoint[] = [];
+  for (const p of d) {
+    const kv = kByTime.get(p.time);
+    if (kv !== undefined) j.push({ time: p.time, value: 3 * kv - 2 * p.value });
+  }
+  return { k, d, j };
 }

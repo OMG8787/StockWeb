@@ -28,6 +28,8 @@ export interface IndicatorDef {
   /** paneIndex 只有 pane==="sub" 的指標會用到；price-pane的指標不必理會這個參數，
    *  不傳給 chart.addSeries() 時 lightweight-charts 預設就是 pane 0。 */
   createSeries(chart: IChartApi, palette: ChartPalette, paneIndex: number): Record<string, IndicatorSeries>;
+  /** 副圖標題與圖例（只有 pane==="sub" 用）：series 名稱對應 createSeries()／computeData() 的 key。 */
+  legend?: { title: string; items: { name: string; label: string; color: string; digits?: number }[] };
   computeData(candles: Candle[], palette: ChartPalette): Record<string, IndicatorPointData[]>;
 }
 
@@ -48,6 +50,14 @@ const MACD_SIGNAL_COLOR = "#f59e0b";
 const RSI_COLOR = "#a855f7";
 const KD_K_COLOR = "#3b82f6";
 const KD_D_COLOR = "#f59e0b";
+const KD_J_COLOR = "#a855f7";
+
+const REF_LINE_COLOR = "#9ca3af";
+function addRefLines(series: IndicatorSeries, levels: number[]) {
+  levels.forEach((price) =>
+    series.createPriceLine({ price, color: REF_LINE_COLOR, lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "" })
+  );
+}
 
 const LINE_OPTS = { lineWidth: 1 as const, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false };
 
@@ -84,6 +94,14 @@ export const INDICATOR_DEFS: IndicatorDef[] = [
     key: "macd",
     label: "MACD",
     pane: "sub",
+    legend: {
+      title: "MACD(12,26,9)",
+      items: [
+        { name: "macd", label: "DIF", color: MACD_COLOR, digits: 2 },
+        { name: "signal", label: "DEA", color: MACD_SIGNAL_COLOR, digits: 2 },
+        { name: "histogram", label: "柱", color: "#6b7280", digits: 2 },
+      ],
+    },
     createSeries: (chart, palette, paneIndex) => ({
       histogram: chart.addSeries(HistogramSeries, { color: palette.textMuted, priceLineVisible: false, lastValueVisible: false }, paneIndex),
       macd: chart.addSeries(LineSeries, { ...LINE_OPTS, color: MACD_COLOR }, paneIndex),
@@ -99,26 +117,53 @@ export const INDICATOR_DEFS: IndicatorDef[] = [
     },
   },
   {
+    key: "kd",
+    label: "KDJ",
+    pane: "sub",
+    legend: {
+      title: "KDJ(9,3,3)",
+      items: [
+        { name: "k", label: "K", color: KD_K_COLOR, digits: 1 },
+        { name: "d", label: "D", color: KD_D_COLOR, digits: 1 },
+        { name: "j", label: "J", color: KD_J_COLOR, digits: 1 },
+      ],
+    },
+    createSeries: (chart, _palette, paneIndex) => {
+      const k = chart.addSeries(LineSeries, { ...LINE_OPTS, color: KD_K_COLOR }, paneIndex);
+      const d = chart.addSeries(LineSeries, { ...LINE_OPTS, color: KD_D_COLOR }, paneIndex);
+      const j = chart.addSeries(LineSeries, { ...LINE_OPTS, color: KD_J_COLOR }, paneIndex);
+      addRefLines(k, [20, 80]);
+      return { k, d, j };
+    },
+    computeData: (candles) => {
+      const kd = computeKdSeries(candles);
+      return { k: kd.k, d: kd.d, j: kd.j };
+    },
+  },
+  {
     key: "rsi",
     label: "RSI",
     pane: "sub",
-    createSeries: (chart, _palette, paneIndex) => ({ line: chart.addSeries(LineSeries, { ...LINE_OPTS, color: RSI_COLOR }, paneIndex) }),
+    legend: { title: "RSI(14)", items: [{ name: "line", label: "RSI", color: RSI_COLOR, digits: 1 }] },
+    createSeries: (chart, _palette, paneIndex) => {
+      const line = chart.addSeries(LineSeries, { ...LINE_OPTS, color: RSI_COLOR }, paneIndex);
+      addRefLines(line, [30, 70]);
+      return { line };
+    },
     computeData: (candles) => ({ line: computeRsiSeries(candles) }),
   },
-  {
-    key: "kd",
-    label: "KD",
-    pane: "sub",
-    createSeries: (chart, _palette, paneIndex) => ({
-      k: chart.addSeries(LineSeries, { ...LINE_OPTS, color: KD_K_COLOR }, paneIndex),
-      d: chart.addSeries(LineSeries, { ...LINE_OPTS, color: KD_D_COLOR }, paneIndex),
-    }),
-    computeData: (candles) => {
-      const kd = computeKdSeries(candles);
-      return { k: kd.k, d: kd.d };
-    },
-  },
 ];
+
+/**
+ * 暖機用：指標是用「暖機K線＋顯示K線」一起算的，算完要把早於顯示區間第一根的點丟掉，
+ * 否則指標線會把時間軸往左撐出一段沒有K線的空白。日線時間是 "YYYY-MM-DD"，字串比較即可。
+ */
+export function trimIndicatorData(
+  data: Record<string, IndicatorPointData[]>,
+  fromTime: string
+): Record<string, IndicatorPointData[]> {
+  return Object.fromEntries(Object.entries(data).map(([name, points]) => [name, points.filter((p) => p.time >= fromTime)]));
+}
 
 /**
  * 把 computeData() 算出來的資料塞進 createSeries() 建立的對應 series。

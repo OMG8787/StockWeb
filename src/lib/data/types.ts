@@ -101,6 +101,11 @@ export interface ChartResponse {
   market: Market;
   range: ChartRange;
   candles: Candle[];
+  /**
+   * 只有呼叫 getChartWithWarmup()（/api/chart?warmup=1）時才有：緊接在 `candles` 第一根
+   * 之前、時間較早的日K，專供 MA／布林／MACD／KD／RSI 暖機用，**不可拿來畫K線**。
+   */
+  warmupCandles?: Candle[];
 }
 
 /**

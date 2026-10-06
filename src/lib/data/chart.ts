@@ -121,3 +121,37 @@ export function getLastChartFailure(symbolInput: string, range: ChartRange, mark
   const market = marketHint ?? detectMarket(symbol);
   return lastChartFailure.get(`${market}:${symbol}:${range}`);
 }
+
+/**
+ * 技術指標暖機用的較長區間（2026-10-06 使用者回報「無法顯示出MACD與KD」：3個月只有約63根，
+ * MACD 要 34 根暖機、MA60 要 60 根，可見範圍內幾乎沒有線）。顯示區間 → 用來補「更早K線」的區間；
+ * 5y／10y 暖機的月份請求太多（61～121個月）不值得，開頭約34根（占比不到3%）留白。
+ */
+export const CHART_WARMUP_RANGE: Partial<Record<ChartRange, ChartRange>> = {
+  "5d": "1y",
+  "10d": "1y",
+  "1m": "1y",
+  "3m": "1y",
+  "6m": "1y",
+  "1y": "2y",
+  "2y": "5y",
+};
+
+/**
+ * getChart() 加上 `warmupCandles`＝顯示區間第一根之前的更早日K。顯示用的 `candles` 跟
+ * getChart(range) 完全相同（沿用既有區間裁切邏輯、不重算），暖機資料抓不到時退回空陣列、
+ * 不影響主圖（指標只是前段沒有線）。兩次呼叫都走 getChart 的快取，不會重複打上游。
+ */
+export async function getChartWithWarmup(
+  symbolInput: string,
+  range: ChartRange,
+  marketHint?: Market
+): Promise<ChartResponse | null> {
+  const display = await getChart(symbolInput, range, marketHint);
+  const warmRange = CHART_WARMUP_RANGE[range];
+  if (!display || !warmRange || display.candles.length === 0) return display;
+  const full = await getChart(symbolInput, warmRange, marketHint).catch(() => null);
+  const firstTime = display.candles[0].time;
+  const warmupCandles = full ? full.candles.filter((c) => c.time < firstTime) : [];
+  return { ...display, warmupCandles };
+}

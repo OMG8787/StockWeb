@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getChart, getLastChartFailure } from "@/lib/data";
+import { getChart, getChartWithWarmup, getLastChartFailure } from "@/lib/data";
 import type { ChartRange, Market } from "@/lib/data";
 import { withLivePollWait } from "@/lib/data/livePollContext";
 
@@ -24,7 +24,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ symb
     return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
   }
   try {
-    const chart = await withLivePollWait(req, () => getChart(symbol, range, market));
+    // warmup=1：圖表頁用，額外回傳顯示區間之前的日K（warmupCandles），讓 MA／MACD／KD 在可見範圍全程有值。
+    const wantWarmup = req.nextUrl.searchParams.get("warmup") === "1";
+    const chart = await withLivePollWait(req, () => (wantWarmup ? getChartWithWarmup(symbol, range, market) : getChart(symbol, range, market)));
     if (!chart) {
       return NextResponse.json(
         { error: "目前無法取得歷史圖表資料", detail: getLastChartFailure(symbol, range, market) },
