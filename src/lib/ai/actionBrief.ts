@@ -1,3 +1,4 @@
+import { MARGIN_SIGNAL_TITLE } from "./marginSignalData";
 import { confidenceText } from "./siteRating";
 import { peekCached, writeCached } from "@/lib/data/cache";
 import { cachedWithDegradedPredicate } from "@/lib/data/degradedCache";
@@ -108,8 +109,11 @@ const ACTION_RULE_WRITING =
 // (3)在括號裡自己加過渡語寫出「本益比（股價淨值比等指標中，本益比代表…）」這種破碎句。
 const ACTION_RULE_GLOSSARY = `【術語】第一次出現時在同一句用≤15字括號白話帶過，不另開段落；同一句有多個術語要各自解釋；括號裡直接放解釋、不加「簡單來說」「XX等指標中」之類過渡語。可照抄：三大法人（外資、投信、自營商）、外資（外國機構投資人）、投信（國內基金公司）、自營商（券商自營部門）、融資（借錢買股）、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MAJOR_HOLDERS}、買超／賣超（買進多於賣出／反之）、本益比（股價是年獲利幾倍）、股價淨值比（股價是淨資產幾倍）、殖利率（年股息占股價比例）、營收年增率（營收比去年同月成長）、每股盈餘（每股賺多少錢）、爆量（成交量暴增）、均線（過去N天平均價）、多頭／空頭排列（短均線在長均線上／下）、MACD（判斷趨勢轉強弱）、黃金交叉（短線上穿長線，轉強）、死亡交叉（短線下穿長線，轉弱）、KD（看短線過熱過冷）、RSI（0~100，越高漲越兇）、布林通道（股價正常波動區間）。交稿前逐一檢查每個術語第一次出現時有沒有括號解釋，漏了補上（這條優先於字數上限）。原始資料自帶的括號說明（例如「MACD黃金交叉（0軸上方…）」）照抄，不要把自己的解釋塞進同一個括號。`;
 
+// 候選股參考資料有「${MARGIN_SIGNAL_TITLE}」那一行（程式算好、只有非中性才附）時的講法；不計分、不改面向數。
+const ACTION_RULE_MARGIN_SIGNAL_SUFFIX = `候選股有「${MARGIN_SIGNAL_TITLE}」行時，點到那一檔就用一句講出訊號名稱、白話意義與依據數字（單日數字、不是趨勢，不可改成相反方向），但它不計入面向支持數、也不單獨決定買不買；沒有那一行就不要自己從融資融券數字編組合判讀。`;
+
 // 「持股結構面」在今日建議裡的專屬規則（措辭共通規則在 RULE_HOLDING_STRUCTURE_WORDING）。
-const ACTION_RULE_HOLDING_STRUCTURE = `籌碼面＝三大法人今天買賣超幾張（流量）；${HOLDING_STRUCTURE_FACET_NAME}＝大戶／外資持股比例、融資使用率、融券使用率跟前期比的變化（存量），兩者不要混為一談。引用時帶實際數字，不寫「持股結構不錯」這種空話；標【無資料】就寫查不到，不可編數字。融資使用率偏高或單日急升是散戶槓桿升溫的追高風險，不可講成利多。融券使用率只列資訊不計分：${RULE_SHORT_UTILIZATION_MEANING}`;
+const ACTION_RULE_HOLDING_STRUCTURE = `籌碼面＝三大法人今天買賣超幾張（流量）；${HOLDING_STRUCTURE_FACET_NAME}＝大戶／外資持股比例、融資使用率、融券使用率跟前期比的變化（存量），兩者不要混為一談。引用時帶實際數字，不寫「持股結構不錯」這種空話；標【無資料】就寫查不到，不可編數字。融資使用率偏高或單日急升是散戶槓桿升溫的追高風險，不可講成利多。融券使用率只列資訊不計分：${RULE_SHORT_UTILIZATION_MEANING}${ACTION_RULE_MARGIN_SIGNAL_SUFFIX}`;
 
 const ACTION_RULE_DATA_HONESTY = [
   "技術面標【無資料】代表「今天沒有2個以上技術訊號同時成立」，要寫「技術面今天沒有夠強的訊號」，不可寫成「技術面無資料」。",
@@ -138,7 +142,7 @@ export { NOT_CHASE_TITLE, groupedPickLines, type ActionBriefPick } from "./actio
 
 /** AI 解說層快取前綴：帶台北日期＋時段——不跨日沿用、今日建議→明日操作建議時換一份（slotCached 的 latest 也在這個前綴下）。 */
 export function actionAiLayerPrefix(day: string, mode: BriefMode): string {
-  return `action-brief-ai:v1:${day}:${mode}`;
+  return `action-brief-ai:v2:${day}:${mode}`;
 }
 
 /** 程式即時層（名單、結論、價位、操作計畫）：跟 stockRating 同樣 10 分鐘，不需要 AI、不吃配額。 */

@@ -1,3 +1,4 @@
+import { marginSignalLine } from "./marginSignal";
 import {
   getChips,
   getChipsRanking,
@@ -81,8 +82,11 @@ const US_ENRICH_LIMIT = 4;
 function describeCandidate(c: ScoredCandidate): string {
   const head = `● ${c.name}(${c.symbol})　現價 ${c.price}　今日 ${pct(c.changePercent)}　入選原因：${c.sources.join("／")}`;
   const body = [...c.facets, c.newsFacet].map((f) => `　- ${f.name}【${f.verdict}】${f.detail}`);
+  // 融資融券組合判讀（程式算好、只有非中性才附，見 marginSignal.ts）；不計分，只是給 AI 解說籌碼的線索。
+  const margin = marginSignalLine(c.chips, c.changePercent);
+  const marginRow = margin ? [`　- ${margin}`] : [];
   const tail = `　→ 面向支持數：${c.supportCount}/${SCORED_FACET_COUNT}（其中明確不支持 ${c.againstCount} 項）`;
-  return [head, ...body, tail].join("\n");
+  return [head, ...body, ...marginRow, tail].join("\n");
 }
 
 /**

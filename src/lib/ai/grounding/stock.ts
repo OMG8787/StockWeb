@@ -43,6 +43,7 @@ import { AI_VIEW_TITLE, AI_VIEW_VISIBLE_TO_USERS, describeAiView } from "../lear
 import type { HistoryPeriod } from "../intent";
 import { stripNameMarker } from "../fuzzyName";
 import { describeDecisionCard } from "../decisionCard";
+import { marginSignalLine } from "../marginSignal";
 
 /**
  * opts.period：使用者明確問到過去某天/某段期間（intent.ts detectHistoryPeriod）時，
@@ -264,6 +265,9 @@ export async function buildStockGrounding(
     // 標題註明資料日；盤中當天的個股法人尚未公布時明講（見 stockNewsAndChips.ts）。
     if (parts.length > 0) lines.push(`${chipsSectionTitle(chips.date ?? chips.marginDate, taipeiDayKey(), isTaipeiWeekend())}：${parts.join("；")}`);
   }
+  // 融資融券組合判讀（程式依單日數字算好，只有非中性才附；日期對不上時改用日K算融資融券那天的漲跌，見 marginSignal.ts）。
+  const marginSignalText = quote.market === "TW" ? marginSignalLine(chips, quote.changePercent, { candles: chartYear?.candles ?? chart?.candles }) : null;
+  if (marginSignalText) lines.push(marginSignalText);
   const chipsRatiosText = describeChipsRatios(chipsRatios);
   if (chipsRatiosText) lines.push(chipsRatiosText);
   const sentimentText = describeSocialSentiment(socialSentiment);

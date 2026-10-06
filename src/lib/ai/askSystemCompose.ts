@@ -29,6 +29,7 @@ import {
   RULE_CHIPS_RATIOS,
   RULE_SOCIAL_SENTIMENT,
   RULE_SECTOR_FACTORS,
+  RULE_MARGIN_SIGNAL,
   RULE_MULTI_STOCK_COMPARISON,
   RULE_INTRADAY_TW,
   RULE_INTRADAY_US,
@@ -61,6 +62,7 @@ import {
 import { DECISION_CARD_TITLE } from "./decisionCard";
 import { MARKET_PULSE_TITLE } from "./grounding/movers";
 import { SITE_RATING_TITLE } from "./siteRating";
+import { MARGIN_SIGNAL_TITLE } from "./marginSignalData";
 import { SIMILAR_CASES_TITLE } from "./learning/similar";
 import { LESSONS_TITLE } from "./learning/lessonMatch";
 import { RULE_AI_VIEW, RULE_EXPERIENCE } from "./learning/experienceRule";
@@ -72,6 +74,7 @@ export const BLOCK_MARKERS = {
   recentCrosses: RECENT_CROSSES_TITLE, // grounding/indicators.ts（共用常數）
   sectorFactors: SECTOR_FACTORS_TITLE, // grounding/sectorFactors.ts（共用常數）
   priceLevels: PRICE_LEVELS_TITLE, // grounding/priceLevels.ts（共用常數）
+  marginSignal: MARGIN_SIGNAL_TITLE, // marginSignalData.ts（共用常數）
   chipsRatios: "籌碼比例（", // grounding/chipsRatios.ts
   socialSentiment: "社群情緒（", // grounding/sentiment.ts
   institutional: "三大法人", // grounding/stock.ts、movers.ts、techScreen.ts
@@ -168,6 +171,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     dataText.includes(BLOCK_MARKERS.institutional) ? RULE_TW_CHIPS : "",
     dataText.includes(BLOCK_MARKERS.chipsRatios) ? RULE_CHIPS_RATIOS : "",
     dataText.includes(BLOCK_MARKERS.sectorFactors) ? RULE_SECTOR_FACTORS : "",
+    dataText.includes(BLOCK_MARKERS.marginSignal) ? RULE_MARGIN_SIGNAL : "",
     dataText.includes(BLOCK_MARKERS.socialSentiment) || SOCIAL_TOPIC_PATTERN.test(c.question) ? RULE_SOCIAL_SENTIMENT : "",
     c.stockCount > 1 ? RULE_MULTI_STOCK_COMPARISON : "",
     c.twMarketOpen && (hasStockLike || c.moversText || c.techScreenText) ? RULE_INTRADAY_TW : "",

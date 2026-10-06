@@ -1,3 +1,5 @@
+import { marginSignalLine } from "./marginSignal";
+import { MARGIN_SIGNAL_TITLE } from "./marginSignalData";
 import { slotCached } from "./slotCache";
 import { dailyBriefSlot } from "./aiSchedule";
 import { premiumFellBack } from "./gemini";
@@ -61,7 +63,8 @@ export interface DailyBrief {
 // v7：2026-10-05 補「同一個數字只寫一次」規則（BRIEF_RULE_NO_REPEAT_NUMBER），作廢舊快取
 // v8：2026-10-05 快報改成「今日重點＋現象→原因→後續＋明天要留意」600~900字（使用者嫌太簡短、沒因果）
 // v9：2026-10-05 改成依時點重寫（slotCache.ts）
-const BRIEF_CACHE_KEY = "daily-brief:v9";
+// v10：2026-10-06 參考資料新增「融資融券組合判讀」區塊（marginSignal.ts，只有非中性才附）
+const BRIEF_CACHE_KEY = "daily-brief:v10";
 
 function listStocks(items: Array<{ name: string; symbol: string; changePercent: number }>): string {
   return items.map((i) => `${i.name}(${i.symbol})：${i.changePercent >= 0 ? "+" : ""}${i.changePercent}%`).join("、");
@@ -107,6 +110,22 @@ async function buildTwHoldingStructureSummary(
     })
     .filter((l): l is string => l !== null);
   return lines.length > 0 ? lines.join("\n") : "（今日主要漲跌個股查無大戶／外資持股／融資／融券資料）";
+}
+
+// 「主要漲跌個股的融資融券組合判讀」：程式依單日數字算好（marginSignal.ts），只列非中性的；全部中性回空字串（區塊整段不附）。
+async function buildTwMarginSignalSummary(
+  twGainers: Array<{ name: string; symbol: string; changePercent: number }>,
+  twLosers: Array<{ name: string; symbol: string; changePercent: number }>
+): Promise<string> {
+  const targets = [...twGainers.slice(0, MOVERS_LIST_LIMIT), ...twLosers.slice(0, MOVERS_LIST_LIMIT)];
+  const lines = await Promise.all(
+    targets.map(async (s) => {
+      const chips = await getChips(s.symbol, "TW").catch(() => null);
+      const line = marginSignalLine(chips, s.changePercent);
+      return line ? `${s.name}(${s.symbol})：${line}` : null;
+    })
+  );
+  return lines.filter((l): l is string => l !== null).join("\n");
 }
 
 // ── 今日快報系統提示詞（具名常數，見 CLAUDE.md 規則九）──
@@ -160,7 +179,7 @@ const BRIEF_RULE_NO_REPEAT_NUMBER =
   "同一個數字（同一項目、同一期間）全文只寫一次，不可在同一句或不同點換句話重複（例如不可寫『外資近5日賣超401.3億、近5日外資-401.3億』）。";
 
 // 今日快報對「持股結構」三項的措辭規則（共通的週資料／照抄升降規則在 RULE_HOLDING_STRUCTURE_WORDING）。
-const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資／融券比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_UTILIZATION_MEANING}`;
+const BRIEF_RULE_HOLDING_STRUCTURE = `大戶／外資持股／融資／融券比例只能當解釋台股漲跌的線索之一，不可推論未來漲跌。第一次提到時括號帶過：${GLOSS_MAJOR_HOLDERS}、${GLOSS_FOREIGN_HOLDING}、${GLOSS_MARGIN_UTILIZATION}、${GLOSS_SHORT_UTILIZATION}。${RULE_HOLDING_STRUCTURE_WORDING}${RULE_SHORT_UTILIZATION_MEANING}有「${MARGIN_SIGNAL_TITLE}」區塊時，講到那一檔就用一句帶出訊號名稱與白話意義（單日數字、不是趨勢，不可改成相反方向，不可推論未來漲跌）；沒有該區塊就不要自己從融資融券數字編組合判讀。`;
 
 const BRIEF_SYSTEM_PROMPT = [
   BRIEF_ROLE,
@@ -203,9 +222,10 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
         // 國際／地緣政治／總經（戰爭、制裁、油價、Fed…）：固定的「台股」「美股」查詢抓不到這類大事。
         fetchIntlMarketNews(8).catch(() => []),
       ]);
-    const [chipsSummary, holdingSummary] = await Promise.all([
+    const [chipsSummary, holdingSummary, marginSignalSummary] = await Promise.all([
       buildTwChipsSummary(twGainers, twLosers),
       buildTwHoldingStructureSummary(twGainers, twLosers),
+      buildTwMarginSignalSummary(twGainers, twLosers).catch(() => ""),
     ]);
 
     const twStatus = getMarketStatus("TW");
@@ -237,6 +257,9 @@ export async function getDailyBrief(forceRefresh = false): Promise<DailyBrief> {
       "",
       "【主要漲跌個股的大戶／外資／融資／融券比例（僅台股，附前期變化；大戶是集保每週公布的週資料、跟上一週比，外資持股、融資使用率與融券使用率是每日資料、跟前一交易日比；升降幅度已算好，直接引用）】",
       holdingSummary,
+      ...(marginSignalSummary
+        ? ["", `【主要漲跌個股的${MARGIN_SIGNAL_TITLE}（僅台股、程式依單日數字算好，只列有訊號的；結論照用、不可反向或擴大成趨勢）】`, marginSignalSummary]
+        : []),
       "",
       "【近期市場新聞（台股，依時間排序，可能橫跨最近幾天）】",
       twNews.length > 0 ? twNews.map((n) => `- [${n.pubDate.slice(0, 10)}] ${n.title}${n.source ? `（${n.source}）` : ""}`).join("\n") : "（無法取得）",
