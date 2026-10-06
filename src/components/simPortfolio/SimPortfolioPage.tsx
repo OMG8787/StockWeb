@@ -39,8 +39,8 @@ export default function SimPortfolioPage() {
               <Stat label="今日報酬" value={pct(perf.dayReturnPct)} cls={tone(perf.dayReturnPct)} />
               <Stat label="累計報酬" value={pct(perf.totalReturnPct)} cls={tone(perf.totalReturnPct)} />
               <Stat label="vs 0050（百分點）" value={signedPts(perf.vsEtfPct)} cls={tone(perf.vsEtfPct)} />
-              <Stat label="同期 0050 買進持有" value={pct(perf.etfReturnPct)} cls={tone(perf.etfReturnPct)} />
-              <Stat label="同期加權指數" value={pct(perf.indexReturnPct)} cls={tone(perf.indexReturnPct)} />
+              <Stat label="同期 0050 買進持有（自建倉當下起算）" value={pct(perf.etfReturnPct)} cls={tone(perf.etfReturnPct)} />
+              <Stat label="同期加權指數（自建倉當下起算）" value={pct(perf.indexReturnPct)} cls={tone(perf.indexReturnPct)} />
               <Stat label="已實現損益" value={`${ntd(perf.realized)} 元`} cls={tone(perf.realized)} />
               <Stat label="未實現損益" value={`${ntd(perf.unrealized)} 元`} cls={tone(perf.unrealized)} />
               <Stat label="最大回撤" value={`${perf.maxDrawdownPct.toFixed(2)}%`} />
@@ -185,7 +185,7 @@ export default function SimPortfolioPage() {
             學習：每筆交易依據的評等記進評等紀錄（來源「AI模擬投資組合」），由每日學習工作算 1／5／20 日獎勵；平倉時另算「扣成本報酬 − 同期加權指數」獎勵；每天收盤後 AI
             依這些數字寫檢討並存進學習紀錄。
           </li>
-          <li>對照組：{r.benchmark} 與加權指數從開始那天的價格起算（0050 只計價格、未含股利）。</li>
+          <li>對照組：{r.benchmark} 與加權指數從第一次建倉當下的價格起算（不是當天開盤或昨收，所以第一天會跟當日漲跌幅不同；0050 只計價格、未含股利）。</li>
         </ul>
       </section>
     </div>

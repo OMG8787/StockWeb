@@ -90,10 +90,6 @@ export default function HomePage() {
 
       <DailyBriefCard />
 
-      <SimPortfolioCard />
-
-      <WatchlistSection />
-
       <section>
         <h2 className="mb-3 text-lg font-semibold">大盤指數</h2>
         <Suspense fallback={<BlockSkeleton height="h-44" />}>
@@ -109,6 +105,11 @@ export default function HomePage() {
           </Suspense>
         )}
       </section>
+
+      {/* 2026-10-06 使用者：大盤指數移到快報下面、關注名單移到 AI 模擬上面。 */}
+      <WatchlistSection />
+
+      <SimPortfolioCard />
 
       <section>
         <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
