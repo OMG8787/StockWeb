@@ -10,7 +10,7 @@ import type { SimReview, SimState } from "./types";
  * AI 模擬投資組合的每日收盤後檢討（13:35 時點跑完交易後一次，一天一次 AI 呼叫，用預設 lite 等級、不吃較強模型配額）。
  * 「做了什麼、為什麼、哪筆錯了」的事實（交易、評等理由、已實現獎勵、未實現損益）全部由程式先整理好（buildReviewFacts），
  * AI 只負責把它寫成白話並指出問題；AI 失敗就用程式版（同一份事實）。
- * 完整檢討另存進學習紀錄命名空間 `learning:v1:sim-review:{日期}`（400 天），跟評等紀錄、獎勵同一套學習架構；
+ * 完整檢討另存進學習紀錄命名空間 `learning:v1:sim-review:{日期}`（永久，不設過期），跟評等紀錄、獎勵同一套學習架構；
  * 交易本身的評等也以 source＝sim-portfolio 記進評等紀錄，由每日學習工作算 1／5／20 日獎勵。
  */
 
@@ -18,7 +18,6 @@ import type { SimReview, SimState } from "./types";
 export function simReviewKey(day: string): string {
   return `${LEARNING_KEY_PREFIX}sim-review:${day}`;
 }
-const SIM_REVIEW_TTL_SECONDS = 400 * 86_400;
 /** 未實現虧損超過這個百分比（已扣賣出成本）就列為「可能判斷錯誤」要檢討。 */
 export const SIM_REVIEW_LOSS_FLAG_PCT = 5;
 /** 檢討帶入最近幾筆已平倉交易。 */
@@ -99,7 +98,7 @@ export async function writeSimReview(state: SimState, perf: SimPerformance, pric
   }
   if (redis) {
     await redis
-      .set(simReviewKey(day), JSON.stringify({ ...review, facts }), { ex: SIM_REVIEW_TTL_SECONDS })
+      .set(simReviewKey(day), JSON.stringify({ ...review, facts }))
       .catch((err) => console.warn("[sim-portfolio] 檢討寫入學習紀錄失敗：", err));
   }
   return review;

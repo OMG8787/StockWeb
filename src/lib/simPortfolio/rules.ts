@@ -124,6 +124,7 @@ export function newSimState(now: Date, base: { etf: number | null; index: number
     stats: { closedTrades: 0, wins: 0, realized: 0, fees: 0, buys: 0, sells: 0, rewardSum: 0, rewardCount: 0 },
     base,
     doneSlots: [],
+    archiveBackfilled: true,
   };
 }
 
@@ -208,14 +209,20 @@ function soldOn(state: SimState, day: string): Set<string> {
  *   每檔目標 SIM_NEW_POSITION_PCT×淨值（現金不夠就用剩下的），低於 SIM_MIN_TRADE_AMOUNT 不買。
  * - 加碼：持有中「可分批加碼」、不是當天買的、當天沒加碼過，加到單檔上限 SIM_MAX_POSITION_PCT 為止，每次最多 SIM_ADD_POSITION_PCT。
  */
+/** 決策說明：key＝`c:{代號}`（候選）或 `h:{代號}`（持股），value＝動作或不動作的原因（封存「決策紀錄」用）。 */
+export type SimPlanExplain = Map<string, string>;
+
 export function planSimOrders(input: {
   state: SimState;
   day: string;
   held: HeldReview[];
   candidates: BuyCandidate[];
   prices: Map<string, number>;
+  /** 有給就逐檔寫下選或不選、動或不動的原因（不影響決策） */
+  explain?: SimPlanExplain;
 }): SimOrder[] {
   const { state, day, held, candidates, prices } = input;
+  const why = (k: string, v: string) => input.explain?.set(k, v);
   const orders: SimOrder[] = [];
   const nav = navOf(state, prices);
   let cash = state.cash;
@@ -224,17 +231,27 @@ export function planSimOrders(input: {
 
   for (const r of held) {
     const h = byHolding.get(r.symbol);
-    if (!h || !(r.price > 0)) continue;
+    if (!h) continue;
+    if (!(r.price > 0)) {
+      why(`h:${r.symbol}`, "讀不到價格，這個時點不動作");
+      continue;
+    }
     let sell: { shares: number; reason: string; reduce?: boolean } | null = null;
     if (h.stopPrice != null && r.price <= h.stopPrice) {
       sell = { shares: h.shares, reason: `現價 ${r.price} 跌破持有中出場價 ${h.stopPrice}，依紀律全部賣出` };
-    } else if (h.buyDay !== day) {
-      if (r.rating.holdingCode === "exit") sell = { shares: h.shares, reason: `評等轉為「${r.rating.holdingLabel}」：${r.rating.reason}` };
-      else if (r.rating.holdingCode === "reduce" && !h.reduced)
-        sell = { shares: halfShares(h.shares), reason: `評等轉為「${r.rating.holdingLabel}」，先賣一半：${r.rating.reason}`, reduce: true };
+    } else if (h.buyDay === day) {
+      why(`h:${r.symbol}`, `今天剛買進，不因評等當天賣（評等「${r.rating.holdingLabel}」）`);
+    } else if (r.rating.holdingCode === "exit") {
+      sell = { shares: h.shares, reason: `評等轉為「${r.rating.holdingLabel}」：${r.rating.reason}` };
+    } else if (r.rating.holdingCode === "reduce") {
+      if (!h.reduced) sell = { shares: halfShares(h.shares), reason: `評等轉為「${r.rating.holdingLabel}」，先賣一半：${r.rating.reason}`, reduce: true };
+      else why(`h:${r.symbol}`, `評等「${r.rating.holdingLabel}」，但已減碼過一次，不重複減碼（等出場或停損）`);
+    } else if (r.rating.holdingCode === "hold") {
+      why(`h:${r.symbol}`, `評等「${r.rating.holdingLabel}」，續抱不動作`);
     }
     if (!sell) continue;
     orders.push({ symbol: h.symbol, name: h.name, side: "sell", shares: sell.shares, price: r.price, ratingLabel: r.rating.holdingLabel, reason: sell.reason, reduce: sell.reduce });
+    why(`h:${r.symbol}`, `${sell.reduce ? "減碼賣一半" : "全部賣出"}：${sell.reason}`);
     cash += Math.round(r.price * sell.shares) - sellFee(r.price, sell.shares);
     if (sell.shares >= h.shares) remaining.delete(h.symbol);
   }
@@ -242,28 +259,65 @@ export function planSimOrders(input: {
   const sold = soldOn(state, day);
   for (const o of orders) sold.add(o.symbol);
   for (const c of candidates) {
-    if (remaining.size >= SIM_MAX_POSITIONS) break;
-    if (c.rating.code !== "buy" || byHolding.has(c.symbol) || sold.has(c.symbol)) continue;
-    if (!(c.price > 0)) continue;
+    const k = `c:${c.symbol}`;
+    if (c.rating.code !== "buy") {
+      why(k, `評等不是建議買進（${c.rating.label}）`);
+      continue;
+    }
+    if (byHolding.has(c.symbol)) {
+      why(k, "已持有（改看持股的加碼條件）");
+      continue;
+    }
+    if (sold.has(c.symbol)) {
+      why(k, "今天剛賣出，當天不買回");
+      continue;
+    }
+    if (remaining.size >= SIM_MAX_POSITIONS) {
+      why(k, `持股已滿 ${SIM_MAX_POSITIONS} 檔`);
+      continue;
+    }
+    if (!(c.price > 0)) {
+      why(k, "讀不到價格");
+      continue;
+    }
     const budget = Math.min(SIM_NEW_POSITION_PCT * nav, cash);
-    if (budget < SIM_MIN_TRADE_AMOUNT) break;
+    if (budget < SIM_MIN_TRADE_AMOUNT) {
+      why(k, `可用現金 ${Math.round(cash)} 元，不足單筆下限 ${SIM_MIN_TRADE_AMOUNT} 元`);
+      continue;
+    }
     const shares = sharesForBudget(budget, c.price);
-    if (shares <= 0 || Math.round(c.price * shares) < SIM_MIN_TRADE_AMOUNT) continue;
+    if (shares <= 0 || Math.round(c.price * shares) < SIM_MIN_TRADE_AMOUNT) {
+      why(k, `預算 ${Math.round(budget)} 元買不到足額（低於單筆下限 ${SIM_MIN_TRADE_AMOUNT} 元）`);
+      continue;
+    }
     orders.push({ symbol: c.symbol, name: c.name, side: "buy", shares, price: c.price, ratingLabel: c.rating.label, reason: c.rating.reason });
+    why(k, `買進 ${shares} 股（約淨值 ${SIM_NEW_POSITION_PCT * 100}%）：${c.rating.label}`);
     cash -= Math.round(c.price * shares) + buyFee(c.price, shares);
     remaining.add(c.symbol);
   }
 
   for (const r of held) {
     const h = byHolding.get(r.symbol);
-    if (!h || r.rating.holdingCode !== "add" || h.buyDay === day || h.lastAddDay === day) continue;
+    if (!h || r.rating.holdingCode !== "add") continue;
+    const k = `h:${r.symbol}`;
     if (orders.some((o) => o.symbol === h.symbol) || !(r.price > 0)) continue;
+    if (h.buyDay === day || h.lastAddDay === day) {
+      why(k, `評等「${r.rating.holdingLabel}」，但${h.buyDay === day ? "今天剛買進" : "今天已加碼過"}，不再加碼`);
+      continue;
+    }
     const room = SIM_MAX_POSITION_PCT * nav - h.shares * r.price;
     const budget = Math.min(room, SIM_ADD_POSITION_PCT * nav, cash);
-    if (budget < SIM_MIN_TRADE_AMOUNT) continue;
+    if (budget < SIM_MIN_TRADE_AMOUNT) {
+      why(k, `評等「${r.rating.holdingLabel}」，但${room < SIM_MIN_TRADE_AMOUNT ? `已接近單檔上限 ${SIM_MAX_POSITION_PCT * 100}%` : "現金不足"}，不加碼`);
+      continue;
+    }
     const shares = sharesForBudget(budget, r.price);
-    if (shares <= 0 || Math.round(r.price * shares) < SIM_MIN_TRADE_AMOUNT) continue;
+    if (shares <= 0 || Math.round(r.price * shares) < SIM_MIN_TRADE_AMOUNT) {
+      why(k, `評等「${r.rating.holdingLabel}」，但可加碼金額低於單筆下限，不加碼`);
+      continue;
+    }
     orders.push({ symbol: h.symbol, name: h.name, side: "buy", shares, price: r.price, ratingLabel: r.rating.holdingLabel, reason: `持有中評等「${r.rating.holdingLabel}」，加碼（單檔上限 ${SIM_MAX_POSITION_PCT * 100}%）：${r.rating.reason}`, add: true });
+    why(k, `加碼 ${shares} 股：評等「${r.rating.holdingLabel}」`);
     cash -= Math.round(r.price * shares) + buyFee(r.price, shares);
   }
   return orders;

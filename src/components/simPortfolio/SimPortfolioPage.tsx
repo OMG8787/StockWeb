@@ -3,6 +3,7 @@
 import Link from "next/link";
 import MarkdownLite from "../MarkdownLite";
 import NavChart from "./NavChart";
+import SimArchiveSection from "./SimArchiveSection";
 import SimPortfolioHoldingsTable from "./SimPortfolioHoldingsTable";
 import { fmtTime, ntd, pct, SIM_DISCLAIMER, tone, useSimPortfolio } from "./useSimPortfolio";
 
@@ -155,6 +156,8 @@ export default function SimPortfolioPage() {
           </section>
         </>
       )}
+
+      {data.started && data.startDay && <SimArchiveSection startDay={data.startDay} />}
 
       <section className={card}>
         <h2 className="font-semibold">規則（程式決定，AI 不參與買賣）</h2>

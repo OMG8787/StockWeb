@@ -3,6 +3,8 @@
  * 規則常數與純邏輯在 rules.ts，I/O 在 run.ts／store.ts／view.ts。
  */
 
+import type { SimRatingSnapshot } from "./archive";
+
 export type SimSlotId = "0930" | "1300" | "1335" | "1435";
 
 export interface SimHolding {
@@ -119,6 +121,8 @@ export interface SimState {
   doneSlots: string[];
   /** 盤後定價委託中（13:35 那輪下單、14:30 收盤價成交，14:35 那輪結算）；沒有就是空陣列或沒有這欄 */
   pending?: SimPendingOrder[];
+  /** 封存（archive.ts）上線前的舊交易已補進封存 */
+  archiveBackfilled?: boolean;
   /** 最近一次執行 */
   lastRun?: { at: string; slot: SimSlotId; day: string; note: string };
 }
@@ -138,4 +142,6 @@ export interface SimPendingOrder {
   reason: string;
   reduce?: boolean;
   add?: boolean;
+  /** 下單當下的評等快照（結算成交後一起封存，見 archive.ts） */
+  rating?: SimRatingSnapshot | null;
 }

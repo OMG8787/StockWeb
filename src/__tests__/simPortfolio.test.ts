@@ -330,3 +330,27 @@ describe("撮合與盤後委託", () => {
     expect(currentSimSlot(tpe(DAY, "14:35"))?.kind).toBe("fixed-settle");
   });
 });
+
+describe("決策說明（封存用，不影響決策）", () => {
+  it("候選逐檔寫下選或不選的原因、持股寫下動或不動的原因", () => {
+    const s = newSimState(tpe("2026-10-05", "09:30"), { etf: 100, index: 20000 });
+    for (let i = 0; i < SIM_MAX_POSITIONS - 1; i++)
+      applySimOrder(s, { symbol: `H${i}`, name: "x", side: "buy", shares: 100, price: 100, ratingLabel: "", reason: "" }, ctx("2026-10-05"));
+    const explain = new Map<string, string>();
+    const held: HeldReview[] = [{ symbol: "H0", price: 100, changePercent: 0, rating: rating("buy", "hold"), newStop: 90 }];
+    const orders = planSimOrders({
+      state: s,
+      day: DAY,
+      held,
+      candidates: [cand("N1", 50), cand("N2", 50), cand("N3", 50, 1, "avoid"), cand("H1", 100)],
+      prices: new Map(),
+      explain,
+    });
+    expect(orders.map((o) => o.symbol)).toEqual(["N1"]);
+    expect(explain.get("c:N1")).toContain("買進");
+    expect(explain.get("c:N2")).toContain("持股已滿");
+    expect(explain.get("c:N3")).toContain("不是建議買進");
+    expect(explain.get("c:H1")).toContain("已持有");
+    expect(explain.get("h:H0")).toContain("續抱");
+  });
+});
