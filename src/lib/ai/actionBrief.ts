@@ -142,7 +142,8 @@ export { NOT_CHASE_TITLE, groupedPickLines, type ActionBriefPick } from "./actio
 
 /** AI 解說層快取前綴：帶台北日期＋時段——不跨日沿用、今日建議→明日操作建議時換一份（slotCached 的 latest 也在這個前綴下）。 */
 export function actionAiLayerPrefix(day: string, mode: BriefMode): string {
-  return `action-brief-ai:v2:${day}:${mode}`;
+  // v3：2026-10-07 KD 改券商遞迴算法（舊 KD 算的解說不可沿用）。
+  return `action-brief-ai:v3:${day}:${mode}`;
 }
 
 /** 程式即時層（名單、結論、價位、操作計畫）：跟 stockRating 同樣 10 分鐘，不需要 AI、不吃配額。 */
@@ -199,6 +200,7 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
     reason: p.rating.rating.reason,
     plan: buildPlan(p.rating.rating, stance),
     confidence: confidenceText(p.rating.rating) || undefined,
+    riskNote: p.rating.rating.riskNote ?? undefined,
   }));
   const ratings = ratedPicks.map((p) => p.rating);
   // 只有輸入完整的這次才存檔當「上一份名單」（不完整的名單不能當之後的基準）。
@@ -211,7 +213,9 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
 async function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
   // v2（2026-10-06）：新增 degradedReasons 與凍結時段穩定名單；輸入不完整只快取 1 分鐘。
   // v3：2026-10-06 名單依本站把握程度排序、每檔附程式把握程度（confidence）。
-  const key = `action-list:v3:${taipeiDayKey()}:${stance.briefMode}`;
+  // v4：2026-10-07 每檔附程式風險原句（riskNote，四入口比較）。
+  // v5：2026-10-07 KD 改券商遞迴算法（舊 KD 算的名單不可沿用）。
+  const key = `action-list:v5:${taipeiDayKey()}:${stance.briefMode}`;
   const isDegraded = (l: ActionListLayer) => (l.degradedReasons?.length ?? 0) > 0;
   if (forceRefresh) {
     const fresh = await computeActionList(stance);

@@ -111,7 +111,7 @@ flowchart TD
 | 評等（建議買進／先不要買、已持有字樣、理由、拉回加碼價、出場價、改判條件） | `computeRatingCore()`（ratingCore.ts）→ `computeSiteRating()`（siteRating.ts） | `QUALIFY_MIN_SUPPORT／QUALIFY_MAX_AGAINST`（actionScoring.ts）、`VETO_FACETS`、`RISK_NOTE_ONLY_GUARDS`、`NEAR_ZONE_PCT` | stockRating.ts（正式站）、5 支回測（stability.ts 帶 chipsWindow＋confirmPrev） |
 | 融資融券組合判讀（追高風險／可能軋空／籌碼沉澱／空方佔優／中性） | `computeMarginSignal()`＋`marginSignalLine()`（marginSignal.ts；資料與文字在 marginSignalData.ts） | `MARGIN_SIGNAL_PRICE_MOVE_PCT`＝1、`MARGIN_BIG_CHANGE_PCT`＝3（且≥`MARGIN_MIN_CHANGE_LOTS`＝100張）、`SHORT_BIG_CHANGE_PCT`＝10（且≥`SHORT_MIN_CHANGE_LOTS`＝30張）、區塊標題 `MARGIN_SIGNAL_TITLE` | 個股資料（grounding/stock.ts，askSystemCompose 依標題帶 `RULE_MARGIN_SIGNAL`）、今日建議體檢表（actionGrounding.describeCandidate）、今日快報（brief.ts）。**只列資訊、不計分**（回測結果見 docs/backtest/2026-10-margin-signal.md）；融資融券交易日跟報價對不上時（收盤後～21 點）改用日K算那天漲跌，沒日K就不判讀；只有非中性才附 |
 | 籌碼面近 N 日累計（研究用，正式站未啟用） | `sumChipsWindow()`（chipsWindow.ts） | `CHIPS_WINDOW_DAYS`＝5 | 只有 stability.ts 回測；回測沒有比單日＋2日確認好 |
-| 本站把握程度（只給建議買進；高＝大盤不偏弱且連續≥3日、低＝大盤偏弱且剛轉買≤2日） | `ratingConfidence()`／`confidenceRank()`／`confidenceText()`／`describeConfidenceGrades()`（siteRating.ts）；連續天數＝confirmState.streak（沒有狀態時 `stateFromRatingLog()` 用評等紀錄回推） | `CONFIDENCE_HIGH_MIN_STREAK`＝3、`CONFIDENCE_LOW_MAX_STREAK`＝2 | describeSiteRating 評等行、今日建議排序（selectPickGroups，不再採用 AI order）與逐檔顯示、全市場推薦名單排序、技術篩選評等排序、關注清單僅關注彙整（formatWatchRatingSummary）、問高把握（RULE_HIGH_CONFIDENCE） |
+| 本站把握程度（只給建議買進；高＝大盤不偏弱且連續≥3日、低＝大盤偏弱且剛轉買≤2日） | `ratingConfidence()`／`confidenceRank()`／`confidenceText()`／`describeConfidenceGrades()`（siteRating.ts）；連續天數＝confirmState.streak（沒有狀態時 `stateFromRatingLog()` 用評等紀錄回推） | `CONFIDENCE_HIGH_MIN_STREAK`＝3、`CONFIDENCE_LOW_MAX_STREAK`＝2 | describeSiteRating 評等行、今日建議排序（selectPickGroups，不再採用 AI order）與逐檔顯示、全市場推薦名單排序、技術篩選評等排序、關注清單僅關注彙整（formatWatchRatingSummary）、問高把握（RULE_HIGH_CONFIDENCE）、結論卡「把握程度（照抄）」行（decisionCard.ts，未持有且建議買進才印）；**回答後保證** `ensureConfidenceMentioned()`（confidenceMention.ts）：買賣判斷題／關注清單深度分析回答提到建議買進的股票卻沒講把握程度，程式插在該檔結論句後（插不進去才附在最後），2026-10-07 四入口比較 ③④② 把握程度通過率 0～75%→100% |
 | 評等翻轉確認（新結論連續 2 個交易日才換，破底立即） | `applyRatingConfirmation()`（ratingStability.ts）→ `computeSiteRating({confirm})`（pendingChange、confirmState）；狀態 `readConfirmBase()／writeConfirmState()`（ratingConfirmStore.ts） | `MAX_GAP_DAYS`＝7、交易日＝最新一根日K日期 | stockRating（正式站）、stability.ts 回測、結論卡主要風險 |
 | 評等快取＋I/O | `getStockRating()`／`getStockRatings()`（stockRating.ts） | `STOCK_RATING_TTL_MS`＝10 分、失敗 60 秒 | 個股資料、持股、今日建議、技術篩選、AI 問答名單行、consistency 評測 |
 | 評等文字（給 AI 與名單） | `describeSiteRating()`（siteRating.ts） | `SITE_RATING_TITLE` | 個股資料、今日建議名單與「先不要買」區、AI 問答全市場名單、持股（未持有） |
@@ -146,9 +146,9 @@ flowchart TD
 | 快取 | key | TTL | 版本史／備註 |
 |---|---|---|---|
 | 個股評等 | `stock-rating:v5:{代號}:{台北日期}` | 10 分（失敗 60 秒） | 不含市場（避免同一檔有無市場各算一份）；改評等規則或 StockRatingResult 欄位要升版 |
-| 今日建議程式名單層 | `action-list:v3:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
+| 今日建議程式名單層 | `action-list:v5:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫、每檔程式風險原句 riskNote（v4：卡片「風險」優先用評等的具體短線風險，不用 AI 的泛用句；v5：KD 改券商遞迴算法）；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
 | 今日建議上一份名單存檔 | `action-list-last:v1:{資料已定時段代號}` | 62 小時 | 平日 22:00～隔天 08:30、週末同一代號（上一個交易日）；只存輸入完整那次的名單評等；重算時上一份名單的股票只有被重新評等為不建議買進才換掉（`actionStability.ts`）。輸入不完整（`degradedReasons`）的名單只快取 1 分鐘、不存檔 |
-| 今日建議 AI 解說層 | `action-brief-ai:v2:{台北日期}:{模式}:{時點}`＋`…:latest` | 時點值 36 小時、latest 7 天 | 名單或評等字樣變動的股票不沿用舊解說；不跨日 |
+| 今日建議 AI 解說層 | `action-brief-ai:v3:{台北日期}:{模式}:{時點}`＋`…:latest` | 時點值 36 小時、latest 7 天 | 名單或評等字樣變動的股票不沿用舊解說；不跨日 |
 | 今日快報 | `daily-brief:v10:{時點}`＋latest | 同上 | 存檔 `brief-archive:v1:{日期}` 400 天 |
 | AI 判斷層 | `ai-judge:v1:{日期}:{代號}` | 30 小時；失敗冷卻 30 分 | 每天最多 10 次呼叫 |
 | 加權指數日K | `learning:taiex:6m:{台北日期}` | 1 小時（失敗 60 秒） | 市況與弱市況提示共用 |
@@ -178,7 +178,7 @@ flowchart TD
 
 ## 5. 回答後檢查矩陣
 
-> AI 問答後處理（`postProcessAiAnswer`）末端另有兩個「補程式說明」：`ensureRatingChangeExplained`（評等跟前一交易日不同）與 `ensureMarginSignalMentioned`（個股資料有「融資融券組合判讀」【訊號】、回答提到該檔卻沒講出訊號名稱，marginSignal.ts）；評測走同一路徑。
+> AI 問答後處理（`postProcessAiAnswer`）末端另有三個「補程式說明」（第三個 `ensureConfidenceMentioned`：把握程度，confidenceMention.ts）：`ensureRatingChangeExplained`（評等跟前一交易日不同）與 `ensureMarginSignalMentioned`（個股資料有「融資融券組合判讀」【訊號】、回答提到該檔卻沒講出訊號名稱，marginSignal.ts）；評測走同一路徑。
 
 | AI 入口 | 繁中正規化 | 清內部標記 | 去評等標籤 | numberGuard（價位抄錯） | 先不要買刪價位 | 結構化輸出 |
 |---|---|---|---|---|---|---|

@@ -39,6 +39,8 @@ export interface ActionBriefPick {
   plan?: string;
   /** 本站把握程度（程式字樣「本站把握程度：高（…）」，siteRating.confidenceText；舊快取沒有這欄） */
   confidence?: string;
+  /** 評等的短線風險原句（siteRating.riskNote，程式依 RSI／布林／離支撐距離寫好）；有就當卡片的「風險」，不用 AI 的泛用句（四入口比較：AI 風險句常是千篇一律的「短線常回檔、宜分批」）。舊快取沒有這欄 */
+  riskNote?: string;
   /** AI 判斷層的一行看法——2026-10-06 起不顯示給使用者（冠軍／挑戰者證明前只記錄），保留欄位相容舊快取 */
   aiView?: string | null;
 }
@@ -218,7 +220,8 @@ export function groupedPickLines(
   const pickLine = (p: ActionBriefPick) => {
     const t = aiPickText(ai, p);
     const reason = str(t?.reason) || p.reason;
-    const risk = str(t?.risk);
+    // 風險：程式寫好的具體短線風險優先（每檔不同、帶數字）；沒有才用 AI 的一句。
+    const risk = p.riskNote ? str(p.riskNote.replace(/^短線風險：/, ""), 120) : str(t?.risk);
     // AI 看法接在同一個條列尾端（MarkdownLite 不支援巢狀清單，另起一行會被當成另一檔）。
     return [
       `- **${p.name}(${p.symbol})**：${p.label}。${p.confidence ? `${sentence(p.confidence)}。` : ""}${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,

@@ -1,6 +1,6 @@
 import type { Facet } from "./actionScoring";
 import { stripNameMarker } from "./fuzzyName";
-import type { SiteRating } from "./siteRating";
+import { confidenceText, type SiteRating } from "./siteRating";
 
 /**
  * 個股「結論卡」（2026-10-06「提高 Lite 下限」）：買賣判斷題由程式先把結論、價位、支持／不支持面向、主要風險
@@ -17,6 +17,8 @@ export const COMPARISON_PICK_TITLE = "【比較結論（程式依本站綜合評
 
 const CARD_FIRST = "- 第一句（照抄）：";
 const CARD_LEVELS = "- 價位：";
+/** 把握程度行（程式判定；只有未持有且建議買進才印）。confidenceMention.ts 靠這個前綴判斷「這題該講把握程度」。 */
+export const CARD_CONFIDENCE_PREFIX = "- 把握程度（照抄）：";
 const CARD_SUPPORT = "- 支持的面向：";
 const CARD_AGAINST = "- 不支持的面向：";
 const CARD_RISK = "- 主要風險：";
@@ -75,10 +77,11 @@ export function describeDecisionCard(c: DecisionCardInput): string {
     `${DECISION_CARD_TITLE}${stripNameMarker(c.name)}(${c.symbol})`,
     `${CARD_FIRST}${stripNameMarker(c.name)}(${c.symbol})${cardFirstSentence(c)}`,
     `${CARD_LEVELS}${levels}`,
+    ...(c.held || !confidenceText(r) ? [] : [`${CARD_CONFIDENCE_PREFIX}${confidenceText(r)}`]),
     `${CARD_SUPPORT}${support.length ? support.join("；") : "（無）"}`,
     `${CARD_AGAINST}${against.length ? against.join("；") : "（無）"}`,
     `${CARD_RISK}${mainRisk(c)}`,
-    "- 回答骨架：第一句照抄上面的結論→2～3 點理由（每點帶一個卡片或個股資料裡的具體數字，從支持／不支持面向挑真正決定結論的）→主要風險一句→怎麼做一句（依【目前時段與回答立場】）。精簡，不要逐項轉述資料。",
+    "- 回答骨架（四入口最優做法：今日建議卡）：第一句照抄上面的結論；卡片有「把握程度」行時緊接一句照抄它→怎麼做一句（依【目前時段與回答立場】，價位照卡片）→2～3 點理由（每點帶一個卡片或個股資料裡的具體數字，從支持／不支持面向挑真正決定結論的）→主要風險一句。精簡，不要逐項轉述資料。",
   ].join("\n");
 }
 
@@ -123,6 +126,7 @@ export const BUY_FORBIDDEN_PATTERN = /等回檔|等拉回再買|現價不買|現
 
 interface ParsedCard {
   first: string;
+  confidence: string;
   levels: string;
   support: string;
   against: string;
@@ -143,6 +147,7 @@ export function parseDecisionCards(grounding: string): ParsedCard[] {
     .map((chunk) => ({
       name: chunk.split("\n")[0].trim(),
       first: lineAfter(chunk, CARD_FIRST),
+      confidence: lineAfter(chunk, CARD_CONFIDENCE_PREFIX),
       levels: lineAfter(chunk, CARD_LEVELS),
       support: lineAfter(chunk, CARD_SUPPORT),
       against: lineAfter(chunk, CARD_AGAINST),
@@ -236,6 +241,7 @@ export function renderCardFallback(grounding: string): string | null {
   }
   const c = cards[0];
   const parts = [`${c.first}。`];
+  if (c.confidence) parts.push(`${c.confidence}。`);
   if (c.support && c.support !== "（無）") parts.push(`支持的理由：${c.support}。`);
   if (c.against && c.against !== "（無）") parts.push(`不支持的地方：${c.against}。`);
   if (c.levels && c.levels !== "（無）") parts.push(`價位：${c.levels}。`);

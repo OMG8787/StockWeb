@@ -29,7 +29,7 @@ export interface EntryGradeInput {
 const ENGLISH_SENTENCE = /(?:\b[A-Za-z][a-z']+\b[\s,]+){5,}\b[A-Za-z][a-z']+/;
 const INTERNAL_MARKERS = /【內部|非使用者可見|禁止原樣|內部系統標記|未持有[：:]\s*「|已持有[：:]\s*「|參考資料(顯示|中|裡)/;
 /** 先不要買時不可出現的買進價位／出場價／加碼寫法。 */
-const AVOID_FORBIDDEN_PRICE = /拉回到\s*[\d.]+\s*附近可加碼|加碼參考價|跌破\s*[\d.,]+\s*(元)?\s*(建議)?出場|買進區間|分批買進/;
+const AVOID_FORBIDDEN_PRICE = /(?<!不給|不提|不附|沒有|無|不用|不會給)(?:拉回到\s*[\d.]+\s*附近可加碼|加碼參考價|跌破\s*[\d.,]+\s*(元)?\s*(建議)?出場|買進區間|分批買進)/;
 const RISK_WORDS = /風險|留意|小心|注意|回檔|跌破|不確定|波動|過熱|追高|轉弱/;
 const ACTION_WORDS_BUY = /分批|可買|可以買|加碼|買進後|開盤|盤中/;
 const ACTION_WORDS_AVOID = /改判|轉為建議買進|條件|等到|再評估|不要買|不建議/;
@@ -139,8 +139,11 @@ export function extractStockSegment(answer: string, stocks: EntryStock[], symbol
   const headEnd = seg.indexOf("\n");
   if (firstBreak > 0 && headEnd >= 0 && firstBreak > headEnd) seg = seg.slice(0, firstBreak);
   // 程式附在整則回答最後的「融資融券組合判讀」說明，若有這一檔的那一行，併入這一檔（③④也都含這段，才公平）。
-  const sup = answer.split("\n").find((l) => /^\s*[-•]\s*/.test(l) && l.includes(`(${symbol})`) && l.includes("【") && l.includes("依據"));
-  if (sup && !seg.includes(sup.trim())) seg = `${seg.trim()}\n${sup.trim()}`;
+  // 程式附加的說明行（融資融券判讀、把握程度）都併入這一檔。
+  const sups = answer
+    .split("\n")
+    .filter((l) => /^\s*[-•]\s*/.test(l) && l.includes(`(${symbol})`) && ((l.includes("【") && l.includes("依據")) || l.includes("本站把握程度：")));
+  for (const sup of sups) if (!seg.includes(sup.trim())) seg = `${seg.trim()}\n${sup.trim()}`;
   seg = seg.replace(/\*\*/g, "");
   return seg.trim();
 }

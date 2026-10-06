@@ -90,6 +90,8 @@ function mkCase(id: string, question: string, extra: Partial<EvalCase> = {}): Ev
 async function main() {
   const regradePath = arg("regrade");
   if (regradePath) return regrade(regradePath);
+  const cmpIdx = process.argv.indexOf("--compare");
+  if (cmpIdx >= 0) return compare(process.argv[cmpIdx + 1], process.argv[cmpIdx + 2]);
   const stocks = parseStocks(arg("stocks") ?? DEFAULT_STOCKS);
   const variants = (arg("variants") ?? "gemini,nvidia").split(",");
   const cardMode = arg("card") ?? "prod"; // prod | local | both | none
@@ -277,6 +279,48 @@ async function regrade(p: string) {
   fs.writeFileSync(p, JSON.stringify(saved, null, 1));
   fs.writeFileSync(p.replace(/\.json$/, ".md"), renderEntriesReport(saved, p.replace(/\.json$/, "")));
   log(`重新評分完成：${p.replace(/\.json$/, ".md")}`);
+}
+
+/** 改前 vs 改後（只比兩邊都有的股票）：每個入口的規則通過率與評審平均、各規則通過率變化。 */
+function compare(beforePath: string, afterPath: string) {
+  const load = (f: string) => JSON.parse(fs.readFileSync(f, "utf8")) as Saved;
+  const before = load(beforePath);
+  const after = load(afterPath);
+  const common = new Set(before.records.map((r) => r.symbol).filter((s) => after.records.some((r) => r.symbol === s)));
+  const key = (r: EntryRecord) => (r.entry.startsWith("card") ? ENTRY_LABEL[r.entry] : `${ENTRY_LABEL[r.entry]}｜${r.variant}`);
+  const stat = (saved: Saved, k: string) => {
+    const rs = saved.records.filter((r) => key(r) === k && common.has(r.symbol));
+    const checks = rs.flatMap((r) => r.checks);
+    const js = rs.map((r) => r.judge?.score).filter((x): x is number => typeof x === "number");
+    return { n: rs.length, pass: checks.filter((c) => c.pass).length, total: checks.length, judge: js.length ? js.reduce((a, b) => a + b, 0) / js.length : NaN, chars: rs.length ? Math.round(rs.reduce((n, r) => n + plainLen(r.text), 0) / rs.length) : 0, rs };
+  };
+  const keys = [...new Set([...before.records, ...after.records].map(key))];
+  const L: string[] = [`# 四入口改前 vs 改後：${path.basename(beforePath, ".json")} → ${path.basename(afterPath, ".json")}`, "", `- 只比兩邊都有的股票：${[...common].join("、")}；評審＝NVIDIA 每筆 3 次平均（只當參考）。`, ""];
+  L.push("| 入口｜模型 | 檔數 | 規則通過率 改前→改後 | 評審平均 改前→改後 | 平均字數 改前→改後 |", "|---|---|---|---|---|");
+  for (const k of keys) {
+    const b = stat(before, k);
+    const a = stat(after, k);
+    if (!a.n && !b.n) continue;
+    const pc = (x: { pass: number; total: number }) => (x.total ? `${Math.round((x.pass / x.total) * 100)}%` : "—");
+    const jd = (x: { judge: number }) => (Number.isNaN(x.judge) ? "—" : x.judge.toFixed(2));
+    L.push(`| ${k} | ${b.n}→${a.n} | ${pc(b)}→${pc(a)} | ${jd(b)}→${jd(a)} | ${b.chars}→${a.chars} |`);
+  }
+  L.push("", "## 各規則通過率變化（只列有差異的）", "", "| 入口｜模型 | 規則 | 改前 | 改後 |", "|---|---|---|---|");
+  for (const k of keys) {
+    const rules = [...new Set([...stat(before, k).rs, ...stat(after, k).rs].flatMap((r) => r.checks.map((c) => c.rule)))];
+    for (const rule of rules) {
+      const rate = (saved: Saved) => {
+        const cs = stat(saved, k).rs.flatMap((r) => r.checks.filter((c) => c.rule === rule));
+        return cs.length ? { t: `${Math.round((cs.filter((c) => c.pass).length / cs.length) * 100)}%`, v: cs.filter((c) => c.pass).length / cs.length } : { t: "—", v: NaN };
+      };
+      const b = rate(before);
+      const a = rate(after);
+      if (b.t !== a.t) L.push(`| ${k} | ${rule} | ${b.t} | ${a.t} |`);
+    }
+  }
+  const out = path.join("docs", "eval", `${arg("out") ?? "entries-compare"}.md`);
+  fs.writeFileSync(out, L.join("\n"));
+  log(`比較表：${out}`);
 }
 
 // ---------------------------------------------------------------- 報告
