@@ -61,6 +61,15 @@ describe("computeSiteRating＋確認：維持前一交易日結論時，字樣�
     const broke = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(80, true), confirm: { prev: prevBuy, day: "2026-10-06" } });
     expect([broke.code, broke.holdingCode]).toEqual(["avoid", "exit"]);
   });
+  it("盤中跌破先警示不改判；跌幅達 INTRADAY_HARD_DROP_PCT 或收盤後才立即改判", () => {
+    const soft = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(80, true), confirm: { prev: prevBuy, day: "2026-10-06" }, intraday: { changePercent: -2 } });
+    expect(soft.code).toBe("buy");
+    expect(soft.pendingChange).toContain("盤中已跌破");
+    const hard = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(80, true), confirm: { prev: prevBuy, day: "2026-10-06" }, intraday: { changePercent: -6 } });
+    expect([hard.code, hard.holdingCode]).toEqual(["avoid", "exit"]);
+    const closed = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(80, true), confirm: { prev: prevBuy, day: "2026-10-06" }, intraday: null });
+    expect([closed.code, closed.holdingCode]).toEqual(["avoid", "exit"]);
+  });
   it("昨天先不要買、今天達門檻 → 先維持先不要買，改判條件寫明天仍達門檻", () => {
     const prevAvoid = applyRatingConfirmation(null, { code: "avoid", holdingCode: "hold", hardRisk: false, day: "2026-10-05" });
     const r = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(99), confirm: { prev: prevAvoid, day: "2026-10-06" } });

@@ -96,7 +96,16 @@ export interface RatingInput {
    * undefined＝不套（舊行為，回測比較用）。day＝這次評等的台北交易日。
    */
   confirm?: { prev: ConfirmState | null; day: string };
+  /**
+   * 盤中（台股開盤中）才給：今天到目前的漲跌幅。盤中跌破所有支撐先只警示、收盤確認才立即改判
+   * （2026-10-07 使用者同意：盤中短暫跌破又站回會讓結論一天內來回翻）；跌幅 ≥ INTRADAY_HARD_DROP_PCT 時盤中仍立即改判。
+   * 沒給＝收盤後／回測（照舊：跌破立即生效）。
+   */
+  intraday?: { changePercent: number } | null;
 }
+
+/** 盤中跌幅達到這個百分比（含跌停）時，跌破支撐不等收盤、立即改判。 */
+export const INTRADAY_HARD_DROP_PCT = 5;
 
 /** 內部用：翻轉確認期間，強制公布前一交易日的結論（不對外）。 */
 interface ForcedResult {
@@ -150,10 +159,11 @@ export function computeSiteRating(input: RatingInput): SiteRating {
   const raw = computeRawSiteRating(input, null);
   if (!input.confirm) return raw;
   const brokeDown = !!input.framework && !input.framework.zone;
+  const intradayBreak = brokeDown && !!input.intraday && input.intraday.changePercent > -INTRADAY_HARD_DROP_PCT;
   const st = applyRatingConfirmation(input.confirm.prev, {
     code: raw.code,
     holdingCode: raw.holdingCode,
-    hardRisk: brokeDown,
+    hardRisk: brokeDown && !intradayBreak,
     day: input.confirm.day,
   });
   if (st.code === raw.code && st.holdingCode === raw.holdingCode) return { ...raw, pendingChange: null, confirmState: st };
@@ -162,7 +172,9 @@ export function computeSiteRating(input: RatingInput): SiteRating {
     (st.code === "buy") !== (raw.code === "buy") ? `未持有「${raw.label}」` : "",
     holdClassOf(st.holdingCode) !== holdClassOf(raw.holdingCode) ? `已持有「${raw.holdingLabel}」` : "",
   ].filter(Boolean);
-  const pendingChange = `今天的資料指向${parts.join("、") || `「${raw.label}」`}（${raw.reason.split("；")[0]}），本站改判需連續 2 個交易日確認，下一個交易日仍如此才改判，今天維持前一交易日的結論`;
+  const pendingChange = intradayBreak
+    ? `盤中已跌破所有均線與近期低點（現價 ${fmt(input.framework!.price)}），收盤仍跌破就改判${parts.join("、") || `「${raw.label}」`}；盤中先維持前一交易日的結論`
+    : `今天的資料指向${parts.join("、") || `「${raw.label}」`}（${raw.reason.split("；")[0]}），本站改判需連續 2 個交易日確認，下一個交易日仍如此才改判，今天維持前一交易日的結論`;
   return { ...held, reason: `${held.reason}；${pendingChange}`, pendingChange, confirmState: st };
 }
 

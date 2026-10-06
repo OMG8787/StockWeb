@@ -2,6 +2,7 @@ import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMa
 import type { Market } from "@/lib/data";
 import { cachedWithDegradedNullTtl } from "@/lib/data/degradedCache";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
+import { getMarketStatus } from "@/lib/marketStatus";
 import type { Facet } from "./actionScoring";
 import { computeRatingCore } from "./ratingCore";
 import { logRating, type RatingSource } from "./ratingLog";
@@ -106,6 +107,8 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
     earnings,
     announcements,
     marketRet60Pct: await marketRetPromise,
+    // 盤中（台股開盤中）跌破支撐先警示、收盤確認才改判（siteRating INTRADAY_HARD_DROP_PCT）。
+    intraday: quote.market === "TW" && getMarketStatus("TW") === "open" ? { changePercent: quote.changePercent } : null,
     confirmPrev,
     confirmDay,
   });

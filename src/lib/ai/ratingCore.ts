@@ -33,6 +33,8 @@ export function ratingPriceFramework(
 }
 
 export interface RatingCoreInput {
+  /** 盤中才給（siteRating.RatingInput.intraday）：盤中跌破先警示、收盤確認才改判。回測不給。 */
+  intraday?: { changePercent: number } | null;
   symbol: string;
   name: string;
   price: number;
@@ -104,6 +106,7 @@ export function computeRatingCore(input: RatingCoreInput): RatingCoreResult {
     chase,
     ...(input.guards ? { guards: input.guards } : {}),
     marketRet60Pct: input.marketRet60Pct,
+    intraday: input.intraday ?? null,
     ...(input.confirmPrev !== undefined ? { confirm: { prev: input.confirmPrev, day: input.confirmDay ?? input.asOfDay } } : {}),
   });
   return { signals, scored, framework, chase, rating };
