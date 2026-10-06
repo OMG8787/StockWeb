@@ -386,8 +386,8 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 ## 接手狀態（CLAUDE.md 規則十；隨時更新，最後更新 2026-10-06 14:35 台北）
 
 **進行中／暫停的工作（2026-10-06 14:30 額度將滿時存檔）**
-1. 評測改前改後比較（Sonnet，可能被中斷）：等本機 mis.twse 解封（13:43 起再封鎖）→ 補改前 7 題（list-reference、yes-no、second-opinion、holding-target、stance-after-hours-fixed、stance-weekend、earlier-claim-chase）→ 改後完整 33 題（gemini-flash-lite-latest＋NVIDIA、`--judge-with nvidia`）→ `--compare`；退步就修或 revert `51b4087`／`976672c`。改前基準：worktree C:/Users/88691/Documents/Claude/Stock-web-baseline（2a14948）＋docs/eval/2026-10-06-lite-before.*；完成後刪該 worktree。**一次只開一個評測程序**。
-2. 評等穩定化＋把握程度＋持有字樣＋評等變動說明（程式全部完成、**未上線**）：worktree `scratchpad/wt-stab`（分支 stab-work，rebase 到 033b8b5，wip commit df7c0f4、5b0e30a、5a9306f、cdbe8c7），npm test 434 過。**下一步**：評測 agent 跑完後，循序跑改前（主分支）／改後（wt-stab，需複製 .env.local、跑完刪）：holdings-deep、holdings-sell、holding-target＋新題 holdings-labels、list-reference-digits、high-confidence；通過→整理 commit、rebase 到最新主分支、push；正式站抽測關注分析 1 題＋個股持有 1 題；刪 wt-stab。內容摘要：連 2 交易日確認（翻轉 4.64→1.32 次／月；20日 +0.76→+1.20% t2.33；樣本外仍負但改善）、程式把握程度（高＝大盤不弱且建議買進連續≥3日；樣本外 20日 高 +1.01% t2.63／中 −0.57／低 −1.55）、今日建議與各清單依把握程度排序（action-list v3、stock-rating v5、rating-confirm:v1）、停利標籤改單一動作＋guardHeldAnswer、ratingChange 擴充＋ensureRatingChangeExplained、「這3檔」指代、guardHoldingsCoverage。報告 docs/backtest/2026-10-stability.md。
+1. ✅ 評測改前改後比較（10/6 晚我自己循序跑完）：33 題，規則通過率 gemini 97→99%、nvidia 95→97%，全部通過題 26→31／23→26；評審分略降（2.88→2.79、3.27→3.21，僅參考）→ 保留 `51b4087`／`976672c`。報告 docs/eval/2026-10-06-eve-compare.md。Stock-web-baseline 已刪（先 `rmdir` 掉 node_modules junction 再刪資料夾）。
+2. 評等穩定化＋把握程度＋持有字樣＋評等變動說明（程式全部完成、**未上線**；10/6 晚已 rebase 到 b011f04 並解 holdings.ts 衝突（保留已賣出區塊＋僅關注彙整），stab-work 1c2db32，npm test 481 過；正在循序跑 6 題改前改後評測，log 在 scratchpad/stab-before.log、stab-after.log）：worktree `scratchpad/wt-stab`（分支 stab-work，rebase 到 033b8b5，wip commit df7c0f4、5b0e30a、5a9306f、cdbe8c7），npm test 434 過。**下一步**：評測 agent 跑完後，循序跑改前（主分支）／改後（wt-stab，需複製 .env.local、跑完刪）：holdings-deep、holdings-sell、holding-target＋新題 holdings-labels、list-reference-digits、high-confidence；通過→整理 commit、rebase 到最新主分支、push；正式站抽測關注分析 1 題＋個股持有 1 題；刪 wt-stab。內容摘要：連 2 交易日確認（翻轉 4.64→1.32 次／月；20日 +0.76→+1.20% t2.33；樣本外仍負但改善）、程式把握程度（高＝大盤不弱且建議買進連續≥3日；樣本外 20日 高 +1.01% t2.63／中 −0.57／低 −1.55）、今日建議與各清單依把握程度排序（action-list v3、stock-rating v5、rating-confirm:v1）、停利標籤改單一動作＋guardHeldAnswer、ratingChange 擴充＋ensureRatingChangeExplained、「這3檔」指代、guardHoldingsCoverage。報告 docs/backtest/2026-10-stability.md。
 3. 報價＋全站自動刷新（Sonnet）：自動刷新已上線（PageAutoRefresh、autoRefresh.ts）；`033b8b5` 批次失敗再試；`a32ec8e` 導覽／列表 prefetch 關閉——**待驗換頁速度**（各頁 5 秒內），變慢就改成只關列表連結。可能有 scratchpad/quote-wip.patch。10/7 盤中：量資料年齡、測 MIS「依 ex_ch 字串各自快取」假說。
 4. 關注清單「已賣出」（Sonnet）：已上線 `a339401`（部署狀態見 git log 後 gh statuses），本機 Playwright 14 項過，**待正式站驗證**。
 5. AI 模擬投資組合：已完成（`3e33491`、`cea32ce`、`c1e0bf2`、`1d39da4` 真實化、`10290a0` 永久保存）；待 14:35 結算時點確認封存寫入與盤後定價結算；10/7 盤中確認五檔成交價與漲跌停判斷。
@@ -452,6 +452,8 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **首頁卡片一直標示「Gemini Flash Lite；較強模型今日額度用完」**：本機 agent 測試與正式站共用同一把金鑰，吃掉非 lite 每日 20 次配額；且思考模型時限太短逾時。本機已強制只用 lite（premiumAllowedHere）。→ 工作日誌 2026-10-06（續3），搜尋「premiumAllowedHere」。
 - **今日建議名單在資料沒變時（盤前／深夜）反覆換股**：上游失敗被吞成空清單且殘缺結果照常快取。凍結時段保留上一份名單（actionStability.ts）。→ 工作日誌 2026-10-06（續3），搜尋「盤前名單跳動」。
 - **正式站 AI 問答用股名問卻答成大盤、resolvedTargets 為空**：先檢查是不是測試端編碼——Git Bash 的 curl 送中文 JSON 會變亂碼，改用 Python urllib（UTF-8）送。→ 工作日誌 2026-10-06（續3），搜尋「誤報」。
+- **刪 git worktree 資料夾時把主 repo 的 node_modules 一起刪掉**：worktree 裡的 node_modules 是指向主 repo 的 junction，`rm -rf`／`Remove-Item -Recurse` 會刪到目標內容；先 `cmd /c rmdir <worktree>
+ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-baseline。
 - **盤中畫面報價落後 30 秒～2 分鐘**：TTL＜輪詢間隔＋SWR 只等 1.5 秒回舊值、MIS 同網址回上游快取。→ 工作日誌 2026-10-06（續3），搜尋「x-live-poll」。
 
 ## 品保流程（詳細規則見 CLAUDE.md，這裡只摘要）
