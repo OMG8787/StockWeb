@@ -12,6 +12,8 @@ export interface EvalRecord {
   finalAnswer?: string;
   checks: CheckResult[];
   judge?: { score: number; reason: string; by?: string };
+  /** 回答後檢查（ask.ts finalizeAiAnswer）沒有一次通過時：重生／程式版／截斷修剪與原因 */
+  postCheck?: { outcome: string; issues: string[] };
 }
 
 export interface CaseCapture {

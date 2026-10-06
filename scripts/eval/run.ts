@@ -160,10 +160,37 @@ async function callVariant(variant: string, cap: Captured): Promise<{ text: stri
   }
 }
 
-async function postProcess(raw: string, grounding: string) {
+/** 回答後檢查不過時，用同一個模型（同一個 variant）帶錯誤說明重生一次——跟正式流程 ask.ts 一樣。 */
+async function regenerateWith(variant: string, cap: Captured, previous: string, issues: string[]): Promise<string | null> {
+  const ask = (await import("@/lib/ai/ask")) as { regenerateTurns?: (p: string, i: string[]) => ChatTurn[] };
+  if (!ask.regenerateTurns) return null;
+  const r = await callVariant(variant, { ...cap, messages: [...cap.messages, ...ask.regenerateTurns(previous, issues)] });
+  if ("error" in r) return null;
+  const { normalizeZhTw } = await import("@/lib/ai/zhTwNormalize");
+  const checked = normalizeZhTw(r.text);
+  return "rejectReason" in checked && checked.rejectReason ? null : checked.text;
+}
+
+async function postProcess(
+  raw: string,
+  grounding: string,
+  regenerate?: (issues: string[]) => Promise<string | null>
+): Promise<{ final: string; zhFixed: number; reject?: string; outcome?: string; issues?: string[] }> {
   const { normalizeZhTw } = await import("@/lib/ai/zhTwNormalize");
   const checked = normalizeZhTw(raw);
   if ("rejectReason" in checked && checked.rejectReason) return { final: "", zhFixed: checked.fixedCount, reject: checked.rejectReason };
+  // 與正式流程同一個入口（ask.ts finalizeAiAnswer：後處理→回答後檢查→重生→程式版）；舊版沒有就退回 postProcessAiAnswer。
+  const fin = (await import("@/lib/ai/ask")) as {
+    finalizeAiAnswer?: (i: { raw: string; grounding: string; regenerate?: (issues: string[]) => Promise<string | null> }) => Promise<{
+      answer: string;
+      outcome: string;
+      issues: string[];
+    }>;
+  };
+  if (fin.finalizeAiAnswer) {
+    const f = await fin.finalizeAiAnswer({ raw: checked.text, grounding, regenerate });
+    return { final: f.answer, zhFixed: checked.fixedCount, outcome: f.outcome, issues: f.issues };
+  }
   // 與正式流程同一個後處理入口（ask.ts postProcessAiAnswer）。舊版程式（例如評測改動前的 commit）沒有這個匯出時，
   // 退回當時 ask.ts 的寫法：清內部標記→拿掉評等標籤→關鍵價位更正。
   const ask = (await import("@/lib/ai/ask")) as { postProcessAiAnswer?: (a: string, g: string) => string };
@@ -283,7 +310,7 @@ async function main() {
         const r = await callVariant(v, cap);
         const latencyMs = Math.round(performance.now() - s);
         if ("error" in r) return { caseId: c.id, variant: v, ok: false, latencyMs, failure: r.error, checks: [] } satisfies EvalRecord;
-        const pp = await postProcess(r.text, cap.grounding);
+        const pp = await postProcess(r.text, cap.grounding, (issues) => regenerateWith(v, cap, r.text, issues));
         const checks = gradeAnswer({
           caseDef: c,
           rawAnswer: r.text,
@@ -292,7 +319,17 @@ async function main() {
           zhFixedCount: pp.zhFixed,
           phase: cap.phase,
         });
-        return { caseId: c.id, variant: v, model: r.model, ok: true, latencyMs, rawAnswer: r.text, finalAnswer: pp.final, checks } satisfies EvalRecord;
+        return {
+          caseId: c.id,
+          variant: v,
+          model: r.model,
+          ok: true,
+          latencyMs,
+          rawAnswer: r.text,
+          finalAnswer: pp.final,
+          checks,
+          ...(pp.outcome && pp.outcome !== "ok" ? { postCheck: { outcome: pp.outcome, issues: pp.issues ?? [] } } : {}),
+        } satisfies EvalRecord;
       })
     );
     records.push(...results);

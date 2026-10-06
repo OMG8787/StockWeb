@@ -277,8 +277,10 @@ describe("結構性守門：唯一來源不可被繞過", () => {
   it("評等紀錄 field 只能由 ratingLogField 產生", () => {
     expect(callers(/`\$\{[^}]*symbol[^}]*\}#\$\{[^}]*code[^}]*\}`/)).toEqual(["src/lib/ai/ratingLog.ts"]);
   });
-  it("AI 問答回答後處理只有 postProcessAiAnswer 一個入口", () => {
+  it("AI 問答回答後處理只有 finalizeAiAnswer（內部呼叫 postProcessAiAnswer）一個入口", () => {
     const ask = fs.readFileSync(path.resolve(process.cwd(), "src/lib/ai/ask.ts"), "utf8");
-    expect(ask).toMatch(/answer: postProcessAiAnswer\(result\.answer, grounding\)/);
+    expect(ask).toMatch(/finalizeAiAnswer\(\{\s*raw: result\.answer,/);
+    expect(ask).toMatch(/const first = postProcessAiAnswer\(input\.raw, input\.grounding\)/);
+    expect(ask).toMatch(/const second = postProcessAiAnswer\(retryRaw, input\.grounding\)/);
   });
 });

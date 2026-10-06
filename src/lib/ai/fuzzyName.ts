@@ -115,9 +115,22 @@ export function extractSubject(question: string): string | null {
   return subject;
 }
 
-/** 名稱去掉「*」「-KY」等標記。 */
+/**
+ * 官方簡稱的「*」標記（例如「國巨*」）去掉——給 AI 的參考資料與回答一律用這個（唯一來源），
+ * 模型才不會照抄成「國巨*(2327)」（2026-10-06 評測 name-with-marker）。保留「-KY」（那是正式簡稱的一部分）。
+ */
+export function stripNameMarker(name: string): string {
+  return name.replace(/[*＊]/g, "").trim();
+}
+
+/** 回答裡「名稱*(代號)」的星號（模型從別的區塊抄到時的保險）；不動 Markdown 粗體的 **。 */
+export function stripNameMarkersInText(text: string): string {
+  return text.replace(/([一-鿿])[*＊](?=\s*[（(]\s*\d{4})/g, "$1");
+}
+
+/** 名稱去掉「*」「-KY」等標記（錯字比對用）。 */
 export function plainTwName(name: string): string {
-  return name.replace(/[*＊]/g, "").replace(/-?KY$/i, "").trim();
+  return stripNameMarker(name).replace(/-?KY$/i, "").trim();
 }
 
 /** 兩個字串的近似分數（越小越像）；不算近似回 null。 */

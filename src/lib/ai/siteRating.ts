@@ -2,6 +2,7 @@ import type { Signal } from "@/lib/signals";
 import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_COUNT, type Facet } from "./actionScoring";
 import { NEAR_ZONE_PCT, type PriceFramework } from "./grounding/priceLevels";
 import { ACTIVE_CHASE_GUARDS, evaluateChaseGuards, type ChaseGuardHit, type ChaseGuardId, type ChaseMetrics } from "./chaseGuards";
+import { stripNameMarker } from "./fuzzyName";
 
 /**
  * 本站綜合評等（純邏輯、無 I/O，有測試）。
@@ -314,7 +315,7 @@ export function describeSiteRating(name: string, symbol: string, r: SiteRating):
       : levels.length > 0
         ? `價位：${levels.join("；")}。`
         : "";
-  return `${SITE_RATING_TITLE}${name}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${tail}`;
+  return `${SITE_RATING_TITLE}${stripNameMarker(name)}(${symbol})：未持有：「${r.label}」／已持有：「${r.holdingLabel}」。理由：${r.reason}。${tail}`;
 }
 
 /** 模型偶爾把評等標籤原樣抄出（「未持有：「建議買進」」），回答送出前拿掉標籤、只留字樣。 */

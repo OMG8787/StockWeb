@@ -3,7 +3,7 @@ import { buildMarketOverviewText } from "./marketOverview";
 import type { Market } from "@/lib/data";
 import { fetchIntlMarketNews, fetchNews, fetchUsMarketNews } from "@/lib/data/news";
 import { formatTopicNewsBlock, searchTopicNews } from "@/lib/data/topicNews";
-import { callAiProviders } from "@/lib/ai/provider";
+import { callAiProviders, type CallAiProvidersOptions } from "@/lib/ai/provider";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { getActionBrief, type ActionBrief } from "@/lib/ai/actionBrief";
 import { getTradingStance } from "./tradingStance";
@@ -35,7 +35,11 @@ import {
   TECH_INDICATOR_PATTERN,
 } from "./intent";
 import { buildStockGrounding } from "./grounding/stock";
-import { buildMoversGrounding } from "./grounding/movers";
+import { buildMarketPulseGrounding, buildMoversGrounding } from "./grounding/movers";
+import { answerCardIssues, ensureFuzzyConfirmation, looksTruncated, pickForComparison, renderCardFallback, TRUNCATION_ISSUE_PREFIX } from "./decisionCard";
+import { stripNameMarkersInText } from "./fuzzyName";
+import { MARKET_JUDGMENT_PATTERN } from "./askSystemCompose";
+import { isTaipeiWeekend } from "@/lib/marketStatus";
 import { buildTechScreenGrounding } from "./grounding/techScreen";
 import { buildHoldingsAnalysisGrounding, buildHoldingsGrounding } from "./grounding/holdings";
 import { buildThemeGrounding, detectTheme, THEME_QUESTION_PATTERN } from "./grounding/theme";
@@ -95,6 +99,18 @@ export async function answerQuestion(
   // 問的是主題/概念股，但本站沒有這個主題的分類資料（見 THEME_QUESTION_PATTERN
   // 的說明）——這種情況要明講，不能讓 AI 拿一般的今日焦點清單冒充成該主題的成分股。
   const unknownTheme = targets.length === 0 && !themeMatch && THEME_QUESTION_PATTERN.test(question);
+  // 錯字（「建鼎呢?」→ 健鼎）：問句本身沒有篩選字眼、只是因為上一句問過「可以買嗎」才被當成延續全市場焦點時，
+  // 先試名稱近似比對——問句有一個近似股名的主詞，比「沿用上一句的全市場意圖」更可信（2026-10-06 評測 typo-name）。
+  let fuzzyNote = "";
+  const moversOnlyByHistory =
+    targets.length === 0 && !themeMatch && !topicNewsQuery && !conversationWantsMovers(question, []) && conversationWantsMovers(question, history);
+  if (!contextSymbol && moversOnlyByHistory) {
+    const guess = await guessSymbolByFuzzyName(question).catch(() => null);
+    if (guess) {
+      targets = [{ symbol: guess.best.symbol, market: guess.best.market }];
+      fuzzyNote = describeFuzzyGuess(guess);
+    }
+  }
   const wantsMovers = targets.length === 0 && !themeMatch && !topicNewsQuery && conversationWantsMovers(question, history);
   // 「用技術指標條件篩股票」跟上面的 wantsMovers 是兩個獨立的需求：問「有沒有
   // MACD跟KD都黃金交叉的股票」時需要的是全市場逐檔算過的指標明細，不是漲幅榜；
@@ -111,7 +127,6 @@ export async function answerQuestion(
   }
   // 錯字（「建鼎呢?」→ 健鼎）：完全比對不到、也不是篩選／主題／追問時，猜最可能的一檔直接分析，
   // 並要求 AI 開頭先確認（2026-10-05 使用者回報直接回「資料庫中沒有建鼎」）。見 fuzzyName.ts。
-  let fuzzyNote = "";
   if (!contextSymbol && targets.length === 0 && !themeMatch && !unknownTheme && !wantsMovers && !wantsTechScreen) {
     const guess = await guessSymbolByFuzzyName(question).catch(() => null);
     if (guess) {
@@ -141,6 +156,24 @@ export async function answerQuestion(
   // a narrower follow-up question in the same conversation — "殖利率多少"
   // — doesn't get inflated into a full write-up it didn't ask for.
   const wantsSingleStockAnalysis = !!contextSymbol && SINGLE_STOCK_ANALYSIS_INTENT_PATTERN.test(question);
+  // 買賣判斷題（要不要買、走勢、何時進場、比較…；很短的追問看上一句）：個股資料最上面附程式組好的結論卡，
+  // 回答後檢查第一句與結論卡一致（decisionCard.ts）。
+  const lastUserForJudgment = [...history].reverse().find((t) => t.role === "user")?.content ?? "";
+  const tradeJudgment =
+    wantsSingleStockAnalysis ||
+    JUDGMENT_QUESTION_PATTERN.test(question) ||
+    TRADE_JUDGMENT_EXTRA_PATTERN.test(question) ||
+    (question.trim().length <= SHORT_FOLLOWUP_MAX_LEN && JUDGMENT_QUESTION_PATTERN.test(lastUserForJudgment));
+  // 大盤題（「今天大盤怎樣」「有什麼值得注意」）：附精簡漲跌榜，答得出今天的焦點（2026-10-06 評測）。
+  const wantsMarketPulse =
+    targets.length === 0 &&
+    !themeMatch &&
+    !unknownTheme &&
+    !topicNewsQuery &&
+    !wantsMovers &&
+    !wantsTechScreen &&
+    !wantsMarketWide &&
+    MARKET_OVERVIEW_QUESTION_PATTERN.test(question);
 
   // 關注清單只在這一句（或上一句使用者的話）真的在談持股時，才附逐檔報價損益；否則
   // 只附一份「名單背景」（名稱＋代號，不抓報價）。2026-10-04 使用者反映 AI 聊著聊著
@@ -182,6 +215,8 @@ export async function answerQuestion(
     marketNews,
     newsFeed,
     topicNews,
+    marketPulse,
+    indicesOnly,
   ] =
     await Promise.all([
       // 問到過去某天/某段期間時，個股【歷史脈絡】多附該期間逐日明細；多檔比較時每檔歷史脈絡精簡版。
@@ -194,6 +229,7 @@ export async function answerQuestion(
             source: contextSymbol && contextSymbol.toUpperCase() === t.symbol.toUpperCase() ? "stock-button" : "ai-ask",
             // AI 判斷層只在問 1～2 檔個股時呼叫（關注清單深度分析不走這裡，避免一次十幾檔吃免費額度）。
             aiJudge: targets.length <= 2,
+            decisionCard: tradeJudgment,
             costBasis: holdings.find((h) => h.symbol.toUpperCase() === t.symbol.toUpperCase() && (h.shares ?? 0) > 0)?.costBasis,
           })
         )
@@ -217,6 +253,11 @@ export async function answerQuestion(
       getNewsFeed().catch(() => ({ pinned: [], items: [], generatedAt: "" })),
       // 主題新聞搜尋：搜尋失敗會標成「失敗」（不是「0 則」），模型才不會把沒搜到說成沒有新聞。
       topicNewsQuery ? searchTopicNews(topicNewsQuery) : Promise.resolve(null),
+      wantsMarketPulse ? buildMarketPulseGrounding(isTaipeiWeekend() ? "最近一個交易日" : "今日") : Promise.resolve(""),
+      // 聚焦用：買賣判斷題只附指數本身（getIndices 有快取，不多打上游）。
+      getIndices()
+        .then((indices) => indices.map((i) => `${i.name}：${i.price}（${i.change >= 0 ? "+" : ""}${i.changePercent}%）`).join("\n"))
+        .catch(() => ""),
     ]);
   const topicNewsText = topicNews ? formatTopicNewsBlock(topicNews) : "";
 
@@ -243,6 +284,22 @@ export async function answerQuestion(
 
   const stockGroundings = stockGroundingResults.filter((g): g is { symbol: string; text: string } => g !== undefined);
   if (stockGroundings.length > 0) groundedSymbol = stockGroundings[0].symbol;
+  // 聚焦 grounding：個股買賣判斷題、沒問到大盤時，只附指數本身（不附總經、市場歷史、夜盤、大盤重大事件），
+  // 減少雜訊讓弱模型專心在結論卡與個股資料（2026-10-06「提高 Lite 下限」）。
+  const focusedStock = tradeJudgment && stockGroundings.length > 0 && !MARKET_JUDGMENT_PATTERN.test(question);
+  const indexText = focusedStock && indicesOnly ? indicesOnly : indexGrounding;
+  // 比較題：「若只能選一檔選哪檔」由程式依評等決定（decisionCard.ts），AI 不用自己挑、也不會照抄規則範例。
+  const comparisonText =
+    stockGroundings.length >= 2 && COMPARISON_QUESTION_PATTERN.test(question)
+      ? await Promise.all(stockGroundings.map((g) => getStockRating(g.symbol).catch(() => null)))
+          .then(
+            (rs) =>
+              pickForComparison(
+                rs.filter((r): r is StockRatingResult => r != null).map((r) => ({ name: r.name, symbol: r.symbol, rating: r.rating }))
+              ) ?? ""
+          )
+          .catch(() => "")
+      : "";
   // 評等跟前一交易日不同時，附原因讓 AI 主動交代（2026-10-06 使用者：「昨天你不是說南亞不要追高」）。見 ratingChange.ts。
   const ratingChangeText = await buildRatingChangeText([
     ...stockGroundings.map((g) => g.symbol),
@@ -292,6 +349,14 @@ export async function answerQuestion(
     }
     return parts.join("；");
   }
+  // 該講哪一句由程式決定（2026-10-06 評測：不存在的 9999 被模型照抄「本站有涵蓋、暫時連不上」那句）。
+  function unresolvedReplyHint(): string {
+    const hints: string[] = [];
+    if (unresolvedKnown.length > 0) hints.push("有涵蓋但暫時抓不到的，要明說「這檔本站有涵蓋，但資料來源暫時連不上，等等再問看看」，不可說成不涵蓋");
+    if (unresolvedUnknown.length > 0)
+      hints.push(`沒有比對到的${unresolvedUnknown.map((t) => t.symbol).join("、")}，要直說「本站查不到這個代號／名稱，可能打錯或不在本站涵蓋範圍」，不可說成本站有涵蓋或暫時連不上`);
+    return `請用自己的話照實回覆：${hints.join("；")}。`;
+  }
 
   // 問的是特定個股時不附一般大盤新聞標題：2026-10-04 使用者回報問「2330 最近走勢如何？」，
   // 回答卻扯進標題裡順帶出現的「台灣精材(3467)與其他個股無關」。個股自己的新聞已在個股資料裡，
@@ -309,7 +374,7 @@ export async function answerQuestion(
     .join("\n");
 
   const pinnedEventsText =
-    newsFeed.pinned.length > 0
+    !focusedStock && newsFeed.pinned.length > 0
       ? newsFeed.pinned.map((p) => `- ${p.title}${p.summary ? `：${p.summary}` : ""}`).join("\n")
       : "";
 
@@ -328,7 +393,7 @@ export async function answerQuestion(
   // must never trigger either not-found note below.
   const notFoundNote =
     !contextSymbol && targets.length > 0 && stockGroundings.length === 0
-      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：${describeUnresolved()}。請用自己的話照實回覆：暫時連不上的要明說「這檔本站有涵蓋，但資料來源暫時連不上，等等再問看看」，不可說成不涵蓋；不要複製這段標記，也不要用自己的知識補任何數字。`
+      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：${describeUnresolved()}。${unresolvedReplyHint()}不要複製這段標記，也不要用自己的知識補任何數字。`
       : "";
   // Partial miss on a multi-stock question (e.g. "環球晶跟世界先進比較" when
   // only one of the two is covered) — some real data was found, so the
@@ -337,7 +402,7 @@ export async function answerQuestion(
   // found, or it risks filling that gap in with its own trained knowledge.
   const partialNotFoundNote =
     !contextSymbol && stockGroundings.length > 0 && unresolvedTargets.length > 0
-      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：這次問題裡有部分股票/公司查到真實資料（見上方個股資料），另外${describeUnresolved()}。請用自己的話照實回覆（暫時連不上的要明說本站有涵蓋、等等再問，不可說成不涵蓋），不要用自己的知識補這幾檔的任何數字，不要複製這段標記。`
+      ? `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】比對結果：這次問題裡有部分股票/公司查到真實資料（見上方個股資料），另外${describeUnresolved()}。${unresolvedReplyHint()}不要用自己的知識補這幾檔的任何數字，不要複製這段標記。`
       : "";
 
   const stockGroundingText =
@@ -377,12 +442,14 @@ export async function answerQuestion(
     // 目前時段與回答立場（盤中／盤後定價／收盤後／週末），見 tradingStance.ts。
     { text: stance.stanceLine, userSafe: false },
     { text: stockGroundingText, userSafe: true },
+    { text: comparisonText, userSafe: false },
     { text: fuzzyNote, userSafe: false },
     { text: ratingChangeText, userSafe: false },
     { text: notFoundNote, userSafe: false },
     { text: partialNotFoundNote, userSafe: false },
     { text: specialDateNote ? `【台股特殊日期】\n${specialDateNote}` : "", userSafe: false },
-    { text: indexGrounding ? `【大盤概況（台股＋美股）】\n${indexGrounding}` : "", userSafe: true },
+    { text: indexText ? `【大盤概況（台股＋美股）】\n${indexText}` : "", userSafe: true },
+    { text: marketPulse, userSafe: true },
     {
       text: pinnedEventsText ? `【近期重大事件（AI 已判斷為可能影響整體大盤等級）】\n${pinnedEventsText}` : "",
       userSafe: true,
@@ -455,7 +522,7 @@ ${actionBriefText}` : "",
     holdingsEmptyAsked:
       holdings.length === 0 &&
       (HOLDINGS_TOPIC_PATTERN.test(question) || HOLDINGS_ANALYSIS_INTENT_PATTERN.test(question)),
-    indexText: indexGrounding,
+    indexText,
     moversText: moversGrounding,
     techScreenText: techScreenGrounding,
     hasTheme: !!themeGrounding,
@@ -466,6 +533,7 @@ ${actionBriefText}` : "",
     hasTradingStance: true,
     listReference,
     topicNewsText,
+    marketPulseText: marketPulse,
     twMarketOpen: getMarketStatus("TW") === "open",
     usMarketOpen: getMarketStatus("US") === "open",
   });
@@ -485,23 +553,42 @@ ${actionBriefText}` : "",
   // knowingly clicking a "give me the full analysis" button and expects to
   // wait a bit, not a live-typing exchange — same tradeoff brief.ts makes
   // for its own long-form generation.
-  const result = wantsHoldingsAnalysis
-    ? await callAiProviders(system, messages, {
-        timeoutMs: 45000,
-        maxOutputTokens: Math.min(2000 + holdings.length * 400, 8000),
-      })
+  const callOptions: CallAiProvidersOptions = wantsHoldingsAnalysis
+    ? { timeoutMs: 45000, maxOutputTokens: Math.min(2000 + holdings.length * 400, 8000) }
     : wantsSingleStockAnalysis
       ? // Same "user knowingly asked for the full picture, not a quick
         // reply" tradeoff as the holdings case above, just for one stock —
         // the default budget was sized for a short chat answer and cut this
         // kind of multi-paragraph analysis off mid-sentence.
-        await callAiProviders(system, messages, { timeoutMs: 30000, maxOutputTokens: 2500 })
+        { timeoutMs: 30000, maxOutputTokens: 2500 }
       : JUDGMENT_QUESTION_PATTERN.test(question) || DEEPER_ANALYSIS_REQUEST_PATTERN.test(question) || wantsHoldingsDecision
         ? // 判斷題約 300～450 字、要求再多分析時約 700 字（RULE_CONCISE_ANSWER），預設 1000 tokens 會截斷。
-          await callAiProviders(system, messages, { maxOutputTokens: 1800 })
-        : await callAiProviders(system, messages);
+          { maxOutputTokens: 1800 }
+        : {};
+  const result = await callAiProviders(system, messages, callOptions);
   if (result.usedAi) {
-    return { answer: postProcessAiAnswer(result.answer, grounding), groundedSymbol, usedAi: true, model: modelInfo(result.model) };
+    const provider = result.provider;
+    const checked = await finalizeAiAnswer({
+      raw: result.answer,
+      grounding,
+      // 回答後檢查不過：同一個模型帶著錯誤說明重生一次（時間上限短，不拖垮整個請求）。
+      regenerate: async (issues) => {
+        const retry = await callAiProviders(system, [...messages, ...regenerateTurns(result.answer, issues)], {
+          ...callOptions,
+          forceProvider: provider,
+          timeoutMs: REGENERATE_TIMEOUT_MS,
+          totalBudgetMs: REGENERATE_TIMEOUT_MS + 2000,
+        });
+        return retry.usedAi ? retry.answer : null;
+      },
+    });
+    if (checked.issues.length > 0) console.warn("[ask] 回答後檢查：", checked.outcome, JSON.stringify(checked.issues));
+    return {
+      answer: checked.answer,
+      groundedSymbol,
+      usedAi: true,
+      model: checked.outcome === "program" ? PROGRAM_MODEL : modelInfo(result.model),
+    };
   }
 
   return {
@@ -516,7 +603,10 @@ ${actionBriefText}` : "",
  * 清內部標記 → 拿掉評等標籤 → 關鍵價位抄錯更正為程式值（numberGuard.ts）→ 先不要買的股票刪掉出場價／買進區間（ratingConsistencyGuard.ts）。
  */
 export function postProcessAiAnswer(answer: string, grounding: string): string {
-  const guarded = guardAnswerNumbers(stripRatingTags(sanitizeLeakedMarkers(answer)), grounding);
+  const guarded = guardAnswerNumbers(
+    ensureFuzzyConfirmation(stripNameMarkersInText(stripRatingTags(sanitizeLeakedMarkers(answer))), grounding),
+    grounding
+  );
   if (guarded.fixes.length > 0) console.warn("[ask] 更正 AI 抄錯的價位：", JSON.stringify(guarded.fixes));
   const consistent = guardAvoidPriceAdvice(guarded.text, grounding);
   if (consistent.fixes.length > 0) console.warn("[ask] 刪掉先不要買股票的價位建議：", JSON.stringify(consistent.fixes));
@@ -536,4 +626,74 @@ async function buildRatingChangeText(symbols: string[]): Promise<string> {
     );
   })().catch(() => "");
   return Promise.race([work, new Promise<string>((resolve) => setTimeout(() => resolve(""), RATING_CHANGE_WAIT_MS))]);
+}
+
+// ---------------------------------------------------------------- 回答後檢查＋自動重生（2026-10-06「提高 Lite 下限」）
+
+/** 「建議買嗎」這類短追問：主題在上一句。 */
+const SHORT_FOLLOWUP_MAX_LEN = 8;
+/** JUDGMENT_QUESTION_PATTERN 以外也算買賣判斷的字眼。 */
+const TRADE_JUDGMENT_EXTRA_PATTERN = /買嗎|賣嗎|停損|停利|加碼|減碼|續抱|追高|明天.{0,4}(漲|跌)|會漲|會跌/;
+/** 比較題（多檔時才看）。 */
+const COMPARISON_QUESTION_PATTERN = /比較|哪(一|個|檔|支|只)|選|還是|vs|VS|跟.{1,8}(誰|哪)/;
+/** 大盤題：問整體盤勢或今天值得注意什麼（不含個股名稱時才看）。 */
+const MARKET_OVERVIEW_QUESTION_PATTERN =
+  /(大盤|台股|股市|盤勢|行情|加權).{0,8}(怎樣|怎麼樣|如何|表現|狀況|重點|值得注意|注意什麼|發生什麼|為什麼)|(今天|今日|最近).{0,8}(有什麼|有啥|有哪些).{0,6}(值得注意|重點|焦點|大事)/;
+/** 重生的時間上限：正式站整個請求 60 秒，前面組資料與第一次回答已用掉大半。 */
+const REGENERATE_TIMEOUT_MS = 15_000;
+/** 重生仍不合格、改用程式版回答時的模型標示。 */
+const PROGRAM_MODEL = { id: "site-program", name: "本站程式版（AI 回答未通過檢查）" };
+
+/** 重生時附加的兩則對話（評測 run.ts 也用這個，兩邊一致）。 */
+export function regenerateTurns(previous: string, issues: string[]): ChatTurn[] {
+  return [
+    { role: "assistant", content: previous },
+    {
+      role: "user",
+      content: `【內部系統標記／非使用者可見文字，禁止原樣照抄輸出】你剛才的回答沒有通過檢查：${issues.join("；")}。請依同一份參考資料重寫完整回答（直接給新回答，不要道歉、不要提到這段檢查）。`,
+    },
+  ];
+}
+
+/** 截斷時退而求其次：只留到最後一個完整句子（留下的不到一半就不砍）。 */
+function trimToLastSentence(answer: string): string {
+  const m = answer.match(/^[\s\S]*[。！？!?]/);
+  return m && m[0].length >= answer.length * 0.5 ? m[0] : answer;
+}
+
+export interface FinalizeResult {
+  answer: string;
+  /** ok＝通過（或無從補救）；regenerated＝重生後通過；program＝改用程式版；trimmed＝截斷只留完整句子 */
+  outcome: "ok" | "regenerated" | "program" | "trimmed";
+  issues: string[];
+}
+
+/**
+ * 回答後處理＋檢查＋重生（唯一入口；評測 scripts/eval/run.ts 也呼叫這一個）：
+ * postProcessAiAnswer → answerCardIssues（第一句與結論卡一致、建議買進不可寫等回檔、截斷）→
+ * 不過就用同一個模型重生一次 → 仍不過：有結論卡用程式版回答，只有截斷就留到最後完整句子。
+ */
+export async function finalizeAiAnswer(input: {
+  raw: string;
+  grounding: string;
+  regenerate?: (issues: string[]) => Promise<string | null>;
+}): Promise<FinalizeResult> {
+  const first = postProcessAiAnswer(input.raw, input.grounding);
+  const issues = answerCardIssues(first, input.grounding);
+  if (issues.length === 0) return { answer: first, outcome: "ok", issues };
+  const retryRaw = input.regenerate ? await input.regenerate(issues).catch(() => null) : null;
+  if (retryRaw) {
+    const second = postProcessAiAnswer(retryRaw, input.grounding);
+    const issues2 = answerCardIssues(second, input.grounding);
+    if (issues2.length === 0) return { answer: second, outcome: "regenerated", issues };
+    if (issues2.every(isTruncationIssue)) return { answer: trimToLastSentence(second), outcome: "trimmed", issues: issues2 };
+  }
+  if (issues.every(isTruncationIssue) && looksTruncated(first)) return { answer: trimToLastSentence(first), outcome: "trimmed", issues };
+  const program = renderCardFallback(input.grounding);
+  if (program) return { answer: program, outcome: "program", issues };
+  return { answer: first, outcome: "ok", issues };
+}
+
+function isTruncationIssue(issue: string): boolean {
+  return issue.startsWith(TRUNCATION_ISSUE_PREFIX);
 }

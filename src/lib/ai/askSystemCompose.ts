@@ -54,7 +54,11 @@ import {
   RULE_TRADING_STANCE,
   RULE_RATING_CHANGE,
   RULE_LIST_REFERENCE,
+  RULE_DECISION_CARD,
+  RULE_MARKET_PULSE,
 } from "./askSystemPrompt";
+import { DECISION_CARD_TITLE } from "./decisionCard";
+import { MARKET_PULSE_TITLE } from "./grounding/movers";
 import { SITE_RATING_TITLE } from "./siteRating";
 import { SIMILAR_CASES_TITLE } from "./learning/similar";
 import { LESSONS_TITLE } from "./learning/lessonMatch";
@@ -87,7 +91,7 @@ const SOCIAL_TOPIC_PATTERN = /社群|情緒|Reddit|網友|散戶討論|PTT|推�
 /** 問到利率／升降息才帶升降息細部框架。 */
 const RATE_TOPIC_PATTERN = /升息|降息|利率|聯準會|Fed|FOMC|央行|通膨|殖利率/i;
 /** 問大盤／市場氣氛時，大盤層級的【市場歷史與情緒走勢】才派得上用場。 */
-const MARKET_JUDGMENT_PATTERN = /大盤|加權|指數|市場|台股|美股|情緒|恐慌|VIX|大環境|總經|景氣/i;
+export const MARKET_JUDGMENT_PATTERN = /大盤|加權|指數|市場|台股|美股|情緒|恐慌|VIX|大環境|總經|景氣/i;
 
 export interface AskPromptContext {
   question: string;
@@ -121,6 +125,8 @@ export interface AskPromptContext {
   listReference?: boolean;
   /** 主題新聞搜尋的資料區塊文字（有搜尋才有；見 data/topicNews.ts） */
   topicNewsText?: string;
+  /** 大盤題的精簡漲跌榜（grounding/movers.ts buildMarketPulseGrounding） */
+  marketPulseText?: string;
 }
 
 export function composeAskSystemPrompt(c: AskPromptContext): string {
@@ -150,7 +156,8 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     RULE_SECOND_OPINION,
     // 對話情境
     c.hasHistory || c.holdingsBackground ? RULE_STAY_ON_TOPIC : "",
-    c.hasHistory || EARLIER_CLAIM_PATTERN.test(c.question) ? RULE_NO_UNVERIFIABLE_CONFESSION : "",
+    // 只在使用者真的引用「你之前說過」時才組入（2026-10-06 評測：有對話紀錄就組入，模型在沒人提時也念「我只看得到這次的對話」）。
+    EARLIER_CLAIM_PATTERN.test(c.question) ? RULE_NO_UNVERIFIABLE_CONFESSION : "",
     // 個股／指標／籌碼（依資料文字偵測）
     dataText.includes(BLOCK_MARKERS.recentCrosses) ? RULE_NO_CANT_BACKTRACK_WHEN_DATA : "",
     hasStockHistory || marketHistoryRelevant ? RULE_USE_HISTORICAL_CONTEXT : "",
@@ -185,6 +192,8 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     dataText.includes(BLOCK_MARKERS.aiView) ? RULE_AI_VIEW : "",
     dataText.includes(BLOCK_MARKERS.ratingChange) ? RULE_RATING_CHANGE : "",
     c.hasTradingStance ? RULE_TRADING_STANCE : "",
+    c.stockText.includes(DECISION_CARD_TITLE) ? RULE_DECISION_CARD : "",
+    (c.marketPulseText ?? "").includes(MARKET_PULSE_TITLE) ? RULE_MARKET_PULSE : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),
     // 放最後：長度與格式規則聲明優先於前面要求多解釋的規則

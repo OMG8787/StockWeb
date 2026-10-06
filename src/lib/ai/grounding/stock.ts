@@ -41,6 +41,8 @@ import { describeRatingForHolding } from "../holdingRating";
 import { getAiJudgment } from "../aiJudge";
 import { AI_VIEW_TITLE, AI_VIEW_VISIBLE_TO_USERS, describeAiView } from "../learning/aiAdjust";
 import type { HistoryPeriod } from "../intent";
+import { stripNameMarker } from "../fuzzyName";
+import { describeDecisionCard } from "../decisionCard";
 
 /**
  * opts.period：使用者明確問到過去某天/某段期間（intent.ts detectHistoryPeriod）時，
@@ -48,7 +50,7 @@ import type { HistoryPeriod } from "../intent";
  */
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined },
-  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource; aiJudge?: boolean } = {}
+  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource; aiJudge?: boolean; decisionCard?: boolean } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
   const [quote, chart, chartYear, stockRating] = await Promise.all([
@@ -101,27 +103,43 @@ export async function buildStockGrounding(
   ]);
 
   const changeLabel = quote.change >= 0 ? "上漲" : "下跌";
+  // 週末（台北）不可寫「今日」：資料是最近一個交易日的（2026-10-06 評測：週末回答仍寫「今日收盤」）。
+  const lastTradeDay = chart?.candles.at(-1)?.time;
+  const dayWord = isTaipeiWeekend()
+    ? `最近一個交易日${typeof lastTradeDay === "string" ? `（${lastTradeDay.slice(5).replace("-", "/")}）` : ""}`
+    : "今日";
   const lines = [
-    `股票：${quote.name}（${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"}）`,
+    `股票：${stripNameMarker(quote.name)}（${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"}）`,
     `目前價格：${quote.price} ${quote.currency}，${changeLabel} ${Math.abs(quote.change)}（${quote.changePercent}%）`,
     quote.board === "emerging"
       ? // 興櫃沒有開盤價/收盤價這種東西（議價交易，見 lib/data/emerging.ts），
         // 硬套「開/高/低/昨收」這個格式會讓 AI 把 null 講成「開盤 0 元」或自己
         // 補一個數字上去。這裡直接換成符合興櫃實際制度的敘述。
-        `今日：最高 ${quote.high ?? "（今日無成交）"} / 最低 ${quote.low ?? "（今日無成交）"} / 前日均價 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()} 股`
-      : `今日：開 ${quote.open} / 高 ${quote.high} / 低 ${quote.low} / 昨收 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()}`,
+        `${dayWord}：最高 ${quote.high ?? `（${dayWord}無成交）`} / 最低 ${quote.low ?? `（${dayWord}無成交）`} / 前日均價 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()} 股`
+      : `${dayWord}：開 ${quote.open} / 高 ${quote.high} / 低 ${quote.low} / 昨收 ${quote.prevClose}，成交量 ${quote.volume.toLocaleString()}`,
   ];
   if (stockRating) {
+    // 關注清單有購買價格時套持有中停利提示＋持有中出場參考（個人成本不進全站共用的評等快取；
+    // 跟關注清單輕量／深度分析同一個函式，見 holdingRating.ts）。
+    const holdingRated = describeRatingForHolding(
+      stockRating,
+      opts.costBasis != null ? { costBasis: opts.costBasis, market: quote.market, emerging: quote.board === "emerging" } : null,
+      chart?.candles
+    );
+    // 買賣判斷題：程式組好的結論卡放最前面，AI 只解說（decisionCard.ts）。
+    if (opts.decisionCard) {
+      lines.unshift(
+        describeDecisionCard({
+          name: stockRating.name,
+          symbol: stockRating.symbol,
+          rating: holdingRated.rating,
+          facets: stockRating.facets,
+          held: holdingRated.held,
+        })
+      );
+    }
     lines.push(
-      `${
-        // 關注清單有購買價格時套持有中停利提示＋持有中出場參考（個人成本不進全站共用的評等快取；
-        // 跟關注清單輕量／深度分析同一個函式，見 holdingRating.ts）。
-        describeRatingForHolding(
-          stockRating,
-          opts.costBasis != null ? { costBasis: opts.costBasis, market: quote.market, emerging: quote.board === "emerging" } : null,
-          chart?.candles
-        ).text
-      }（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
+      `${holdingRated.text}（評等以現價 ${stockRating.price} 計算，與今日建議、全市場推薦同一份結論，每 10 分鐘更新；回答買賣判斷時第一句照抄，不可推翻）`
     );
     // AI 判斷層照樣跑（寫進評等紀錄供冠軍／挑戰者比較），但證明有效前不顯示給使用者（AI_VIEW_VISIBLE_TO_USERS）。
     const judgment = await aiJudgePromise;
@@ -159,11 +177,16 @@ export async function buildStockGrounding(
     // 當下的實際狀態值」（有沒有交叉、K/D/RSI 實際數值、均線排列、MACD 在 0 軸
     // 哪一側），讓任何被指名問到的指標都有真實數字可以回答，不必靠猜或改答別的。
     const indicatorLine = describeIndicatorState(computeIndicatorState(chart.candles, quote.price));
-    if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「今天沒有交叉」，不要改用別的指標代答）：${indicatorLine}`);
+    if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「${dayWord === "今日" ? "今天" : "最近一個交易日"}沒有交叉」，不要改用別的指標代答）：${indicatorLine}`);
     // 近幾天逐日的交叉紀錄：使用者會追問「昨天有沒有」「這幾天交叉過嗎」，沒有這行 AI 只能
     // 回「無法回溯」（2026-10-04 實測）。見 describeRecentCrosses 的說明。
-    const recentCrosses = describeRecentCrosses(chart.candles, getMarketStatus(quote.market) === "open");
-    if (recentCrosses) lines.push(`${RECENT_CROSSES_TITLE}（用當天為止的日K現算，可直接回答「昨天有沒有交叉」；今天若在盤中，這根K線會隨最新價變動，盤中出現的交叉到收盤可能消失）：${recentCrosses}`);
+    const marketOpen = getMarketStatus(quote.market) === "open";
+    const recentCrosses = describeRecentCrosses(chart.candles, marketOpen);
+    // 盤中才附「這根K線會變」的但書：週末／收盤後也寫「今天若在盤中」，模型會講成「今天盤中」（2026-10-06 評測）。
+    if (recentCrosses)
+      lines.push(
+        `${RECENT_CROSSES_TITLE}（用當天為止的日K現算，可直接回答「昨天有沒有交叉」${marketOpen ? "；現在盤中，今天這根K線會隨最新價變動，盤中出現的交叉到收盤可能消失" : ""}）：${recentCrosses}`
+      );
   } else {
     lines.push("（歷史走勢資料目前無法取得）");
   }

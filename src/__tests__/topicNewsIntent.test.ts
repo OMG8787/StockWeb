@@ -48,7 +48,7 @@ describe("主題新聞資料區塊", () => {
     const failed = formatTopicNewsBlock({ topic: "美國 伊朗", days: 3, status: "failed", items: [] });
     for (const t of [ok, empty, failed]) expect(t.startsWith(TOPIC_NEWS_TITLE)).toBe(true);
     expect(ok).toContain("搜尋成功，共 1 則");
-    expect(ok).toContain("- [10-06] 美國對伊朗金融制裁升級（商傳媒）"); // 台北時間日期
+    expect(ok).toContain("第1則［10-06］美國對伊朗金融制裁升級（商傳媒）"); // 台北時間日期；程式先編號，AI 逐則引用
     expect(empty).toContain("結果 0 則");
     expect(failed).toContain("搜尋失敗");
     expect(failed).not.toContain("0 則");

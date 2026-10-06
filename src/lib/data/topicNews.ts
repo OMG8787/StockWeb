@@ -84,8 +84,9 @@ export function formatTopicNewsBlock(r: TopicNewsResult): string {
   const head = `${TOPIC_NEWS_TITLE}：「${r.topic}」，近 ${r.days} 天】`;
   if (r.status === "failed") return `${head}\n搜尋狀態：這一刻新聞搜尋失敗（不是沒有新聞，是沒搜到）`;
   if (r.status === "empty") return `${head}\n搜尋狀態：搜尋成功，結果 0 則`;
+  // 程式先編號（2026-10-06 評測：Lite 會把兩則不同新聞的標題混成一句）；AI 只能逐則引用、一行一則。
   const lines = r.items.map(
-    (n) => `- [${n.pubDate ? taipeiMonthDay(n.pubDate) : "?"}] ${n.title}${n.source ? `（${n.source}）` : ""}`
+    (n, i) => `第${i + 1}則［${n.pubDate ? taipeiMonthDay(n.pubDate) : "日期不明"}］${n.title}${n.source ? `（${n.source}）` : ""}`
   );
   return `${head}\n搜尋狀態：搜尋成功，共 ${r.items.length} 則（Google 新聞標題，新到舊）\n${lines.join("\n")}`;
 }

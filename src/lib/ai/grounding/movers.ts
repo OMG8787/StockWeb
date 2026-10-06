@@ -169,3 +169,35 @@ export async function buildMoversGrounding(): Promise<string> {
     return "";
   }
 }
+
+/** 大盤題用的精簡漲跌榜區塊標題（askSystemCompose.ts 依這個標題決定帶 RULE_MARKET_PULSE）。 */
+export const MARKET_PULSE_TITLE = "【今日漲跌榜（大盤題用的焦點，不是推薦名單）】";
+const PULSE_N = 6;
+
+/**
+ * 「今天大盤怎樣／有什麼值得注意」這類全市場題用的精簡版漲跌榜（2026-10-06 評測：大盤題只拿到指數，
+ * 答不出今天的焦點）。只列台股漲幅、跌幅、成交金額前幾名（上市櫃現有報價，不多打上游）；
+ * 週末時資料是最近一個交易日，標籤由呼叫端傳入的 dayWord 決定。
+ */
+export async function buildMarketPulseGrounding(dayWord: string): Promise<string> {
+  try {
+    const [gainers, losers, turnover] = await Promise.all([
+      searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" }),
+      searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "asc" }),
+      searchStocks({ market: "TW", sortBy: "turnover", sortDir: "desc" }).catch(() => []),
+    ]);
+    const fmt = (items: typeof gainers) =>
+      items
+        .slice(0, PULSE_N)
+        .map((s) => `${s.name.replace(/[*＊]/g, "")}(${s.symbol}) ${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%`)
+        .join("、") || "（無資料）";
+    const lines = [
+      `台股${dayWord}漲幅前${PULSE_N}：${fmt(gainers)}`,
+      `台股${dayWord}跌幅前${PULSE_N}：${fmt(losers)}`,
+      turnover.length > 0 ? `台股${dayWord}成交金額前${PULSE_N}（資金最集中）：${fmt(turnover)}` : "",
+    ].filter(Boolean);
+    return `${MARKET_PULSE_TITLE}\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
+}
