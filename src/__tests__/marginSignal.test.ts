@@ -115,6 +115,12 @@ describe("ensureMarginSignalMentioned（回答沒講出訊號就補程式說明�
     const a = "聯電(2303)融資大減、籌碼沉澱。";
     expect(ensureMarginSignalMentioned(a, grounding)).toEqual({ text: a, appended: [] });
   });
+  it("多檔：訊號名稱只出現在別檔或最後的總結段（不是講這一檔）→ 這一檔仍要補", () => {
+    const g = `${grounding}\n股票：華碩（2357，台股）\n目前價格：300`;
+    const a = "聯電(2303)建議先不要買。\n\n華碩(2357)建議買進，基本面佳。\n\n整體留意籌碼沉澱的風險。";
+    expect(ensureMarginSignalMentioned(a, g).appended).toEqual(["2303"]);
+    expect(ensureMarginSignalMentioned("聯電(2303)建議先不要買，主因籌碼沉澱。\n\n華碩(2357)建議買進。", g).appended).toEqual([]);
+  });
   it("沒提到那一檔 → 不動；參考資料沒有區塊 → 不動", () => {
     const a = "台積電(2330)可以買。";
     expect(ensureMarginSignalMentioned(a, grounding).appended).toEqual([]);

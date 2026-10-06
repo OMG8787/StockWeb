@@ -18,7 +18,7 @@ import { guessSymbolByFuzzyName, guessSymbolsFromText } from "./symbolResolve";
 import { describeFuzzyGuess } from "./fuzzyName";
 import { describeRatingChanges, ensureRatingChangeExplained } from "./ratingChange";
 import { ensureMarginSignalMentioned } from "./marginSignal";
-import { ensureConfidenceMentioned } from "./confidenceMention";
+import { ensureStockFactsMentioned } from "./stockFactsMention";
 import { getStockRating } from "./stockRating";
 import {
   conversationWantsMovers,
@@ -695,10 +695,10 @@ export function postProcessAiAnswer(answer: string, grounding: string): string {
   // 融資融券組合判讀有訊號、回答提到該檔卻沒講出訊號名稱的，補上程式說明（marginSignal.ts）。
   const margin = ensureMarginSignalMentioned(changed.text, grounding);
   if (margin.appended.length > 0) console.warn("[ask] 補融資融券組合判讀：", JSON.stringify(margin.appended));
-  // 本站把握程度（程式判定）：買賣判斷題／關注清單深度分析回答提到建議買進的股票卻沒講把握程度的，補程式判定（confidenceMention.ts）。
-  const confidence = ensureConfidenceMentioned(margin.text, grounding);
-  if (confidence.appended.length > 0) console.warn("[ask] 補把握程度：", JSON.stringify(confidence.appended));
-  return confidence.text;
+  // 每檔現價（即時報價）與本站把握程度（程式判定）：買賣判斷題／關注清單深度分析回答提到某檔卻沒講的，補程式寫好的字樣（stockFactsMention.ts）。
+  const facts = ensureStockFactsMentioned(margin.text, grounding);
+  if (facts.appended.length > 0) console.warn("[ask] 補現價／把握程度：", JSON.stringify(facts.appended));
+  return facts.text;
 }
 
 /**

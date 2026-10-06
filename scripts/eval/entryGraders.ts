@@ -4,6 +4,7 @@
 import { extractKeyLevels, guardAnswerNumbers } from "@/lib/ai/numberGuard";
 import { MARGIN_SIGNAL_TITLE } from "@/lib/ai/marginSignalData";
 import { BUY_FORBIDDEN_PATTERN } from "@/lib/ai/decisionCard";
+import { parseLiveQuotes } from "@/lib/ai/livePrice";
 import { coreLabel, firstSentences, mentionedSymbols, parseProgramRatings, plain } from "./graders";
 import type { CheckResult } from "./types";
 
@@ -96,6 +97,14 @@ export function gradeEntryStock(g: EntryGradeInput): CheckResult[] {
   // 融資融券組合判讀：該檔有非中性訊號就要講出名稱。
   const sig = g.grounding.match(new RegExp(`${MARGIN_SIGNAL_TITLE}（[^）]*）：【([^】]+)】`));
   if (sig) out.push({ rule: "講出融資融券組合判讀", pass: plain(text).includes(sig[1]), detail: plain(text).includes(sig[1]) ? undefined : `應提到「${sig[1]}」` });
+
+  // 現價（2026-10-07 使用者：四入口出現的每一檔都要顯示當前現價）：回答要有「現價 X（±Y%…）」，X 要是即時報價。
+  const liveQuote = parseLiveQuotes(g.grounding).get(g.stock.symbol.toUpperCase());
+  if (liveQuote) {
+    const shown = text.match(/現價 [\d,]+(?:\.\d+)?(?: 美元)?（[+\-]?\d+(?:\.\d+)?%/g) ?? [];
+    const ok = shown.some((s) => Number(s.replace(/現價 |,|美元|（.*$/g, "").trim()) === liveQuote.price);
+    out.push({ rule: "每檔都有現價（即時報價）", pass: ok, detail: ok ? undefined : `應含「${liveQuote.text.slice(0, 20)}」，實際 ${shown.join("、") || "沒有"}` });
+  }
 
   // 做法與風險：每個入口都該讓人知道「怎麼做」「最大風險」。
   out.push({ rule: "講清楚怎麼做", pass: (isAvoid ? ACTION_WORDS_AVOID : ACTION_WORDS_BUY).test(text) });

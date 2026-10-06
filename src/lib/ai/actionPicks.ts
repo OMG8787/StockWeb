@@ -41,6 +41,10 @@ export interface ActionBriefPick {
   confidence?: string;
   /** 評等的短線風險原句（siteRating.riskNote，程式依 RSI／布林／離支撐距離寫好）；有就當卡片的「風險」，不用 AI 的泛用句（四入口比較：AI 風險句常是千篇一律的「短線常回檔、宜分批」）。舊快取沒有這欄 */
   riskNote?: string;
+  /** 評等計算時的價格（siteRating 的 price）；前端輪詢更新現價時用它判斷要不要註明「評等以 X 計算」（livePrice.ts） */
+  ratingPrice?: number;
+  /** 即時現價片段「現價 234（+6.4%，13:31）」（getActionBrief 每次回應時用 getQuote 重算，不進快取層；livePrice.formatLiveQuote） */
+  livePrice?: string;
   /** AI 判斷層的一行看法——2026-10-06 起不顯示給使用者（冠軍／挑戰者證明前只記錄），保留欄位相容舊快取 */
   aiView?: string | null;
 }
@@ -92,6 +96,8 @@ export interface NotChasePick {
   supportCount: number;
   /** 沒跟上的面向（不支持／無資料／中性）名稱 */
   weakFacets: string[];
+  /** 即時現價片段（同 ActionBriefPick.livePrice）；有就取代「今日 +X%」 */
+  livePrice?: string;
 }
 
 /**
@@ -224,7 +230,7 @@ export function groupedPickLines(
     const risk = p.riskNote ? str(p.riskNote.replace(/^短線風險：/, ""), 120) : str(t?.risk);
     // AI 看法接在同一個條列尾端（MarkdownLite 不支援巢狀清單，另起一行會被當成另一檔）。
     return [
-      `- **${p.name}(${p.symbol})**：${p.label}。${p.confidence ? `${sentence(p.confidence)}。` : ""}${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,
+      `- **${p.name}(${p.symbol})**：${p.label}。${p.livePrice ? `${sentence(p.livePrice)}。` : ""}${p.confidence ? `${sentence(p.confidence)}。` : ""}${p.plan ? `操作：${sentence(p.plan)}。` : ""}理由：${sentence(reason)}。${risk ? `風險：${sentence(risk)}。` : ""}`,
     ];
   };
   const buyTitle = nextOpen ? `**${stance.nextOpenLabel} 建議買進（開盤或盤中可買）**` : "**建議買進（現價可分批買）**";
@@ -254,7 +260,7 @@ export function renderActionBrief(input: RenderInput): string {
   const nc = input.notChase;
   out.push(
     nc
-      ? `**${NOT_CHASE_TITLE}**：${nc.name}(${nc.symbol}) 今日 ${nc.changePercent >= 0 ? "+" : ""}${nc.changePercent}%，但面向支持數只有 ${nc.supportCount}${
+      ? `**${NOT_CHASE_TITLE}**：${nc.name}(${nc.symbol}) ${nc.livePrice ?? `今日 ${nc.changePercent >= 0 ? "+" : ""}${nc.changePercent}%`}，但面向支持數只有 ${nc.supportCount}${
           notChaseText(ai, nc) ? `，${notChaseText(ai, nc)}` : nc.weakFacets.length ? `（${nc.weakFacets.join("、")}沒跟上）` : ""
         }。`
       : input.gainersAvailable

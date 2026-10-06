@@ -44,6 +44,7 @@ import type { HistoryPeriod } from "../intent";
 import { stripNameMarker } from "../fuzzyName";
 import { describeDecisionCard } from "../decisionCard";
 import { marginSignalLine } from "../marginSignal";
+import { describeLiveQuoteLine } from "../livePrice";
 
 /**
  * opts.period：使用者明確問到過去某天/某段期間（intent.ts detectHistoryPeriod）時，
@@ -112,6 +113,8 @@ export async function buildStockGrounding(
   const lines = [
     `股票：${stripNameMarker(quote.name)}（${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"}）`,
     `目前價格：${quote.price} ${quote.currency}，${changeLabel} ${Math.abs(quote.change)}（${quote.changePercent}%）`,
+    // 四入口一致的現價顯示（livePrice.ts）：即時報價＋時間；評等價不同時註明，回答後 ensureStockFactsMentioned 保證每檔都有。
+    describeLiveQuoteLine(stripNameMarker(quote.name), quote.symbol, quote, stockRating?.price),
     quote.board === "emerging"
       ? // 興櫃沒有開盤價/收盤價這種東西（議價交易，見 lib/data/emerging.ts），
         // 硬套「開/高/低/昨收」這個格式會讓 AI 把 null 講成「開盤 0 元」或自己

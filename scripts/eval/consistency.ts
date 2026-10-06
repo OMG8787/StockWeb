@@ -15,6 +15,7 @@
  */
 import type { HoldingInput } from "@/lib/ai/askTypes";
 import { parseProgramRatings } from "./graders";
+import { parseLiveQuotes } from "@/lib/ai/livePrice";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -84,6 +85,10 @@ async function main() {
     const lines = entries.map(([name, g]) => [name, ratingLine(g, r.symbol)] as const);
     const base = lines[0][1];
     for (const [name, line] of lines) check(`${name} 評等行與 AI 問答個股題相同`, !!line && line === base, line ? (line === base ? "" : line.slice(0, 120)) : "參考資料沒有這檔的評等行");
+
+    // 現價（2026-10-07）：三個 AI 入口的【即時報價】片段要逐字相同；今日建議卡用同一個 getQuote＋formatLiveQuote（actionBrief.ts）。
+    const livePrices = entries.slice(0, 3).map(([name, g]) => [name, parseLiveQuotes(g).get(r.symbol)?.text ?? null] as const);
+    for (const [name, text] of livePrices) check(`${name} 現價片段與 AI 問答個股題相同`, !!text && text === livePrices[0][1], text ?? "參考資料沒有這檔的即時報價行");
 
     const cost = costs.get(r.symbol) ?? Math.round(r.price * 1.1 * 100) / 100;
     const held: HoldingInput = { ...holding, costBasis: cost, shares: 1000 };

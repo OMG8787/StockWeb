@@ -5,6 +5,7 @@ import type { HoldingInput } from "../askTypes";
 import { describeHoldingTechnical } from "./indicators";
 import { buildSoldGrounding } from "./soldHoldings";
 import { buildStockGrounding } from "./stock";
+import { describeLiveQuoteLine } from "../livePrice";
 import { getStockRatings } from "../stockRating";
 import { describeRatingForHolding, formatHoldingRatingSummary, formatWatchRatingSummary, type HoldingRatingEntry } from "../holdingRating";
 
@@ -82,7 +83,8 @@ export async function buildHoldingsGrounding(
       // 不讓一般的「我持股賺還賠」問題平白多付這個成本。
       const technical = includeTechnical ? await describeHoldingTechnical(quote) : "";
       const rated = ratings.get(h.symbol.toUpperCase());
-      const ratingText = rated ? `\n${rated.text}` : "";
+      // 每檔現價（livePrice.ts，跟個股資料同一個格式）；深度分析後段退回輕量版的股票也要有。
+      const ratingText = `${rated ? `\n${rated.text}` : ""}\n${describeLiveQuoteLine(quote.name, quote.symbol, quote)}`;
       const base = `${quote.name}(${quote.symbol}，${quote.market === "TW" ? "台股" : "美股"})：現價 ${quote.price} ${quote.currency}，今日${quote.change >= 0 ? "漲" : "跌"} ${Math.abs(quote.changePercent)}%`;
       if (isHeldInput(h)) {
         // Same lib/portfolio.ts math the watchlist table itself uses (buy/

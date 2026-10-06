@@ -166,9 +166,33 @@ const SIGNAL_LINE = new RegExp(`^${MARGIN_SIGNAL_TITLE}（[^）]*）：【([^】
  * 個股參考資料有「融資融券組合判讀」【訊號】、回答提到該檔卻沒講出訊號名稱時，在回答最後補上程式寫好的一句
  * （確定性、不重生）。評測 2026-10-06：只靠提示詞規則，gemini-flash-lite／NVIDIA 在「融資融券怎麼看」「可以買嗎」常略過它。
  */
+/** 回答裡該檔附近（任一次提到後到下一檔被提到為止、最多 MARGIN_MENTION_WINDOW 字）有沒有講出訊號名稱——不能只看整則回答有沒有出現（關注清單最後的總結段常泛稱「追高風險」，不是在講這一檔）。 */
+const MARGIN_MENTION_WINDOW = 400;
+function labelNearStock(answer: string, cur: { name: string; symbol: string }, others: Array<{ name: string; symbol: string }>, label: string): boolean {
+  for (const key of [cur.name, cur.symbol]) {
+    if (key.length < 2) continue;
+    for (let i = answer.indexOf(key); i >= 0; i = answer.indexOf(key, i + 1)) {
+      let end = Math.min(answer.length, i + key.length + MARGIN_MENTION_WINDOW);
+      for (const o of others) {
+        for (const k of [o.name, o.symbol]) {
+          const j = k.length >= 2 ? answer.indexOf(k, i + key.length) : -1;
+          if (j >= 0 && j < end) end = j;
+        }
+      }
+      if (answer.slice(i, end).includes(label)) return true;
+    }
+  }
+  return false;
+}
+
 export function ensureMarginSignalMentioned(answer: string, grounding: string): { text: string; appended: string[] } {
   if (!answer || !grounding.includes(MARGIN_SIGNAL_TITLE)) return { text: answer, appended: [] };
   const missing: Array<{ symbol: string; line: string }> = [];
+  const allStocks = grounding
+    .split("\n")
+    .map((l) => l.match(STOCK_HEADER))
+    .filter((h): h is RegExpMatchArray => !!h)
+    .map((h) => ({ name: h[1].replace(/[*＊]/g, "").trim(), symbol: h[2] }));
   let cur: { name: string; symbol: string } | null = null;
   for (const raw of grounding.split("\n")) {
     const h = raw.match(STOCK_HEADER);
@@ -180,7 +204,8 @@ export function ensureMarginSignalMentioned(answer: string, grounding: string): 
     if (!cur || !m) continue;
     const [, label, rest] = m;
     const mentioned = answer.includes(cur.symbol) || (cur.name.length >= 2 && answer.includes(cur.name));
-    if (mentioned && !answer.includes(label)) missing.push({ symbol: cur.symbol, line: `${cur.name}(${cur.symbol})：【${label}】${rest}` });
+    const me = cur;
+    if (mentioned && !labelNearStock(answer, me, allStocks.filter((x) => x.symbol !== me.symbol), label)) missing.push({ symbol: cur.symbol, line: `${cur.name}(${cur.symbol})：【${label}】${rest}` });
   }
   if (missing.length === 0) return { text: answer, appended: [] };
   const shown = missing.slice(0, MARGIN_SIGNAL_APPENDIX_MAX);

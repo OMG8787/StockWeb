@@ -117,6 +117,7 @@ import { getTwTradingPhase, taipeiDayKey } from "@/lib/pollingSchedule";
 import { getMarketStatus } from "@/lib/marketStatus";
 import { getTradingStance } from "@/lib/ai/tradingStance";
 import { guardAvoidPriceAdvice } from "@/lib/ai/ratingConsistencyGuard";
+import { formatLiveQuote, parseLiveQuotes } from "@/lib/ai/livePrice";
 import { REGIME_RET60_PCT } from "../../scripts/backtest/wideConfig";
 import { REGIME_A_PCT } from "../../scripts/backtest/regimeConfig";
 
@@ -133,6 +134,18 @@ describe("同一檔股票：各入口結論與價位逐字相同", () => {
       expect(g.text).toContain(describeSiteRating(r.name, r.symbol, r.rating));
       const levels = describePriceFramework(r.framework, { avoid: r.rating.code === "avoid" });
       if (levels) expect(g.text).toContain(levels);
+    }
+  });
+
+  it("現價（2026-10-07）：個股資料、持股輕量清單、今日建議卡用同一個報價來源與同一個格式化函式", async () => {
+    for (const sym of ["1111", "2222"]) {
+      const r = (await getStockRating(sym))!;
+      const quote = fx.quote(sym)!;
+      const expected = formatLiveQuote(quote as never, r.price);
+      const g = (await buildStockGrounding({ symbol: sym, market: "TW" }))!;
+      expect(parseLiveQuotes(g.text).get(sym)?.text).toBe(expected);
+      const light = await buildHoldingsGrounding([{ symbol: sym, market: "TW", name: r.name }], false, true);
+      expect(parseLiveQuotes(light).get(sym)?.text).toBe(formatLiveQuote(quote as never));
     }
   });
 

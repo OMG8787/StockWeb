@@ -1,4 +1,6 @@
 import { MARGIN_SIGNAL_TITLE } from "./marginSignalData";
+import { getQuote } from "@/lib/data";
+import { formatLiveQuote } from "./livePrice";
 import { confidenceText } from "./siteRating";
 import { peekCached, writeCached } from "@/lib/data/cache";
 import { cachedWithDegradedPredicate } from "@/lib/data/degradedCache";
@@ -48,6 +50,8 @@ export interface ActionBrief {
   picks: ActionBriefPick[];
   /** 要用較強模型、但額度用完或暫時無法使用而改用其他模型（卡片標示用） */
   fellBackToLite?: boolean;
+  /** 「先不要買／不建議追」那一檔的代號（前端輪詢現價用；沒有就 undefined） */
+  notChaseSymbol?: string;
   /** 名單與價位（程式即時層）的計算時間；generatedAt 是 AI 解說撰寫時間（沒有 AI 時同 listAt） */
   listAt?: string;
 }
@@ -269,12 +273,25 @@ ${list.grounding}` }], {
     { forceRefresh }
   ).catch(() => null);
 
-  const merged = mergeAiExplanation(list.picks, layer, list.notChase?.symbol ?? null, nextActionBriefSlotTime());
+  // 每檔即時現價（2026-10-07 使用者：四入口出現的每一檔都要顯示當前現價）：不進快取層、每次回應用 getQuote 重算
+  // （跟 AI 問答同一個報價來源與格式 livePrice.ts）；前端盤中再每 30 秒輪詢更新。
+  const priceOf = new Map(list.ratings.map((r) => [r.symbol.toUpperCase(), r.price]));
+  const [pickQuotes, ncQuote] = await Promise.all([
+    Promise.all(list.picks.map((p) => getQuote(p.symbol, "TW").catch(() => null))),
+    list.notChase ? getQuote(list.notChase.symbol, "TW").catch(() => null) : Promise.resolve(null),
+  ]);
+  const livePicks = list.picks.map((p, i) => ({
+    ...p,
+    ratingPrice: priceOf.get(p.symbol.toUpperCase()),
+    ...(pickQuotes[i] ? { livePrice: formatLiveQuote(pickQuotes[i]!, priceOf.get(p.symbol.toUpperCase())) } : {}),
+  }));
+  const liveNotChase = list.notChase && ncQuote ? { ...list.notChase, livePrice: formatLiveQuote(ncQuote, priceOf.get(list.notChase.symbol.toUpperCase())) } : list.notChase;
+  const merged = mergeAiExplanation(livePicks, layer, list.notChase?.symbol ?? null, nextActionBriefSlotTime());
   const text = renderActionBrief({
     stance,
     marketLine: list.indexSummary.replace(/^大盤：/, ""),
     buy: merged.picks.filter((p) => p.code !== "avoid"),
-    notChase: list.notChase,
+    notChase: liveNotChase,
     marketNote: list.marketNote,
     gainersAvailable: list.gainersAvailable,
     ai: merged.ai,
@@ -287,7 +304,8 @@ ${list.grounding}` }], {
   return {
     title: stance.briefTitle,
     mode: stance.briefMode,
-    picks: list.picks,
+    picks: livePicks,
+    ...(list.notChase ? { notChaseSymbol: list.notChase.symbol } : {}),
     text: guarded.text,
     usedAi,
     listAt: list.listAt,
