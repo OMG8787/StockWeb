@@ -46,7 +46,7 @@ export const HOLDING_CHANGE_MIN_POINTS = 0.05;
 export const HOLDING_STRUCTURE_FACET_NAME = "持股結構面（大戶／外資／融資／融券）";
 // 融券使用率（融券餘額÷融券限額；2026-10-04 由券資比改成這個）刻意只列資訊不計分：升高代表看空的人
 // 變多，但空單日後要回補、也可能是軋空燃料，單看這個數字方向不明確，找不到有根據的加扣分規則
-// （融資融券組合判讀之後另案處理）。
+// （融資融券組合判讀已另做：marginSignal.ts，2026-10-06 回測後同樣只列資訊、不計分）。
 export const SHORT_UTILIZATION_INFO_NOTE = "（僅供參考、不計分：融券使用率升高可能是看空增加、也可能是軋空燃料，方向不明確）";
 
 // tone 是 "up" 但實際上是「漲多了」的警訊，不是買進理由——PROGRESS.md 記過一個真實

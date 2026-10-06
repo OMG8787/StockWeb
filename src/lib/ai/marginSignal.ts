@@ -1,6 +1,7 @@
 import type { Candle, Chips } from "@/lib/data/types";
 import { getTwTradingPhase, taipeiDayKey } from "@/lib/pollingSchedule";
 import {
+  MARGIN_SIGNAL_BACKTEST_NOTE,
   MARGIN_BIG_CHANGE_PCT,
   MARGIN_MIN_CHANGE_LOTS,
   MARGIN_SIGNAL_PRICE_MOVE_PCT,
@@ -105,7 +106,7 @@ export function computeMarginSignal(input: MarginSignalInput): MarginSignal | nu
  */
 export function describeMarginSignal(sig: MarginSignal | null, scope?: string): string | null {
   if (!sig || sig.code === "neutral") return null;
-  return `${MARGIN_SIGNAL_TITLE}（程式依單日數字算好${scope ? `，${scope}` : ""}）：【${sig.label}】${sig.meaning}。依據：${sig.numbers}`;
+  return `${MARGIN_SIGNAL_TITLE}（程式依單日數字算好${scope ? `，${scope}` : ""}）：【${sig.label}】${sig.meaning}。依據：${sig.numbers}（${MARGIN_SIGNAL_BACKTEST_NOTE}）`;
 }
 
 /**

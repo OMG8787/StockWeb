@@ -17,6 +17,13 @@ export const SHORT_BIG_CHANGE_PCT = 10;
 /** 融券單日增減的絕對張數下限。 */
 export const SHORT_MIN_CHANGE_LOTS = 30;
 
+/**
+ * 附在每則判讀後面的誠實註記（2026-10-06 回測，docs/backtest/2026-10-margin-signal.md）：四種訊號後續 10～20 日的超額報酬
+ * 在樣本內（2024-10～2026-08）與樣本外（2022-01～2024-09）方向不一致（例如「追高風險」樣本內 +0.87%、樣本外 -0.34%）、
+ * 多數不顯著，所以不計入評等，也要避免 AI 把它講成「一定會回檔／一定會軋空」。
+ */
+export const MARGIN_SIGNAL_BACKTEST_NOTE = "本站回測：這類訊號後續10～20日的漲跌方向不一致、多不顯著，只當解釋籌碼的線索，不代表一定回檔或上漲";
+
 export type MarginSignalCode = "chase" | "squeeze" | "settle" | "bearish" | "neutral";
 
 /** 區塊標題：askSystemCompose.ts 依這個標題判斷要不要帶 RULE_MARGIN_SIGNAL，兩邊共用同一個常數。 */
@@ -25,7 +32,7 @@ export const MARGIN_SIGNAL_TITLE = "融資融券組合判讀";
 export const MARGIN_SIGNAL_TEXT: Record<Exclude<MarginSignalCode, "neutral">, { label: string; meaning: string }> = {
   chase: {
     label: "追高風險",
-    meaning: "股價上漲、融資同步大增：散戶可能借錢追高，籌碼偏浮動，短線回檔風險通常較高",
+    meaning: "股價上漲、融資同步大增：散戶可能借錢追高，籌碼偏浮動，短線追高被套的風險較大",
   },
   squeeze: {
     label: "可能軋空",
