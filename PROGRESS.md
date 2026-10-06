@@ -383,6 +383,41 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **環境變數裡有付費服務金鑰就被自動使用**：按量計費的供應商必須另有 opt-in 開關（Claude 需 `ALLOW_PAID_AI=true`）；新增服務前先確認免費。→ CLAUDE.md「專案最高原則：零花費」。
 - **GitHub Actions 預熱排程沒照「每5分鐘」跑**：免費排程常延遲數小時或丟棄，不能當主力；主力是 SWR（過期先回舊資料、背景重算），預熱改由 cron-job.org 觸發，回應期限 25 秒以配合其 30 秒逾時。→ 工作日誌 2026-10-04，搜尋「cron-job」。
 
+## 接手狀態（CLAUDE.md 規則十；隨時更新，最後更新 2026-10-06 10:25 台北）
+
+**進行中的 agent**
+1. 評測改前改後比較（Sonnet）：等本機 mis.twse 解封（最晚 14:30）→ 補改前 7 題（list-reference、yes-no、second-opinion、holding-target、stance-after-hours-fixed、stance-weekend、earlier-claim-chase）→ 改後完整 33 題（gemini-flash-lite-latest＋NVIDIA、評審 NVIDIA）→ compare；退步就 revert `51b4087`／`976672c` 相關。改前基準在 worktree C:/Users/88691/Documents/Claude/Stock-web-baseline（2a14948）與 docs/eval/2026-10-06-lite-before.*；完成後刪該 worktree（使用者同意刪）。跑完要通知評等穩定化 agent。
+2. 報價即時性＋全站自動刷新（Sonnet）：報價已上線（`c701bb6`、`243a869`、`850c719`、`81c1b6f`；MIS 多節點新舊不一→落後就重打挑最新）；量測後刪暫時診斷端點；接著做全站共用自動刷新（首頁快報／今日建議卡、/action、個股頁籌碼基本面財報新聞評等、走勢圖延伸、/news、/scoreboard；盤中約 60 秒、盤後 10 分鐘、背景分頁暫停、不清掉輸入與 AI 對話）。
+3. 評等穩定化（Opus）：worktree scratchpad/wt-stab（分支 stab-work）。B／C（持有建議逐字照程式、停利標籤改單一動作、虧損不寫獲利吐回、多檔回答附評等變動說明）patch 在 scratchpad/bc.patch，**等評測 agent 跑完才跑 3 題評測、通過才 push**；A（籌碼面近 5 日累計 chipsWindow.ts＋新結論連 2 日確認 ratingStability.ts、stock-rating v5）FinMind 每日法人資料下載中，樣本內外回測通過（超額不變差、翻轉次數下降：初步 4.6→1.3 次／月）才上線。
+4. AI 模擬投資組合 100 萬（Opus）：程式依本站評等決策、Redis 紀錄、對照 0050 與加權、首頁卡＋/portfolio、每日 AI 檢討納入學習；可能需要使用者在 cron-job.org 加排程（完成時回報）。
+
+**排隊中（依序）**
+1. 評測 agent 跑完 → 評等穩定化 B／C 評測與上線。
+2. 四入口（今日建議／關注分析／個股按鈕／直接提問）品質比較：eval 新增四題型同批股票比較評審分數與規則通過率，最優做法套到其他入口，改後再比。
+3. AI 問答盤中資料準確度：AI 回答時強制即時報價（目前非輪詢請求可能拿到數分鐘前的價）、評等價（10 分鐘快取）與即時價對齊、前一日籌碼資料標明日期。
+4. 每次提示詞／AI 流程改動後跑跨模型評測。
+
+**排定的觀察／檢查**
+- 每則使用者訊息：check-feedback.py＋check-rating-log.py（上次 UTC 見下一章）。
+- 2026-10-07 07:50～08:30：盤前名單是否穩定（actionStability.ts）、log「[action-list] 輸入不完整」是哪個上游。
+- 2026-10-06 盤後：明日操作卡正常、遇到評等變動個股時確認有說明原因。
+- 2026-10-06～10-10：首頁卡片是否還標示「較強模型額度用完」。
+- 每週：評等成績（scripts/check-rating-log.py、/scoreboard）對照基準 20 日 +0.76%（t 1.80）。
+
+**使用者提過、尚未開工的待辦（逐條）**
+1. 融資融券組合判讀（漲跌×融資增減×融券增減，程式先算、三個 AI 功能都用、今日建議持股結構面計分）。
+2. 伺服器端對話記憶（跨裝置記得過往對話）。
+3. 走勢相似度搜尋（例：像和益一個月前的走勢）。
+4. 從使用者 👍 的回答挑 few-shot 範例（Lite 下限的一部分）。
+5. 8 大面向剩餘：法說會逐字稿、供應鏈、期權。
+6. 到價提醒接 LINE 通知。
+7. Google 登入跨裝置同步（程式已寫，需使用者在 Vercel 設 AUTH_GOOGLE_ID／AUTH_GOOGLE_SECRET）。
+8. 用量百分比自動讀取（狀態列腳本寫檔，需使用者同意改 Claude Code 設定；VSCode 擴充可能不支援）。
+
+**使用者已做的決定**：停用的 Claude API 程式碼先保留（ALLOW_PAID_AI 不設）；不為疊加免費額度另開正式站金鑰（先觀察 3～5 天）；本機用獨立 Gemini 金鑰＋GEMINI_PREMIUM_LOCAL=true；Stock-web-baseline 資料夾用完可刪。
+
+**等待中的外部條件**：本機 IP 被 mis.twse.com.tw 暫時封鎖（本機不要打 MIS）。
+
 ## AI 回饋檢查紀錄（CLAUDE.md「AI 回饋自動檢查」）
 
 - 上次檢查時間（UTC）：2026-10-06T02:15:00Z
