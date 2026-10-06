@@ -5,7 +5,9 @@ import {
   SIM_ADD_POSITION_PCT,
   SIM_BENCHMARK_ETF,
   SIM_INITIAL_CAPITAL,
+  SIM_FIXED_FILL_TIME,
   SIM_LIMIT_LOCK_PCT,
+  SIM_MAX_VOLUME_SHARE,
   SIM_MAX_POSITION_PCT,
   SIM_MAX_POSITIONS,
   SIM_MIN_TRADE_AMOUNT,
@@ -15,7 +17,7 @@ import {
   type SimPerformance,
 } from "./rules";
 import { readSimStateCached, simStoreEnabled } from "./store";
-import type { SimNavPoint, SimReview, SimTrade } from "./types";
+import type { SimNavPoint, SimPendingOrder, SimReview, SimTrade } from "./types";
 import { TW_BUY_COMMISSION_RATE, TW_SELL_COMMISSION_RATE, TW_SELL_TAX_RATE } from "@/lib/tradingCosts";
 
 /** /api/sim-portfolio 的回應（首頁卡片與 /portfolio 頁共用）。 */
@@ -48,6 +50,8 @@ export interface SimPortfolioView {
   perf?: SimPerformance;
   holdings?: SimHoldingView[];
   trades?: SimTrade[];
+  /** 盤後定價委託中（14:30 以收盤價成交） */
+  pending?: SimPendingOrder[];
   nav?: SimNavPoint[];
   reviews?: SimReview[];
   lastRun?: { at: string; slot: string; day: string; note: string };
@@ -59,6 +63,8 @@ export interface SimPortfolioView {
     addPositionPct: number;
     minTradeAmount: number;
     limitLockPct: number;
+    maxVolumeSharePct: number;
+    fixedFillTime: string;
     buyFeeRate: number;
     sellFeeRate: number;
     sellTaxRate: number;
@@ -78,6 +84,8 @@ const RULES: SimPortfolioView["rules"] = {
   addPositionPct: SIM_ADD_POSITION_PCT * 100,
   minTradeAmount: SIM_MIN_TRADE_AMOUNT,
   limitLockPct: SIM_LIMIT_LOCK_PCT,
+  maxVolumeSharePct: SIM_MAX_VOLUME_SHARE * 100,
+  fixedFillTime: SIM_FIXED_FILL_TIME,
   buyFeeRate: asPct(TW_BUY_COMMISSION_RATE),
   sellFeeRate: asPct(TW_SELL_COMMISSION_RATE),
   sellTaxRate: asPct(TW_SELL_TAX_RATE),
@@ -147,6 +155,7 @@ export async function getSimPortfolioView(opts: { tradeLimit?: number } = {}): P
     perf,
     holdings,
     trades: state.trades.slice(0, opts.tradeLimit ?? state.trades.length),
+    pending: (state.pending ?? []).filter((p) => p.day === taipeiDayKey()),
     nav: state.nav,
     reviews: state.reviews,
     lastRun: state.lastRun,

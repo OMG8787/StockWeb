@@ -20,6 +20,17 @@ import {
   type HeldReview,
 } from "@/lib/simPortfolio/rules";
 import { buildReviewFacts } from "@/lib/simPortfolio/review";
+import { misRowToDepth } from "@/lib/simPortfolio/depth";
+import {
+  decideFill,
+  executeSimOrders,
+  fixedFillAt,
+  pendingToOrder,
+  recordRejected,
+  SIM_MAX_VOLUME_SHARE,
+  toPendingOrders,
+  type SimDepth,
+} from "@/lib/simPortfolio/rules";
 import { TRADE_COST_PCT, tradeReward } from "@/lib/ai/learning/reward";
 import { TW_ROUND_TRIP_COST_PCT } from "@/lib/tradingCosts";
 import { computeHoldingPnl } from "@/lib/portfolio";
@@ -99,7 +110,7 @@ describe("執行時點", () => {
 });
 
 describe("買賣決策（只依評等）", () => {
-  it("空手：依名單順序買建議買進的，每檔約 15% 淨值；先不要買、接近漲停的不買", () => {
+  it("空手：依名單順序買建議買進的，每檔約 15% 淨值；先不要買的不買（漲停能不能買由 decideFill 判斷）", () => {
     const s = newSimState(tpe(DAY, "09:30"), { etf: 100, index: 20000 });
     const orders = planSimOrders({
       state: s,
@@ -108,7 +119,7 @@ describe("買賣決策（只依評等）", () => {
       candidates: [cand("1101", 50), cand("2330", 1500), cand("9999", 30, 1, "avoid"), cand("8888", 40, 9.8)],
       prices: new Map(),
     });
-    expect(orders.map((o) => o.symbol)).toEqual(["1101", "2330"]);
+    expect(orders.map((o) => o.symbol)).toEqual(["1101", "2330", "8888"]);
     expect(orders[0].shares).toBe(2995); // 15 萬／(50×1.001425)
     expect(orders[1].shares).toBe(Math.floor((SIM_INITIAL_CAPITAL * SIM_NEW_POSITION_PCT) / (1500 * 1.001425)));
   });
@@ -141,11 +152,11 @@ describe("買賣決策（只依評等）", () => {
     const again = planSimOrders({ state: s, day: "2026-10-07", held: [held[1]], candidates: [], prices: new Map() });
     expect(again).toEqual([]);
   });
-  it("跌停附近不賣；當天賣掉的不買回", () => {
+  it("當天賣掉的不買回（未成交的賣單不算賣過）", () => {
     const s = newSimState(tpe("2026-10-05", "09:30"), { etf: 100, index: 20000 });
     applySimOrder(s, { symbol: "A", name: "A", side: "buy", shares: 1000, price: 50, ratingLabel: "", reason: "" }, ctx("2026-10-05"));
-    const locked = planSimOrders({ state: s, day: DAY, held: [{ symbol: "A", price: 45, changePercent: -9.9, rating: rating("avoid", "exit"), newStop: null }], candidates: [], prices: new Map() });
-    expect(locked).toEqual([]);
+    recordRejected(s, { symbol: "A", name: "A", side: "sell", shares: 1000, price: 45, ratingLabel: "", reason: "" }, "未成交：跌停鎖死", ctx());
+    expect(s.holdings).toHaveLength(1);
     applySimOrder(s, { symbol: "A", name: "A", side: "sell", shares: 1000, price: 49, ratingLabel: "", reason: "" }, ctx());
     expect(planSimOrders({ state: s, day: DAY, held: [], candidates: [cand("A", 49)], prices: new Map() })).toEqual([]);
   });
@@ -210,5 +221,112 @@ describe("淨值與成效", () => {
     const facts = buildReviewFacts(s, computePerformance(s, { prices, etf: 100, index: 20000 }, DAY), prices, DAY);
     expect(facts).toContain("買進 甲(A) 1,000 股 @ 100");
     expect(facts).toContain("需檢討");
+  });
+});
+
+const depth = (over: Partial<SimDepth> = {}): SimDepth => ({
+  last: 100,
+  prevClose: 95,
+  limitUp: 104.5,
+  limitDown: 85.5,
+  bestAsk: 100.5,
+  bestAskVol: 5000,
+  bestBid: 99.5,
+  bestBidVol: 5000,
+  volumeShares: 10_000_000,
+  tradeDate: DAY,
+  ...over,
+});
+const fb = { price: 100, changePercent: 1 };
+
+describe("成交判斷（漲跌停鎖死、五檔、成交量）", () => {
+  it("盤中：買用最佳賣價、賣用最佳買價", () => {
+    expect(decideFill({ side: "buy", shares: 100 }, depth(), "continuous", fb)).toMatchObject({ status: "filled", price: 100.5, shares: 100 });
+    expect(decideFill({ side: "sell", shares: 100 }, depth(), "continuous", fb)).toMatchObject({ status: "filled", price: 99.5 });
+  });
+  it("漲停鎖死（現價＝漲停、賣方無掛單）買不到；漲停但還有賣單可以買", () => {
+    const locked = decideFill({ side: "buy", shares: 100 }, depth({ last: 104.5, bestAsk: null }), "continuous", fb);
+    expect(locked.status).toBe("rejected");
+    expect(locked.status === "rejected" && locked.reason).toContain("漲停鎖死");
+    expect(decideFill({ side: "buy", shares: 100 }, depth({ last: 104.5, bestAsk: 104.5 }), "continuous", fb)).toMatchObject({ status: "filled", price: 104.5 });
+    // 漲停鎖死時賣出照樣可以（用最佳買價）
+    expect(decideFill({ side: "sell", shares: 100 }, depth({ last: 104.5, bestAsk: null, bestBid: 104.5 }), "continuous", fb)).toMatchObject({ status: "filled", price: 104.5 });
+  });
+  it("跌停鎖死（現價＝跌停、買方無掛單）賣不掉", () => {
+    const d = decideFill({ side: "sell", shares: 100 }, depth({ last: 85.5, bestBid: null }), "continuous", fb);
+    expect(d.status === "rejected" && d.reason).toContain("跌停鎖死");
+  });
+  it("盤後定價：收盤價成交；收盤漲停買不到、收盤跌停賣不掉；零股註明近似", () => {
+    expect(decideFill({ side: "buy", shares: 1500 }, depth(), "fixed", fb)).toMatchObject({ status: "filled", price: 100, shares: 1500 });
+    const odd = decideFill({ side: "buy", shares: 1500 }, depth(), "fixed", fb);
+    expect(odd.status === "filled" && odd.basis).toContain("盤後零股");
+    expect(decideFill({ side: "buy", shares: 1000 }, depth({ last: 104.5 }), "fixed", fb).status).toBe("rejected");
+    expect(decideFill({ side: "sell", shares: 1000 }, depth({ last: 85.5 }), "fixed", fb).status).toBe("rejected");
+    expect(decideFill({ side: "sell", shares: 1000 }, depth({ last: 104.5 }), "fixed", fb)).toMatchObject({ status: "filled", price: 104.5 });
+  });
+  it("讀不到五檔：退回保守規則並寫明原因", () => {
+    expect(decideFill({ side: "buy", shares: 100 }, null, "continuous", { price: 50, changePercent: 9.6 }).status).toBe("rejected");
+    expect(decideFill({ side: "sell", shares: 100 }, null, "continuous", { price: 50, changePercent: -9.6 }).status).toBe("rejected");
+    const ok = decideFill({ side: "buy", shares: 100 }, null, "continuous", { price: 50, changePercent: 3 });
+    expect(ok).toMatchObject({ status: "filled", price: 50 });
+    expect(ok.status === "filled" && ok.basis).toContain("讀不到五檔");
+  });
+  it("單筆超過當日成交量 5% 只部分成交；量太少不成交", () => {
+    const d = decideFill({ side: "buy", shares: 10_000 }, depth({ volumeShares: 100_000 }), "continuous", fb);
+    expect(d).toMatchObject({ status: "filled", shares: 100_000 * SIM_MAX_VOLUME_SHARE });
+    expect(d.status === "filled" && d.basis).toContain("部分成交");
+    expect(decideFill({ side: "buy", shares: 10 }, depth({ volumeShares: 10 }), "continuous", fb).status).toBe("rejected");
+  });
+  it("MIS 列解析：漲跌停、五檔、量（張→股）", () => {
+    const d = misRowToDepth({ c: "2330", z: "-", trade: { z: "1000" }, y: "990", u: "1085", w: "895", a: "1005_1010_", b: "-", f: "3_4_", g: "", v: "12345", d: "20261006" })!;
+    expect(d).toMatchObject({ last: 1000, limitUp: 1085, limitDown: 895, bestAsk: 1005, bestAskVol: 3000, bestBid: null, volumeShares: 12_345_000, tradeDate: "2026-10-06" });
+  });
+});
+
+describe("撮合與盤後委託", () => {
+  it("未成交記一筆、不動現金與持股；成交附成交依據", () => {
+    const s = newSimState(tpe(DAY, "09:30"), { etf: 100, index: 20000 });
+    const orders = [
+      { symbol: "A", name: "A", side: "buy" as const, shares: 100, price: 100, ratingLabel: "建議買進", reason: "r" },
+      { symbol: "B", name: "B", side: "buy" as const, shares: 100, price: 100, ratingLabel: "建議買進", reason: "r" },
+    ];
+    const res = executeSimOrders(s, orders, {
+      mode: "continuous",
+      depthOf: (sym) => (sym === "A" ? depth() : depth({ last: 104.5, bestAsk: null })),
+      fallbackOf: () => fb,
+      ctx: { ...ctx(), index: 20000 },
+    });
+    expect(res.filled.map((t) => t.symbol)).toEqual(["A"]);
+    expect(res.filled[0]).toMatchObject({ price: 100.5, status: "filled", basis: "最佳賣價 100.5" });
+    expect(res.rejected[0]).toMatchObject({ symbol: "B", status: "rejected", amount: 0, fee: 0 });
+    expect(s.cash).toBe(SIM_INITIAL_CAPITAL - Math.round(100.5 * 100) - buyFee(100.5, 100));
+    expect(s.trades).toHaveLength(2);
+    expect(s.stats.buys).toBe(1);
+  });
+  it("成交價高於預估時買單縮到現金買得起", () => {
+    const s = newSimState(tpe(DAY, "09:30"), { etf: 100, index: 20000 });
+    s.cash = 10_000;
+    const res = executeSimOrders(s, [{ symbol: "A", name: "A", side: "buy", shares: 100, price: 99, ratingLabel: "", reason: "" }], {
+      mode: "continuous",
+      depthOf: () => depth(),
+      fallbackOf: () => fb,
+      ctx: ctx(),
+    });
+    expect(res.filled[0].shares).toBe(sharesForBudget(10_000, 100.5));
+    expect(s.cash).toBeGreaterThanOrEqual(0);
+  });
+  it("13:35 委託 → 14:35 以收盤價結算、成交時間 14:30", () => {
+    const s = newSimState(tpe(DAY, "09:30"), { etf: 100, index: 20000 });
+    const pend = toPendingOrders([{ symbol: "A", name: "A", side: "buy", shares: 1000, price: 100, ratingLabel: "建議買進", reason: "r" }], { day: DAY, at: "x", slot: "1335" });
+    const res = executeSimOrders(s, pend.map(pendingToOrder), {
+      mode: "fixed",
+      depthOf: () => depth({ last: 101 }),
+      fallbackOf: () => fb,
+      ctx: { at: fixedFillAt(DAY), day: DAY, slot: "1435", index: 20000 },
+    });
+    expect(res.filled[0]).toMatchObject({ price: 101, shares: 1000, at: "2026-10-06T06:30:00.000Z" });
+    expect(currentSimSlot(tpe(DAY, "14:00"))?.kind).toBe("fixed-decide");
+    expect(currentSimSlot(tpe(DAY, "14:31"))).toBeNull();
+    expect(currentSimSlot(tpe(DAY, "14:35"))?.kind).toBe("fixed-settle");
   });
 });

@@ -59,15 +59,21 @@ export default function SimPortfolioCard() {
               </ul>
             </div>
             <div>
-              <h3 className="text-[13px] font-medium text-(--text-muted)">最近交易</h3>
+              <h3 className="text-[13px] font-medium text-(--text-muted)">
+                最近交易{(data.pending?.length ?? 0) > 0 && `（另有 ${data.pending!.length} 筆盤後定價委託，${data.rules.fixedFillTime} 成交）`}
+              </h3>
               <ul className="mt-1 space-y-1 text-sm">
                 {(data.trades ?? []).map((t, i) => (
                   <li key={`${t.at}-${t.symbol}-${i}`} className="flex items-baseline gap-2">
-                    <span className={`shrink-0 rounded px-1.5 text-[12px] ${t.side === "buy" ? "bg-(--price-up)/10 text-(--price-up)" : "bg-(--price-down)/10 text-(--price-down)"}`}>
-                      {t.side === "buy" ? "買" : "賣"}
+                    <span
+                      className={`shrink-0 rounded px-1.5 text-[12px] ${
+                        t.status === "rejected" ? "bg-(--page-plane) text-(--text-muted)" : t.side === "buy" ? "bg-(--price-up)/10 text-(--price-up)" : "bg-(--price-down)/10 text-(--price-down)"
+                      }`}
+                    >
+                      {t.status === "rejected" ? "未成交" : t.side === "buy" ? "買" : "賣"}
                     </span>
                     <span className="truncate">
-                      {t.name} {t.shares.toLocaleString("en-US")} 股 @ {t.price}
+                      {t.name} {t.status === "rejected" ? (t.rejectReason ?? "").replace(/^未成交：/, "") : `${t.shares.toLocaleString("en-US")} 股 @ ${t.price}`}
                     </span>
                     <span className="ml-auto shrink-0 text-[12px] text-(--text-muted) tabular-nums">{fmtTime(t.at)}</span>
                   </li>

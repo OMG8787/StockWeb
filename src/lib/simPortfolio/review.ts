@@ -38,11 +38,12 @@ export function buildReviewFacts(state: SimState, perf: SimPerformance, prices: 
     today.length === 0
       ? "【今日交易】沒有交易（評等沒有觸發買賣條件）。"
       : `【今日交易】\n${today
-          .map(
-            (t) =>
-              `- ${t.side === "buy" ? "買進" : "賣出"} ${t.name}(${t.symbol}) ${t.shares.toLocaleString("en-US")} 股 @ ${t.price}（評等「${t.ratingLabel}」；理由：${t.reason}）${
-                t.side === "sell" ? `，已實現 ${fmtNt(t.realized ?? 0)}（${fmtPct(t.realizedPct)}，同期大盤 ${fmtPct(t.indexPct)}，獎勵 ${fmtPct(t.reward)}）` : ""
-              }`
+          .map((t) =>
+            t.status === "rejected"
+              ? `- ${t.side === "buy" ? "想買" : "想賣"} ${t.name}(${t.symbol}) ${t.shares.toLocaleString("en-US")} 股，${t.rejectReason ?? "未成交"}（評等「${t.ratingLabel}」）`
+              : `- ${t.side === "buy" ? "買進" : "賣出"} ${t.name}(${t.symbol}) ${t.shares.toLocaleString("en-US")} 股 @ ${t.price}（評等「${t.ratingLabel}」；理由：${t.reason}${t.basis ? `；成交依據：${t.basis}` : ""}）${
+                  t.side === "sell" ? `，已實現 ${fmtNt(t.realized ?? 0)}（${fmtPct(t.realizedPct)}，同期大盤 ${fmtPct(t.indexPct)}，獎勵 ${fmtPct(t.reward)}）` : ""
+                }`
           )
           .join("\n")}`
   );
@@ -59,7 +60,7 @@ export function buildReviewFacts(state: SimState, perf: SimPerformance, prices: 
         .join("\n")}`
     );
   } else lines.push("【持股】目前空手（全部現金）。");
-  const sells = state.trades.filter((t) => t.side === "sell").slice(0, SIM_REVIEW_RECENT_SELLS);
+  const sells = state.trades.filter((t) => t.side === "sell" && t.status !== "rejected").slice(0, SIM_REVIEW_RECENT_SELLS);
   if (sells.length > 0) {
     lines.push(
       `【最近已平倉（獎勵＝扣成本報酬−同期大盤，負的是判斷錯誤）】\n${sells

@@ -88,6 +88,23 @@ export default function SimPortfolioPage() {
             )}
           </section>
 
+          {(data.pending ?? []).length > 0 && (
+            <section className={card}>
+              <h2 className="mb-2 font-semibold">盤後定價委託中（{r.fixedFillTime} 以收盤價成交）</h2>
+              <ul className="divide-y divide-(--gridline)">
+                {(data.pending ?? []).map((p) => (
+                  <li key={`${p.symbol}-${p.side}`} className="py-2 text-sm">
+                    <span className={`mr-2 rounded px-1.5 text-[12px] ${p.side === "buy" ? "bg-(--price-up)/10 text-(--price-up)" : "bg-(--price-down)/10 text-(--price-down)"}`}>
+                      {p.side === "buy" ? "委買" : "委賣"}
+                    </span>
+                    {p.name} <span className="text-(--text-muted)">{p.symbol}</span> {p.shares.toLocaleString("en-US")} 股（參考收盤價 {p.refPrice}）
+                    <span className="ml-2 text-[12px] text-(--text-muted)">盤後定價委託，{r.fixedFillTime} 成交｜評等「{p.ratingLabel}」</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className={card}>
             <h2 className="mb-2 font-semibold">交易紀錄</h2>
             {(data.trades ?? []).length === 0 ? (
@@ -98,17 +115,29 @@ export default function SimPortfolioPage() {
                   <li key={`${t.at}-${t.symbol}-${i}`} className="py-2.5 text-sm">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                       <span
-                        className={`rounded px-1.5 text-[12px] ${t.side === "buy" ? "bg-(--price-up)/10 text-(--price-up)" : "bg-(--price-down)/10 text-(--price-down)"}`}
+                        className={`rounded px-1.5 text-[12px] ${
+                          t.status === "rejected"
+                            ? "bg-(--page-plane) text-(--text-muted)"
+                            : t.side === "buy"
+                              ? "bg-(--price-up)/10 text-(--price-up)"
+                              : "bg-(--price-down)/10 text-(--price-down)"
+                        }`}
                       >
-                        {t.side === "buy" ? "買進" : "賣出"}
+                        {t.status === "rejected" ? (t.side === "buy" ? "未買到" : "未賣出") : t.side === "buy" ? "買進" : "賣出"}
                       </span>
                       <Link href={`/stock/${t.symbol}?market=TW`} className="font-medium hover:text-(--accent)">
                         {t.name} <span className="text-(--text-muted)">{t.symbol}</span>
                       </Link>
-                      <span className="tabular-nums">
-                        {t.shares.toLocaleString("en-US")} 股 @ {t.price}（{ntd(t.amount)} 元，費用 {ntd(t.fee)}）
-                      </span>
-                      {t.side === "sell" && (
+                      {t.status === "rejected" ? (
+                        <span className="text-(--text-secondary)">
+                          {t.shares.toLocaleString("en-US")} 股｜{t.rejectReason ?? "未成交"}
+                        </span>
+                      ) : (
+                        <span className="tabular-nums">
+                          {t.shares.toLocaleString("en-US")} 股 @ {t.price}（{ntd(t.amount)} 元，費用 {ntd(t.fee)}）
+                        </span>
+                      )}
+                      {t.side === "sell" && t.status !== "rejected" && (
                         <span className={`tabular-nums ${tone(t.realized)}`}>
                           已實現 {ntd(t.realized ?? 0)}（{pct(t.realizedPct)}，大盤 {pct(t.indexPct)}，獎勵 {pct(t.reward)}）
                         </span>
@@ -118,6 +147,7 @@ export default function SimPortfolioPage() {
                     <p className="mt-0.5 text-[13px] text-(--text-secondary)">
                       評等「{t.ratingLabel}」｜{t.reason}
                     </p>
+                    {t.basis && <p className="mt-0.5 text-[12px] text-(--text-muted)">成交依據：{t.basis}</p>}
                   </li>
                 ))}
               </ul>
@@ -134,12 +164,16 @@ export default function SimPortfolioPage() {
           </li>
           <li>
             買進：候選＝當時「今日建議」名單中評等為「建議買進」的台股，依名單順序；每檔約淨值 {r.newPositionPct}%，最多 {r.maxPositions} 檔，單筆低於{" "}
-            {ntd(r.minTradeAmount)} 元不做；當天漲幅 ≥ {r.limitLockPct}% 視為買不到。
+            {ntd(r.minTradeAmount)} 元不做。
+          </li>
+          <li>
+            成交：盤中買進用最佳賣價、賣出用最佳買價（讀不到五檔才用最近成交價）；現價＝漲停且賣方無掛單（漲停鎖死）買不到、現價＝跌停且買方無掛單（跌停鎖死）賣不掉；
+            13:35 那輪是盤後定價委託，{r.fixedFillTime} 以收盤價成交（收盤漲停買不到、收盤跌停賣不掉，零頭走盤後零股、以收盤價近似）；單筆最多成交當日成交量的{" "}
+            {r.maxVolumeSharePct}%，超過部分成交；讀不到五檔與漲跌停價時退回保守規則（漲跌幅 ≥ {r.limitLockPct}% 視為鎖死）。未成交的單記在交易紀錄並寫明原因，不續掛，下一個時點重新評估。
           </li>
           <li>
             持有中：每個時點重讀本站評等並套上成本（停利）——「建議出場」全賣、「建議減碼」先賣一半（只減一次）、「可分批加碼」每次最多加 {r.addPositionPct}%、單檔上限{" "}
-            {r.maxPositionPct}%；現價跌破上一個時點記下的「持有中出場價」就全部賣出。當天買的不因評等當天賣（停損除外）、當天賣的不買回；跌幅 ≥ {r.limitLockPct}%
-            視為賣不掉。
+            {r.maxPositionPct}%；現價跌破上一個時點記下的「持有中出場價」就全部賣出。當天買的不因評等當天賣（停損除外）、當天賣的不買回。
           </li>
           <li>
             成本：手續費買賣各 {r.buyFeeRate}%、賣出證交稅 {r.sellTaxRate}%，逐項無條件捨去到元；股數以 1 股為單位（整張以外用零股），未計滑價與最低手續費。

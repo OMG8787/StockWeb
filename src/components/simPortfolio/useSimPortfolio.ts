@@ -7,7 +7,8 @@ import type { SimPortfolioView } from "@/lib/simPortfolio/view";
 
 /**
  * 首頁卡片與 /portfolio 頁共用：抓 /api/sim-portfolio，台股盤中跟全站同一套輪詢節奏（useLivePolling＋getPollDecision）。
- * TODO（全站自動刷新 AutoRefresh 上線後）：改接共用機制。
+ * 全站自動刷新（lib/autoRefresh.ts）把資料分三類：這裡淨值隨報價變，屬「報價類」，用 useLivePolling＋pollingSchedule（盤中 30 秒、
+ * 背景分頁暫停、14:40 補抓一次）正是共用機制；/portfolio 沒有伺服器渲染的即時數字，不需要在 serverRefreshMs 補路徑。
  */
 export function useSimPortfolio(trades?: number): { data: SimPortfolioView | null; failed: boolean } {
   const [data, setData] = useState<SimPortfolioView | null>(null);
@@ -34,4 +35,4 @@ export const fmtTime = (iso: string) =>
   new Date(iso).toLocaleString("zh-TW", { timeZone: "Asia/Taipei", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
 
 export const SIM_DISCLAIMER =
-  "模擬交易、非投資建議：虛擬資金 100 萬元，買賣全部由本站程式依「本站綜合評等」自動決定（AI 只寫每日檢討），成交價假設為執行當下的即時價／收盤價，已計手續費與證交稅、未計滑價與最低手續費。";
+  "模擬交易、非投資建議：虛擬資金 100 萬元，買賣全部由本站程式依「本站綜合評等」自動決定（AI 只寫每日檢討）。盤中買用最佳賣價、賣用最佳買價，盤後定價 14:30 以收盤價成交，漲跌停鎖死視為買不到／賣不掉，單筆不超過當日成交量 5%；已計手續費與證交稅、未計最低手續費。";

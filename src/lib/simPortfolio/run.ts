@@ -5,19 +5,26 @@ import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getStockRating, type StockRatingResult } from "@/lib/ai/stockRating";
 import { describeRatingForHolding } from "@/lib/ai/holdingRating";
 import { computeHoldingStop } from "@/lib/ai/holdingStop";
+import { getSimDepth } from "./depth";
 import {
-  applySimOrder,
   computePerformance,
   currentSimSlot,
+  executeSimOrders,
+  fixedFillAt,
   markSlotDone,
   newSimState,
+  pendingToOrder,
   planSimOrders,
+  recordRejected,
   SIM_BENCHMARK_ETF,
+  SIM_FIXED_FILL_TIME,
   SIM_MAX_REVIEWS,
   slotDoneKey,
+  toPendingOrders,
   upsertNavPoint,
   type BuyCandidate,
   type HeldReview,
+  type SimDepth,
   type SimSlotDef,
 } from "./rules";
 import { acquireSimLock, readSimState, releaseSimLock, simStoreEnabled, writeSimState } from "./store";
@@ -27,14 +34,14 @@ import type { SimSlotId, SimState } from "./types";
 /**
  * AI 模擬投資組合的執行（有 I/O）。由 /api/cron/warm-cache（cron-job.org 每 5 分鐘）順帶呼叫，
  * 不在執行時點時零 Redis 指令直接略過；也可手動打 /api/cron/sim-portfolio。
- * 買賣規則全在 rules.ts（純函式）；這裡只負責抓評等／報價、套用、存檔。
+ * 買賣規則、成交判斷全在 rules.ts（純函式）；這裡只負責抓評等／報價／盤口、套用、存檔。
+ * 時點：盤中 09:30、13:00 立即撮合；13:35 下盤後定價委託；14:35 起以收盤價結算（成交時間 14:30）並寫 AI 檢討。
  */
 
 export interface SimRunResult {
   status: "done" | "skipped" | "disabled" | "failed";
   reason?: string;
   slot?: SimSlotId;
-  trades?: number;
   nav?: number;
 }
 
@@ -65,11 +72,39 @@ async function reviewHolding(
   return { review: { symbol: h.symbol, price: p, changePercent, rating: held.rating, newStop: stop?.price ?? null }, rated };
 }
 
+/** 存這次的持有中出場價（下一個時點比對）與最後價格；這次沒有檢視結果的持股（新買進）用日K另算一次。 */
+async function refreshStops(
+  state: SimState,
+  prices: Map<string, number>,
+  stopBySymbol: Map<string, number | null>,
+  candidates: BuyCandidate[] = []
+): Promise<void> {
+  for (const h of state.holdings) {
+    const p = prices.get(h.symbol);
+    if (p && p > 0) h.lastPrice = p;
+    if (stopBySymbol.has(h.symbol)) {
+      h.stopPrice = stopBySymbol.get(h.symbol) ?? null;
+      continue;
+    }
+    const candles = await dailyCandles(h.symbol);
+    h.stopPrice = computeHoldingStop({ candles, price: p ?? h.avgCost, costBasis: h.avgCost, market: "TW" })?.price ?? h.stopPrice ?? null;
+    h.lastLabel = candidates.find((c) => c.symbol === h.symbol)?.rating.holdingLabel ?? h.lastLabel;
+  }
+}
+
+/** 盤口只用今天的（MIS 資料日期不是今天＝重置／測試狀態，視同讀不到）。 */
+function todayDepth(depth: Map<string, SimDepth>, day: string) {
+  return (sym: string): SimDepth | null => {
+    const d = depth.get(sym);
+    return d && d.tradeDate === day ? d : null;
+  };
+}
+
 export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | null } = {}): Promise<SimRunResult> {
   if (!simStoreEnabled) return { status: "disabled", reason: "沒有 Redis" };
   const now = opts.now ?? new Date();
   const slot = opts.slot ?? currentSimSlot(now);
-  if (!slot) return { status: "skipped", reason: "不在執行時點（09:30、13:00、13:35 起）" };
+  if (!slot) return { status: "skipped", reason: "不在執行時點（盤中 09:30、13:00；13:35 下盤後委託；14:35 結算）" };
   const day = taipeiDayKey(now);
   const doneKey = slotDoneKey(day, slot.id);
   if (doneMemo.has(doneKey)) return { status: "skipped", reason: "這個時點已執行過", slot: slot.id };
@@ -99,69 +134,106 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
       return { status: "skipped", reason: `今日非交易日（報價日期 ${etfQuote.tradeDate}）`, slot: slot.id };
     }
     if (!state) state = newSimState(now, { etf: etfQuote.price, index });
-
-    // 買進候選＝今日建議名單（程式依本站綜合評等選出、已有凍結時段穩定機制），只取台股、評等即時重讀。
-    const brief = await getActionBrief().catch(() => null);
-    const pickSymbols = (brief?.picks ?? []).filter((p) => p.code === "buy").map((p) => p.symbol.toUpperCase());
-    const heldSymbols = state.holdings.map((h) => h.symbol);
-    const symbols = [...new Set([...heldSymbols, ...pickSymbols])];
-    const quotes = await getQuotesBatch(symbols.map((symbol) => ({ market: "TW" as const, symbol }))).catch(() => symbols.map(() => null));
-    const quoteOf = new Map(symbols.map((s, i) => [s, quotes[i]]));
-
-    const held: HeldReview[] = [];
-    for (const h of state.holdings) {
-      const q = quoteOf.get(h.symbol);
-      const r = await reviewHolding(h, q?.price ?? 0, q?.changePercent ?? 0);
-      if (r) {
-        held.push(r.review);
-        h.lastLabel = r.review.rating.holdingLabel;
-      }
-    }
-    const candidates: BuyCandidate[] = [];
-    for (const sym of pickSymbols) {
-      if (heldSymbols.includes(sym)) continue;
-      const rated = await getStockRating(sym, undefined, "sim-portfolio").catch(() => null);
-      if (!rated || rated.market !== "TW") continue;
-      const q = quoteOf.get(sym);
-      candidates.push({ symbol: sym, name: rated.name, price: q?.price && q.price > 0 ? q.price : rated.price, changePercent: q?.changePercent ?? 0, rating: rated.rating });
-    }
-
-    const prices = new Map<string, number>();
-    for (const r of held) prices.set(r.symbol, r.price);
-    for (const c of candidates) prices.set(c.symbol, c.price);
-    const orders = planSimOrders({ state, day, held, candidates, prices });
     const at = now.toISOString();
-    let executed = 0;
-    for (const o of orders) if (applySimOrder(state, o, { at, day, slot: slot.id, index })) executed++;
 
-    // 存這次的持有中出場價（下一個時點比對）；新買進的也算一次。
-    const stopBySymbol = new Map(held.map((r) => [r.symbol, r.newStop]));
-    for (const h of state.holdings) {
-      if (prices.has(h.symbol)) h.lastPrice = prices.get(h.symbol);
-      if (stopBySymbol.has(h.symbol)) h.stopPrice = stopBySymbol.get(h.symbol) ?? null;
-      else {
-        const candles = await dailyCandles(h.symbol);
-        h.stopPrice = computeHoldingStop({ candles, price: prices.get(h.symbol) ?? h.avgCost, costBasis: h.avgCost, market: "TW" })?.price ?? null;
-        h.lastLabel = candidates.find((c) => c.symbol === h.symbol)?.rating.holdingLabel ?? h.lastLabel;
+    // 前一天沒結算到的盤後委託：不再成交（收盤價已不是當天的），記為未成交後取消。
+    for (const p of (state.pending ?? []).filter((x) => x.day !== day)) {
+      recordRejected(state, pendingToOrder(p), "未成交：錯過當天 14:30 結算（系統當天沒有執行到結算時點），委託取消", {
+        at: fixedFillAt(p.day),
+        day: p.day,
+        slot: p.slot,
+      });
+    }
+    state.pending = (state.pending ?? []).filter((x) => x.day === day);
+
+    let note: string;
+    let prices = new Map<string, number>();
+    let writeReview = false;
+    if (slot.kind === "fixed-settle") {
+      // 14:35 起：以當日收盤價結算 13:35 那輪的盤後定價委託，成交時間記 14:30。
+      const pend = state.pending;
+      state.pending = [];
+      const symbols = [...new Set([...pend.map((x) => x.symbol), ...state.holdings.map((h) => h.symbol)])];
+      const [depth, quotes] = await Promise.all([
+        getSimDepth(symbols),
+        getQuotesBatch(symbols.map((symbol) => ({ market: "TW" as const, symbol }))).catch(() => symbols.map(() => null)),
+      ]);
+      const quoteOf = new Map(symbols.map((sym, i) => [sym, quotes[i]]));
+      const depthOf = todayDepth(depth, day);
+      const res = executeSimOrders(state, pend.map(pendingToOrder), {
+        mode: "fixed",
+        depthOf,
+        fallbackOf: (sym) => ({ price: quoteOf.get(sym)?.price ?? 0, changePercent: quoteOf.get(sym)?.changePercent ?? 0 }),
+        ctx: { at: fixedFillAt(day), day, slot: slot.id, index },
+      });
+      for (const sym of symbols) {
+        const close = depthOf(sym)?.last ?? quoteOf.get(sym)?.price;
+        if (close && close > 0) prices.set(sym, close);
       }
+      await refreshStops(state, prices, new Map(state.holdings.filter((h) => !res.filled.some((t) => t.symbol === h.symbol)).map((h) => [h.symbol, h.stopPrice])));
+      note = `${slot.label}：盤後委託 ${pend.length} 筆，成交 ${res.filled.length} 筆、未成交 ${res.rejected.length} 筆（成交時間 ${SIM_FIXED_FILL_TIME}）`;
+      writeReview = true;
+    } else {
+      // 買進候選＝今日建議名單（程式依本站綜合評等選出、已有凍結時段穩定機制），只取台股、評等即時重讀。
+      const brief = await getActionBrief().catch(() => null);
+      const pickSymbols = (brief?.picks ?? []).filter((x) => x.code === "buy").map((x) => x.symbol.toUpperCase());
+      const heldSymbols = state.holdings.map((h) => h.symbol);
+      const symbols = [...new Set([...heldSymbols, ...pickSymbols])];
+      const quotes = await getQuotesBatch(symbols.map((symbol) => ({ market: "TW" as const, symbol }))).catch(() => symbols.map(() => null));
+      const quoteOf = new Map(symbols.map((sym, i) => [sym, quotes[i]]));
+
+      const held: HeldReview[] = [];
+      for (const h of state.holdings) {
+        const q = quoteOf.get(h.symbol);
+        const r = await reviewHolding(h, q?.price ?? 0, q?.changePercent ?? 0);
+        if (r) {
+          held.push(r.review);
+          h.lastLabel = r.review.rating.holdingLabel;
+        }
+      }
+      const candidates: BuyCandidate[] = [];
+      for (const sym of pickSymbols) {
+        if (heldSymbols.includes(sym)) continue;
+        const rated = await getStockRating(sym, undefined, "sim-portfolio").catch(() => null);
+        if (!rated || rated.market !== "TW") continue;
+        const q = quoteOf.get(sym);
+        candidates.push({ symbol: sym, name: rated.name, price: q?.price && q.price > 0 ? q.price : rated.price, changePercent: q?.changePercent ?? 0, rating: rated.rating });
+      }
+
+      prices = new Map<string, number>();
+      for (const r of held) prices.set(r.symbol, r.price);
+      for (const c of candidates) prices.set(c.symbol, c.price);
+      const changeOf = new Map<string, number>([...held.map((r) => [r.symbol, r.changePercent] as const), ...candidates.map((c) => [c.symbol, c.changePercent] as const)]);
+      const orders = planSimOrders({ state, day, held, candidates, prices });
+      const tail = brief ? "" : "（今日建議名單暫時抓不到，只檢視持股）";
+      if (slot.kind === "fixed-decide") {
+        // 13:35～14:29：盤後定價／盤後零股委託，14:35 那輪以收盤價結算。
+        state.pending = toPendingOrders(orders, { day, at, slot: slot.id });
+        note = `${slot.label}：檢視持股 ${held.length} 檔、候選 ${candidates.length} 檔，盤後定價委託 ${orders.length} 筆（${SIM_FIXED_FILL_TIME} 以收盤價成交）${tail}`;
+      } else {
+        const depth = orders.length > 0 ? await getSimDepth([...new Set(orders.map((o) => o.symbol))]) : new Map<string, SimDepth>();
+        const res = executeSimOrders(state, orders, {
+          mode: "continuous",
+          depthOf: todayDepth(depth, day),
+          fallbackOf: (sym) => ({ price: prices.get(sym) ?? 0, changePercent: changeOf.get(sym) ?? 0 }),
+          ctx: { at, day, slot: slot.id, index },
+        });
+        note = `${slot.label}：檢視持股 ${held.length} 檔、候選 ${candidates.length} 檔，成交 ${res.filled.length} 筆、未成交 ${res.rejected.length} 筆${tail}`;
+      }
+      await refreshStops(state, prices, new Map(held.map((r) => [r.symbol, r.newStop])), candidates);
     }
 
     const perf = computePerformance(state, { prices, etf: etfQuote.price, index }, day);
     upsertNavPoint(state, { day, nav: perf.nav, cash: state.cash, etf: etfQuote.price, index });
     markSlotDone(state, day, slot.id);
-    state.lastRun = {
-      at,
-      slot: slot.id,
-      day,
-      note: `${slot.label}：檢視持股 ${held.length} 檔、候選 ${candidates.length} 檔，成交 ${executed} 筆${brief ? "" : "（今日建議名單暫時抓不到，只檢視持股）"}`,
-    };
-    if (slot.id === "1335") {
+    state.lastRun = { at, slot: slot.id, day, note };
+    if (writeReview) {
       const review = await writeSimReview(state, perf, prices, day, now);
       state.reviews = [review, ...state.reviews.filter((r) => r.day !== day)].slice(0, SIM_MAX_REVIEWS);
     }
     await writeSimState(state);
     doneMemo.add(doneKey);
-    return { status: "done", slot: slot.id, trades: executed, nav: perf.nav, reason: state.lastRun.note };
+    return { status: "done", slot: slot.id, nav: perf.nav, reason: note };
   } catch (err) {
     console.error("[sim-portfolio] 執行失敗：", err);
     return { status: "failed", reason: err instanceof Error ? err.message : String(err), slot: slot.id };

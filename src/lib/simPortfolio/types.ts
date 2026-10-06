@@ -3,7 +3,7 @@
  * 規則常數與純邏輯在 rules.ts，I/O 在 run.ts／store.ts／view.ts。
  */
 
-export type SimSlotId = "0930" | "1300" | "1335";
+export type SimSlotId = "0930" | "1300" | "1335" | "1435";
 
 export interface SimHolding {
   symbol: string;
@@ -49,6 +49,12 @@ export interface SimTrade {
   ratingLabel: string;
   /** 一句由程式組的理由（評等行／出場原因） */
   reason: string;
+  /** 成交（預設）或未成交（漲停鎖死、跌停鎖死、成交量不足…；不影響現金與持股） */
+  status?: "filled" | "rejected";
+  /** 未成交原因 */
+  rejectReason?: string;
+  /** 成交價依據（最佳賣價／最佳買價／盤後定價收盤價…、部分成交說明） */
+  basis?: string;
   /** 賣出才有：這次賣出部分的已實現損益（元，已扣買賣成本） */
   realized?: number;
   /** 賣出才有：這次賣出部分的報酬率（%，已扣成本） */
@@ -111,6 +117,25 @@ export interface SimState {
   base: { etf: number | null; index: number | null };
   /** 已執行過的時點 `{日期}:{時點}`（只留最近幾筆，冪等用） */
   doneSlots: string[];
+  /** 盤後定價委託中（13:35 那輪下單、14:30 收盤價成交，14:35 那輪結算）；沒有就是空陣列或沒有這欄 */
+  pending?: SimPendingOrder[];
   /** 最近一次執行 */
   lastRun?: { at: string; slot: SimSlotId; day: string; note: string };
+}
+
+/** 盤後定價委託（13:30～14:30 下單、14:30 以收盤價撮合）。 */
+export interface SimPendingOrder {
+  day: string;
+  decidedAt: string;
+  slot: SimSlotId;
+  symbol: string;
+  name: string;
+  side: SimSide;
+  shares: number;
+  /** 下單當下參考價（收盤價；實際成交價以 14:30 結算為準） */
+  refPrice: number;
+  ratingLabel: string;
+  reason: string;
+  reduce?: boolean;
+  add?: boolean;
 }
