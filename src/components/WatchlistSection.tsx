@@ -8,6 +8,8 @@ import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
+import { formatTaipeiTime } from "@/lib/format";
 import {
   hasHolding,
   hasManualUnheldOrder,
@@ -41,7 +43,7 @@ function byOrder(a: HoldingItem, b: HoldingItem): number {
  * 一次批次取得多檔報價（超過上限就分批並行）。整批請求失敗時該批每一檔都視為抓不到，
  * 交給呼叫端的「失敗重試一次」處理。
  */
-async function fetchQuotesBatch(targets: WatchlistItem[]): Promise<Map<string, QuoteWithSector | null>> {
+async function fetchQuotesBatch(targets: WatchlistItem[], init?: RequestInit): Promise<Map<string, QuoteWithSector | null>> {
   const out = new Map<string, QuoteWithSector | null>();
   const chunks: WatchlistItem[][] = [];
   for (let i = 0; i < targets.length; i += QUOTES_BATCH_MAX_SYMBOLS) chunks.push(targets.slice(i, i + QUOTES_BATCH_MAX_SYMBOLS));
@@ -49,7 +51,7 @@ async function fetchQuotesBatch(targets: WatchlistItem[]): Promise<Map<string, Q
     chunks.map(async (group) => {
       try {
         const items = group.map((w) => quoteBatchKey(w.market, w.symbol)).join(",");
-        const res = await fetch(`/api/quotes?items=${encodeURIComponent(items)}`);
+        const res = await fetch(`/api/quotes?items=${encodeURIComponent(items)}`, init);
         if (!res.ok) return;
         const body = (await res.json()) as QuotesBatchResponse;
         for (const [key, q] of Object.entries(body.items)) out.set(key, q);
@@ -120,11 +122,12 @@ export default function WatchlistSection() {
       // 顯示「資料暫缺」——名稱/代號/市場用 localStorage 的關注清單資料。產業別由伺服器端
       // 查官方股票清單附加（client 端不能 import findInUniverse：那個模組圖會把 node:tls
       // 之類 server-only 依賴拉進瀏覽器 bundle，實測 build 會失敗）。
-      let quotes = await fetchQuotesBatch(targets);
+      const pollInit = livePollInit(ctx);
+      let quotes = await fetchQuotesBatch(targets, pollInit);
       const failed = targets.filter((w) => !quotes.get(quoteBatchKey(w.market, w.symbol)));
       if (failed.length > 0) {
         await new Promise((r) => setTimeout(r, 1200));
-        const retried = await fetchQuotesBatch(failed);
+        const retried = await fetchQuotesBatch(failed, pollInit);
         quotes = new Map([...quotes, ...Array.from(retried).filter(([, q]) => q)]);
       }
       const results = targets.map((w): WatchlistQuote => {
@@ -153,6 +156,7 @@ export default function WatchlistSection() {
           changePercent: q.changePercent,
           volume: q.volume,
           turnover: q.price * q.volume,
+          tradeTime: q.tradeTime,
           // 這裡是單檔報價，沒有搜尋列表那份「近期平均量」可比，算不出真的
           // volumeTrend（見 lib/data/volumeHistory.ts）；"neutral" 是誠實的「沒有訊號」。
           volumeTrend: "neutral",
@@ -209,12 +213,23 @@ export default function WatchlistSection() {
     return hasManualUnheldOrder(m) ? group.sort(byOrder) : sortByFineIndustry(group);
   });
   const displayItems: HoldingItem[] = [...heldItems, ...unheldItems];
+  // 清單中最新的一筆上游成交時間（ISO 字串同格式可直接比大小）；讓使用者看得到報價實際多新。
+  const latestTradeTime = formatTaipeiTime(
+    displayItems.reduce<string | undefined>((max, i) => (i.tradeTime && (!max || i.tradeTime > max) ? i.tradeTime : max), undefined)
+  );
 
   // xl（>=1280px）時比主內容欄（max-w-6xl）更寬：關注清單欄位多，桌機要一次全部顯示、不用橫向捲動。
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4 xl:ml-[calc((100%-min(100vw-2rem,1760px))/2)] xl:w-[min(calc(100vw-2rem),1760px)]">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-semibold">我的關注</h2>
+        <h2 className="font-semibold">
+          我的關注
+          {latestTradeTime && (
+            <span className="ml-2 text-xs font-normal text-(--text-muted)" title="上游最近一筆成交時間（台北），不是網站抓取時間">
+              資料時間 {latestTradeTime}
+            </span>
+          )}
+        </h2>
         <WatchlistCsvControls items={displayItems} />
       </div>
       {list.length === 0 ? (

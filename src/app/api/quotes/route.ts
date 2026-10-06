@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getQuotesBatch } from "@/lib/data";
+import { withLivePollWait } from "@/lib/data/livePollContext";
 import {
   QUOTES_BATCH_MAX_SYMBOLS,
   parseQuotesBatchItems,
@@ -22,7 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: `單次最多 ${QUOTES_BATCH_MAX_SYMBOLS} 檔` }, { status: 400 });
   }
   try {
-    const quotes = await getQuotesBatch(requests);
+    const quotes = await withLivePollWait(req, () => getQuotesBatch(requests));
     const body: QuotesBatchResponse = { items: {} };
     requests.forEach((r, i) => {
       body.items[quoteBatchKey(r.market, r.symbol)] = quotes[i];

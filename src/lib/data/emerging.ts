@@ -303,6 +303,8 @@ export async function fetchEmergingQuote(stockNo: string): Promise<Quote> {
     tradeDay: xmlTag(xml, "TradeDay"),
   });
   if (!quote) throw new Error(`No emerging quote for ${stockNo}`);
+  // 有真實的逐檔成交時間才標記資料時間（沒有成交時間時 updatedAt 是抓取時間，不能當資料時間）。
+  if (tradeTime) quote.tradeTime = quote.updatedAt;
   return quote;
 }
 

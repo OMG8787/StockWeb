@@ -5,6 +5,7 @@ import type { IndexQuote, Market } from "@/lib/data";
 import { getMarketStatus, type MarketStatus } from "@/lib/marketStatus";
 import { getPollDecision } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 import IndexCard from "./IndexCard";
 import MarketStatusBadge from "./MarketStatusBadge";
 
@@ -19,8 +20,8 @@ export default function LiveIndices({ market, initialIndices }: { market: Market
       setStatus(getMarketStatus(market, now));
       return getPollDecision(market, now, settledDayKey);
     },
-    onFetch: async () => {
-      const res = await fetch("/api/indices");
+    onFetch: async (ctx) => {
+      const res = await fetch("/api/indices", livePollInit(ctx));
       if (!res.ok) return;
       const data = await res.json();
       const next: IndexQuote[] = (data.indices ?? []).filter((i: IndexQuote) => i.market === market);

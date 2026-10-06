@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getQuote, findInUniverse } from "@/lib/data";
 import type { Market } from "@/lib/data";
+import { withLivePollWait } from "@/lib/data/livePollContext";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ symbol: string }> }) {
   const { symbol } = await params;
@@ -14,7 +15,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ symb
     return NextResponse.json({ error: "Missing symbol" }, { status: 400 });
   }
   try {
-    const quote = await getQuote(symbol, market);
+    // 前端輪詢帶 x-live-poll：過期值多等一下拿新值（見 lib/livePoll.ts）；首次載入維持 1.5 秒。
+    const quote = await withLivePollWait(req, () => getQuote(symbol, market));
     if (!quote) {
       return NextResponse.json({ error: "目前無法取得即時報價" }, { status: 503 });
     }

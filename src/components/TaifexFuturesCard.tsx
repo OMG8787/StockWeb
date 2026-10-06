@@ -5,6 +5,7 @@ import type { TaifexFuturesQuote } from "@/lib/data";
 import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
 import { getTaifexPollDecision, IDLE_CHECK_MS } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 
 /**
  * 首頁「大盤指數」卡片旁的台指期夜盤（近月合約）小卡。刻意跟 LiveIndices/IndexCard
@@ -33,8 +34,8 @@ export default function TaifexFuturesCard({ initialQuote }: { initialQuote: Taif
       quote === null
         ? { fetch: true, settle: false, nextCheckMs: IDLE_CHECK_MS }
         : getTaifexPollDecision(now),
-    onFetch: async () => {
-      const res = await fetch("/api/taifex-futures");
+    onFetch: async (ctx) => {
+      const res = await fetch("/api/taifex-futures", livePollInit(ctx));
       if (!res.ok) return;
       const data = await res.json();
       setQuote(data.quote ?? null);

@@ -33,6 +33,8 @@ export interface WatchlistQuote extends Omit<SearchItem, "price" | "changePercen
   changePercent: number | null;
   volume: number | null;
   turnover: number | null;
+  /** 上游最近一筆成交時間（ISO，見 Quote.tradeTime）；沒有就不顯示資料時間。 */
+  tradeTime?: string;
 }
 
 /** 一列＝一檔關注股票的報價 ＋ 使用者自己填的持股資料（localStorage）。 */

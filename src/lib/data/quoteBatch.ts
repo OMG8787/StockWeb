@@ -3,6 +3,7 @@ import { getQuote } from "./quote";
 import { getMarketQuoteMap } from "./marketQuoteMap";
 import { ensureTwUniverseWarm, findInUniverse } from "./universe";
 import { resolveTwExchange } from "./symbols";
+import { liveRevalidateWaitMs } from "./swrPolicy";
 import type { QuoteWithSector } from "@/lib/quotesBatchApi";
 
 /**
@@ -10,6 +11,9 @@ import type { QuoteWithSector } from "@/lib/quotesBatchApi";
  * 全市場抓取上。暖快取（焦點排行／預熱排程早就算好）時是記憶體查表，幾乎不花時間。
  */
 const MARKET_MAP_WAIT_MS = 2_500;
+/** 輪詢請求（x-live-poll）等全市場表重抓的上限比 SWR 同步等待多留這點餘裕：表自己最多等
+ *  liveRevalidateWaitMs() 就會回（新值或舊表），這裡只是不比它先放棄。 */
+const MARKET_MAP_POLL_MARGIN_MS = 500;
 
 /**
  * 關注清單的批次報價：上市先查已快取的全市場報價表（getMarketQuoteMap，跟焦點排行
@@ -27,7 +31,9 @@ export async function getQuotesBatch(
   const twMap: Map<string, Quote> | null = anyFromMap
     ? await Promise.race([
         getMarketQuoteMap("TW").catch(() => null),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), MARKET_MAP_WAIT_MS)),
+        new Promise<null>((resolve) =>
+          setTimeout(() => resolve(null), Math.max(MARKET_MAP_WAIT_MS, liveRevalidateWaitMs() + MARKET_MAP_POLL_MARGIN_MS))
+        ),
       ])
     : null;
 

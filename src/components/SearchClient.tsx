@@ -10,6 +10,7 @@ import type { ChipsRatiosBatchResponse } from "@/lib/chipsRatiosList";
 import { seedChipsRatios } from "@/lib/useChipsRatios";
 import { getPollDecision } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 
 // 一頁筆數：排序／篩選仍在伺服器對全市場完成，前端一次只渲染這麼多列，往下捲或按
 // 「顯示更多」再取下一批（2026-10-05：一次渲染約 2,000 列＋375KB 回應，最後一個區塊
@@ -291,7 +292,7 @@ function MarketSection({
    * 列數不變，瀏覽器捲動位置不會跳動。競態規則（以最後一次使用者操作為準）：
    * 換篩選尚未回來／「顯示更多」進行中 → 這輪略過；輪詢進行中使用者按顯示更多或換篩選 → 輪詢作廢。
    */
-  async function refreshLoaded() {
+  async function refreshLoaded(pollInit?: RequestInit) {
     const loaded = itemsRef.current.length;
     if (loaded === 0 || searchPendingRef.current || loadingMoreRef.current) return;
     const base = baseQueryRef.current;
@@ -299,7 +300,10 @@ function MarketSection({
     const controller = new AbortController();
     pollCtrlRef.current = controller;
     const chipsParam = market === "TW" ? "&withChips=1" : "";
-    const res = await fetch(`/api/search?${base}&limit=${Math.min(loaded, 5000)}${chipsParam}`, { signal: controller.signal });
+    const res = await fetch(`/api/search?${base}&limit=${Math.min(loaded, 5000)}${chipsParam}`, {
+      ...pollInit,
+      signal: controller.signal,
+    });
     if (!res.ok) return;
     const data: SearchPage = await res.json();
     if (controller.signal.aborted || baseQueryRef.current !== base || loadingMoreRef.current) return;
@@ -316,7 +320,7 @@ function MarketSection({
       setStatus(getMarketStatus(market, now));
       return getPollDecision(market, now, settledDayKey);
     },
-    onFetch: () => refreshLoadedRef.current(),
+    onFetch: (ctx) => refreshLoadedRef.current(livePollInit(ctx)),
   });
 
   const loadMoreRef = useRef(loadMore);

@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { withLivePollWait } from "@/lib/data/livePollContext";
 import { getTaifexNightFutures } from "@/lib/data";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const quote = await getTaifexNightFutures();
+    const quote = await withLivePollWait(req, () => getTaifexNightFutures());
     return NextResponse.json({ quote });
   } catch (err) {
     console.error("[taifex-futures] getTaifexNightFutures failed:", err);

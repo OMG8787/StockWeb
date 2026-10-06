@@ -2,10 +2,11 @@
 
 import { useState, type ReactNode } from "react";
 import type { Quote } from "@/lib/data";
-import { formatChange, formatPercent, formatPrice, formatTaipeiDateTime, formatVolume, priceDirectionClass } from "@/lib/format";
+import { formatChange, formatPercent, formatPrice, formatTaipeiDateTime, formatTaipeiTime, formatVolume, priceDirectionClass } from "@/lib/format";
 import { getMarketStatus, marketScope, type MarketStatus } from "@/lib/marketStatus";
 import { getPollDecision } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 import MarketStatusBadge from "./MarketStatusBadge";
 
 /**
@@ -40,8 +41,8 @@ export default function LiveQuoteHeader({ initialQuote, afterPrice }: { initialQ
       setStatus(getMarketStatus(scope, now));
       return getPollDecision(scope, now, settledDayKey);
     },
-    onFetch: async () => {
-      const res = await fetch(`/api/quote/${encodeURIComponent(symbol)}?market=${market}`);
+    onFetch: async (ctx) => {
+      const res = await fetch(`/api/quote/${encodeURIComponent(symbol)}?market=${market}`, livePollInit(ctx));
       if (!res.ok) return;
       const next: Quote = await res.json();
       setQuote(next);
@@ -59,7 +60,16 @@ export default function LiveQuoteHeader({ initialQuote, afterPrice }: { initialQ
         <MarketStatusBadge status={status} />
       </div>
       <p className="mt-1 text-xs text-(--text-muted)">
-        更新時間：{formatTaipeiDateTime(quote.updatedAt)}（台北時間）· 幣別{" "}
+        {/* 資料時間＝上游最近一筆成交時間（tradeTime）；updatedAt 只是伺服器抓取當下，看不出資料多舊，
+            所以兩者並列。上游沒給成交時間（今日尚無成交、盤後日行情）就只顯示更新時間。 */}
+        {quote.tradeTime ? (
+          <>
+            資料時間：{formatTaipeiDateTime(quote.tradeTime)}（最近一筆成交，台北時間）· 伺服器更新{" "}
+            {formatTaipeiTime(quote.updatedAt)} · 幣別{" "}
+          </>
+        ) : (
+          <>更新時間：{formatTaipeiDateTime(quote.updatedAt)}（台北時間）· 幣別{" "}</>
+        )}
         {quote.currency}
         {/* 興櫃沒有收盤價這個東西（見下方說明區塊），所以收盤時段的措辭不能講
             「最近一次收盤資訊」；另外興櫃交易到 15:00，使用者在 14:00 看到

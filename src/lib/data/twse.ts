@@ -30,6 +30,24 @@ interface MisRow {
   // 這筆資料所屬的交易日（YYYYMMDD）。非交易時段判斷 MIS 資料可不可信靠它，
   // 見 pollingSchedule.ts 的 classifyTwQuoteTradeDate()。
   d?: string;
+  // 最近一筆成交的時間：t＝台北時間 "HH:MM:SS"，tlong＝epoch 毫秒（字串）。
+  t?: string;
+  tlong?: string;
+}
+
+/**
+ * MIS 一列的「上游資料時間」（ISO）：優先用 tlong（epoch 毫秒），沒有才用 `d`＋`t`（台北時間）組。
+ * 兩者都沒有或不合理（非有限數、早於 2020 年、晚於現在 5 分鐘以上）就回 undefined——寧可不顯示，
+ * 也不顯示錯的資料時間。twse.ts／tpex.ts 共用。
+ */
+export function misTradeTimeIso(row: { d?: string; t?: string; tlong?: string }, now: number = Date.now()): string | undefined {
+  let ms = row.tlong && /^\d{10,}$/.test(row.tlong) ? Number(row.tlong) : NaN;
+  if (!Number.isFinite(ms) && row.d && /^\d{8}$/.test(row.d) && row.t && /^\d{1,2}:\d{2}:\d{2}$/.test(row.t)) {
+    const [h, m, s] = row.t.split(":");
+    ms = Date.parse(`${row.d.slice(0, 4)}-${row.d.slice(4, 6)}-${row.d.slice(6, 8)}T${h.padStart(2, "0")}:${m}:${s}+08:00`);
+  }
+  if (!Number.isFinite(ms) || ms < Date.parse("2020-01-01T00:00:00Z") || ms > now + 5 * 60_000) return undefined;
+  return new Date(ms).toISOString();
 }
 
 /** MIS 的 `d`（YYYYMMDD）→ ISO 日期；格式不對就 undefined。twse.ts/tpex.ts 共用。 */
@@ -108,6 +126,7 @@ function rowToQuote(row: MisRow): Quote | null {
     // 真的漲跌過。見 NO_TRADE_MID_ESTIMATE_NOTE 定義處的說明。
     priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
     tradeDate: misDateToIso(row.d),
+    tradeTime: misTradeTimeIso(row),
   };
 }
 

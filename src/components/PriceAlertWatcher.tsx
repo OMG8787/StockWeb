@@ -5,6 +5,7 @@ import { formatPrice } from "@/lib/format";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 import { getAlerts, markTriggered, type PriceAlert } from "@/lib/priceAlerts";
 
 /**
@@ -59,7 +60,7 @@ export default function PriceAlertWatcher() {
       const fired: PriceAlert[] = [];
       for (const alert of pending) {
         try {
-          const res = await fetch(`/api/quote/${encodeURIComponent(alert.symbol)}?market=${alert.market}`);
+          const res = await fetch(`/api/quote/${encodeURIComponent(alert.symbol)}?market=${alert.market}`, livePollInit(ctx));
           if (!res.ok) continue;
           const quote = await res.json();
           // 記下興櫃檔，下一輪的節奏判斷才知道它交易到 15:00（見上面 scopeOf）。

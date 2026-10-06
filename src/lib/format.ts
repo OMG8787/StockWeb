@@ -102,6 +102,14 @@ export function formatTaipeiDateTime(isoString: string): string {
   )}:${pad(taipei.getUTCMinutes())}:${pad(taipei.getUTCSeconds())}`;
 }
 
+/** ISO → 台北時間 "HH:MM:SS"（資料時間顯示用）；格式不對回 null。 */
+export function formatTaipeiTime(isoString: string | undefined): string | null {
+  if (!isoString) return null;
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return null;
+  return formatTaipeiDateTime(isoString).slice(-8);
+}
+
 /** Taiwan/greater-China convention: red = up, green = down. */
 export function priceDirectionClass(change: number): string {
   if (change > 0) return "text-(--price-up)";

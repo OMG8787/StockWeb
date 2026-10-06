@@ -6,7 +6,7 @@ import { sanitizeCandles } from "./candleSanity";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
-import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso } from "./twse";
+import { MIS_BATCH_CONCURRENCY, TW_INDUSTRY_NAMES, misDateToIso, misTradeTimeIso } from "./twse";
 
 // TPEx (Taipei Exchange / 證券櫃檯買賣中心) public data endpoints for 上櫃
 // (OTC mainboard) stocks. Confirmed live during this module's construction —
@@ -319,6 +319,8 @@ interface MisRow {
   // 見下方 rowToOtcQuote 內的說明。
   trade?: { z?: string };
   d?: string; // 交易日 YYYYMMDD（見 twse.ts 的同名欄位）
+  t?: string; // 最近成交時間（台北 HH:MM:SS，見 twse.ts）
+  tlong?: string; // 最近成交時間 epoch 毫秒
 }
 
 function bestDepthPrice(depth: string | undefined): number | undefined {
@@ -374,6 +376,7 @@ function rowToOtcQuote(row: MisRow): Quote | null {
     updatedAt: new Date().toISOString(),
     priceNote: volumeShares === 0 ? NO_TRADE_MID_ESTIMATE_NOTE : undefined,
     tradeDate: misDateToIso(row.d),
+    tradeTime: misTradeTimeIso(row),
   };
 }
 

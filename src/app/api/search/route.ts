@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getChipsRatiosBatch, searchStocks } from "@/lib/data";
 import type { Market, SearchFilters, VolumeTrend } from "@/lib/data";
 import { getSearchSnapshot } from "@/lib/searchSnapshot";
+import { withLivePollWait } from "@/lib/data/livePollContext";
 import { toChipsBatchResponse, type ChipsRatiosBatchResponse } from "@/lib/chipsRatiosList";
 
 /** 附籌碼比例時最多等這麼久；籌碼資料快取冷的時候寧可先回列表，前端會退回逐列漸進載入。 */
@@ -76,7 +77,9 @@ export async function GET(req: NextRequest) {
       sortDir,
     };
     // 快照 key＝所有篩選＋排序參數（JSON 會略過 undefined）；分頁參數不在內。
-    const { id: snapshot, items: all } = await getSearchSnapshot(JSON.stringify(filters), () => searchStocks(filters), snapshotParam);
+    const { id: snapshot, items: all } = await withLivePollWait(req, () =>
+      getSearchSnapshot(JSON.stringify(filters), () => searchStocks(filters), snapshotParam)
+    );
     const end = limit !== undefined ? offset + Math.min(limit, MAX_LIMIT) : undefined;
     const items = offset > 0 || end !== undefined ? all.slice(offset, end) : all;
 

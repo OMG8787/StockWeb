@@ -5,6 +5,7 @@ import type { Market, SearchItem } from "@/lib/data";
 import { getMarketStatus, type MarketStatus } from "@/lib/marketStatus";
 import { getPollDecision } from "@/lib/pollingSchedule";
 import { useLivePolling } from "@/lib/useLivePolling";
+import { livePollInit } from "@/lib/livePoll";
 import StockTable from "./StockTable";
 import MarketStatusBadge from "./MarketStatusBadge";
 
@@ -51,8 +52,8 @@ export default function LiveMoversBoard({
       setStatus(getMarketStatus(market, now));
       return getPollDecision(market, now, settledDayKey);
     },
-    onFetch: async () => {
-      const res = await fetch(`/api/search?market=${market}&sortBy=${sortBy}&sortDir=${sortDir}&limit=${limit}`);
+    onFetch: async (ctx) => {
+      const res = await fetch(`/api/search?market=${market}&sortBy=${sortBy}&sortDir=${sortDir}&limit=${limit}`, livePollInit(ctx));
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.items) && data.items.length > 0) setItems(data.items);

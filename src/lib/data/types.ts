@@ -30,6 +30,14 @@ export interface Quote {
   currency: string;
   updatedAt: string;
   /**
+   * 上游「最近一筆成交／資料」的時間（ISO）——**不是**我們抓取的時間（`updatedAt` 才是，
+   * 且是伺服器抓取當下，看不出資料多舊）。台股來自 MIS 的 `tlong`（或 `d`+`t`）、興櫃來自
+   * TradeStatisticTime、美股來自 Yahoo 的 regularMarketTime。上游沒給（例如今日尚無成交、
+   * 非交易時段改用盤後日行情）時為 undefined——UI 只在有值時才顯示「資料時間」，
+   * 絕不拿抓取時間頂替。2026-10-06 加：使用者要能看到盤中報價實際多新。
+   */
+  tradeTime?: string;
+  /**
    * 這檔股票屬於哪個板；只有興櫃會帶值，其餘（上市/上櫃/美股）不帶。UI 用它
    * 決定要不要顯示「興櫃」標示與相關的說明文字。刻意不放進 Market 型別裡：
    * 對外的市場分類仍然只有 "TW"/"US"，興櫃是 TW 底下的一個板別。

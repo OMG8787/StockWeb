@@ -223,7 +223,15 @@ export async function fetchUsQuote(symbol: string): Promise<Quote> {
     volume: meta.regularMarketVolume ?? 0,
     currency: meta.currency ?? "USD",
     updatedAt: new Date().toISOString(),
+    tradeTime: unixSecondsToIso(meta.regularMarketTime),
   };
+}
+
+/** Yahoo 的 regularMarketTime（epoch 秒）→ ISO；缺值／不合理（早於 2020 年或晚於現在 5 分鐘以上）回 undefined。 */
+function unixSecondsToIso(sec: number | undefined): string | undefined {
+  if (sec == null || !Number.isFinite(sec)) return undefined;
+  const ms = sec * 1000;
+  return ms < Date.parse("2020-01-01T00:00:00Z") || ms > Date.now() + 5 * 60_000 ? undefined : new Date(ms).toISOString();
 }
 
 interface YahooQuoteResult {
@@ -234,6 +242,7 @@ interface YahooQuoteResult {
   regularMarketDayHigh?: number;
   regularMarketDayLow?: number;
   regularMarketVolume?: number;
+  regularMarketTime?: number; // epoch 秒
   currency?: string;
   longName?: string;
   shortName?: string;
@@ -298,6 +307,7 @@ export async function fetchUsQuotesBatch(symbols: string[]): Promise<Map<string,
       volume: r.regularMarketVolume ?? 0,
       currency: r.currency ?? "USD",
       updatedAt: new Date().toISOString(),
+      tradeTime: unixSecondsToIso(r.regularMarketTime),
     });
   }
   return map;
