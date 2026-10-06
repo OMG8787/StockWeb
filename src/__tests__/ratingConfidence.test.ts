@@ -78,3 +78,14 @@ describe("清單指代認數字（2026-10-06 13:13「這3檔分別建議買還�
     expect(isListReferenceQuestion("推薦3檔股票")).toBe(false);
   });
 });
+
+import { isCoreInputMissing } from "@/lib/ai/stockRating";
+describe("isCoreInputMissing", () => {
+  it("台股缺日K或法人表就不產生評等；美股、興櫃不檢查法人", () => {
+    expect(isCoreInputMissing("TW", undefined, null, {})).toBe(true);
+    expect(isCoreInputMissing("TW", undefined, {}, null)).toBe(true);
+    expect(isCoreInputMissing("TW", undefined, {}, {})).toBe(false);
+    expect(isCoreInputMissing("TW", "emerging", {}, null)).toBe(false);
+    expect(isCoreInputMissing("US", undefined, null, null)).toBe(false);
+  });
+});

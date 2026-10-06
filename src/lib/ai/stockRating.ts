@@ -8,6 +8,7 @@ import { logRating, type RatingSource } from "./ratingLog";
 import type { PriceFramework } from "./grounding/priceLevels";
 import type { SiteRating } from "./siteRating";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
+import { getTwInstitutionalMap } from "@/lib/data/companyData";
 import { sectorFactorDirection } from "./grounding/sectorFactors";
 import { computeRatingFeatures, type RatingFeatures } from "./learning/features";
 import type { MarketRegime } from "./learning/regime";
@@ -44,6 +45,12 @@ export interface StockRatingResult {
   computedAt: string;
 }
 
+/** 台股（非興櫃）缺日K或三大法人就不產生評等（純函式，有測試）；美股、興櫃本來就沒有法人資料。 */
+export function isCoreInputMissing(market: Market, board: string | undefined, chart: unknown, chips: unknown): boolean {
+  if (market !== "TW" || board === "emerging") return false;
+  return chart == null || chips == null;
+}
+
 async function loadStockRating(symbol: string, market: Market | undefined): Promise<StockRatingResult | null> {
   const quote = await getQuote(symbol, market);
   if (!quote) return null;
@@ -58,14 +65,24 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
       sectorFactorDirection({ symbol: quote.symbol, market: quote.market, sector: findInUniverse(quote.symbol, quote.market)?.sector ?? "" })
     )
     .catch(() => null);
+  // 日K／三大法人是評等的核心輸入：上游偶發失敗時重抓一次；台股（非興櫃）仍缺就回 null（只快取
+  // STOCK_RATING_DEGRADED_TTL_MS），不可把「缺資料算出的評等」當正常結果快取 10 分鐘、寫評等紀錄與翻轉確認
+  // （2026-10-06 四入口評測抓到：日K／法人抓不到時台表科從建議買進變成先不要買，疑為「早上買、傍晚不買」成因之一）。
+  const retry = <T,>(f: () => Promise<T>) => f().catch(() => f()).catch(() => null);
   const [chart, chips, chipsRatios, fundamentals, earnings, announcements] = await Promise.all([
-    getChart(quote.symbol, "3m", quote.market).catch(() => null),
-    getChips(quote.symbol, quote.market).catch(() => null),
+    retry(() => getChart(quote.symbol, "3m", quote.market)),
+    retry(() => getChips(quote.symbol, quote.market)),
     getChipsRatios(quote.symbol, quote.market).catch(() => null),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
     getEarnings(quote.symbol, quote.market).catch(() => null),
     getMaterialAnnouncements(quote.symbol, quote.market).catch(() => []),
   ]);
+  // 法人資料 null 有兩種：全市場法人表抓失敗（要擋）vs 表正常、只是這檔當天沒有法人／融資資料（正常，照算）。
+  const chipsTableOk = chips != null || (quote.market === "TW" && (await getTwInstitutionalMap().then((m) => m.size > 0).catch(() => false)));
+  if (isCoreInputMissing(quote.market, quote.board, chart, chipsTableOk ? true : null)) {
+    console.warn(`[stock-rating] ${quote.symbol} 核心資料缺（日K ${chart ? "有" : "無"}／法人 ${chips ? "有" : "無"}），不產生評等`);
+    return null;
+  }
   // 評等穩定化（2026-10-06，ratingStability.ts）：新結論需連續 2 個交易日確認（破底立即）。
   // 回測（docs/backtest/2026-10-stability.md）：籌碼面維持單日＋2日確認最好；改看 N 日累計沒有更好，所以不用。
   // 翻轉確認的「交易日」用最新一根日K的日期（週末、盤前不會被當成新的一天而提早確認）。
