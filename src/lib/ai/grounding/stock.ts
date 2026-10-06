@@ -50,7 +50,7 @@ import { describeDecisionCard } from "../decisionCard";
  */
 export async function buildStockGrounding(
   target: { symbol: string; market: Market | undefined },
-  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; source?: RatingSource; aiJudge?: boolean; decisionCard?: boolean } = {}
+  opts: { period?: HistoryPeriod; compact?: boolean; costBasis?: number; buyDate?: string; source?: RatingSource; aiJudge?: boolean; decisionCard?: boolean } = {}
 ): Promise<{ symbol: string; text: string } | undefined> {
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
   const [quote, chart, chartYear, stockRating] = await Promise.all([
@@ -123,7 +123,7 @@ export async function buildStockGrounding(
     // 跟關注清單輕量／深度分析同一個函式，見 holdingRating.ts）。
     const holdingRated = describeRatingForHolding(
       stockRating,
-      opts.costBasis != null ? { costBasis: opts.costBasis, market: quote.market, emerging: quote.board === "emerging" } : null,
+      opts.costBasis != null ? { costBasis: opts.costBasis, buyDate: opts.buyDate, market: quote.market, emerging: quote.board === "emerging" } : null,
       chart?.candles
     );
     // 買賣判斷題：程式組好的結論卡放最前面，AI 只解說（decisionCard.ts）。

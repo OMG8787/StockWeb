@@ -21,7 +21,17 @@ export interface WatchlistItem {
    * 購買價格被清掉（回到未持有）時紀錄仍保留在資料裡，只是不顯示（見 soldRecords.visibleSales）。
    */
   sales?: SaleRecord[];
+  /**
+   * 買進日期（台北，YYYY-MM-DD；2026-10-06 使用者回報「國巨買進不到 10 天，AI 卻說買進後曾漲到 732」：
+   * 沒有買進日時停利規則用日K近似、會抓到幾個月前的高點）。持有中才有意義；停利規則只看這天之後的日K。
+   * 來源見 buyDateSrc。第一版加碼（股數增加）不改買進日，仍是第一次買進的日期。
+   */
+  buyDate?: string;
+  /** 買進日來源：auto＝股數由 0／空變成 >0 時自動記的台北今天（是估計值，畫面標「估」）；user＝使用者親手改過（自動流程不可覆蓋）。 */
+  buyDateSrc?: BuyDateSource;
 }
+
+export type BuyDateSource = "auto" | "user";
 
 /** An entry counts as "held" once it has a real (>0) share count and a cost
  *  basis on file — a plain watch-only entry has neither. Shares must be
@@ -118,7 +128,7 @@ function safeParse(raw: string | null): WatchlistItem[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as WatchlistItem[]).map(normalizeItemSales) : [];
+    return Array.isArray(parsed) ? (parsed as WatchlistItem[]).map((i) => normalizeBuyDate(normalizeItemSales(i))) : [];
   } catch {
     return [];
   }
@@ -187,6 +197,26 @@ export function replaceWatchlist(items: WatchlistItem[]) {
   save(items);
 }
 
+/** 買進日欄位只留合格的：日期格式正確且來源是 auto／user（讀回 localStorage／伺服器／匯入資料時整理用；沒日期就不留來源）。 */
+export function normalizeBuyDate<T extends Pick<WatchlistItem, "buyDate" | "buyDateSrc">>(item: T): T {
+  const ok = isValidSaleDate(item.buyDate);
+  if (ok && (item.buyDateSrc === "auto" || item.buyDateSrc === "user")) return item;
+  if (item.buyDate === undefined && item.buyDateSrc === undefined) return item;
+  const { buyDate: _d, buyDateSrc: _s, ...rest } = item;
+  void _d;
+  void _s;
+  return (ok ? { ...rest, buyDate: item.buyDate, buyDateSrc: "user" as BuyDateSource } : rest) as T;
+}
+
+/** 這次股數變更是否只是把「剛賣出」的紀錄改回去（30 秒內連續編輯的合併或撤回）——是的話不算新的買進。 */
+function salesRestored(before: SaleRecord[] | undefined, after: SaleRecord[] | undefined): boolean {
+  const b = before ?? [];
+  const a = after ?? [];
+  if (b.length === 0 || a === b) return false;
+  if (a.length < b.length) return true;
+  return a.length === b.length && a[a.length - 1].id === b[b.length - 1].id && a[a.length - 1] !== b[b.length - 1];
+}
+
 export interface HoldingUpdateContext {
   /** 股數減少時要記成賣出價的即時報價；抓不到（null／undefined）就留空等使用者補填。 */
   price?: number | null;
@@ -207,6 +237,9 @@ export interface HoldingUpdateContext {
  * - 股數空白（undefined）：視為整個清空（跟過去一樣連購買價格一起清），不記賣出。
  * - 股數從 N 減少到 M（含 0）：新增（或合併）一筆賣出紀錄，見 soldRecords.applySharesChange。
  * 換組（持有中／已賣出／未持有）時 `order` 重排到新組最後，同組內改價格不動順序。
+ * 買進日（2026-10-06）：由不持有（空白／已賣出）變成持有中＝新的一筆買進，自動記台北今天（auto）；
+ * 持有中加碼／改價不動；歸零進已賣出時日期隨賣出紀錄保留（紀錄的 buyDate），回到未持有（整檔清空）才清掉；
+ * 已賣出股數再填回 >0 算買回（日期重設為今天），但 30 秒內把剛賣出的紀錄改回去（連續編輯）不算買回、沿用原日期。
  */
 export function applyHoldingUpdate(
   list: WatchlistItem[],
@@ -240,7 +273,7 @@ export function applyHoldingUpdate(
   let sales = prev.sales;
   if (newSharesForSale != null) {
     const updated = applySharesChange(
-      { shares: prev.shares, costBasis: prev.costBasis, sales: prev.sales },
+      { shares: prev.shares, costBasis: prev.costBasis, buyDate: prev.buyDate, sales: prev.sales },
       newSharesForSale,
       { price: ctx.price, today: ctx.today ?? taipeiDayKey(), now: ctx.now ?? Date.now() }
     );
@@ -251,6 +284,17 @@ export function applyHoldingUpdate(
   if (sales !== undefined) draft.sales = sales;
   if (draft.sales && draft.sales.length === 0) delete draft.sales;
   const willGroup = watchGroupOf(draft);
+  if (willGroup === "held" && wasGroup !== "held") {
+    if (wasGroup === "sold" && salesRestored(prev.sales, sales) && prev.buyDate) {
+      // 連續編輯、把剛賣出的撤回：還是同一筆持有，日期沿用
+    } else {
+      draft.buyDate = ctx.today ?? taipeiDayKey();
+      draft.buyDateSrc = "auto";
+    }
+  } else if (willGroup === "unheld") {
+    delete draft.buyDate;
+    delete draft.buyDateSrc;
+  }
   // 持有中組與其他組分開排序（跟過去一樣）；已賣出／未持有共用「非持有」的 order 空間。
   const order = (wasGroup === "held") === (willGroup === "held") ? prev.order : nextOrderFor(next, willGroup === "held");
   next[idx] = { ...draft, order };
@@ -271,6 +315,34 @@ export function updateHolding(
 ) {
   const list = getWatchlist();
   const next = applyHoldingUpdate(list, symbol, market, holding, ctx);
+  if (next !== list) save(next);
+}
+
+/**
+ * 純函式版：使用者改（或清掉）持有中那檔的買進日。date＝null 清掉（回到「沒有買進日」，停利規則不觸發）；
+ * 改過的標 user，之後自動流程不可覆蓋。不合格日期（格式錯、晚於今天）或不是持有中＝原樣回傳。
+ */
+export function applyBuyDateEdit(list: WatchlistItem[], symbol: string, market: Market, date: string | null, today: string = taipeiDayKey()): WatchlistItem[] {
+  const idx = list.findIndex((i) => i.symbol === symbol && i.market === market);
+  if (idx < 0 || !hasHolding(list[idx])) return list;
+  const { buyDate: _d, buyDateSrc: _s, ...rest } = list[idx];
+  void _d;
+  void _s;
+  const next = [...list];
+  if (date === null) {
+    if (list[idx].buyDate === undefined) return list;
+    next[idx] = rest;
+    return next;
+  }
+  if (!isValidSaleDate(date) || date > today) return list;
+  if (list[idx].buyDate === date && list[idx].buyDateSrc === "user") return list;
+  next[idx] = { ...rest, buyDate: date, buyDateSrc: "user" };
+  return next;
+}
+
+export function updateBuyDate(symbol: string, market: Market, date: string | null) {
+  const list = getWatchlist();
+  const next = applyBuyDateEdit(list, symbol, market, date);
   if (next !== list) save(next);
 }
 

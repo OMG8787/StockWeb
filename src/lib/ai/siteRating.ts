@@ -309,33 +309,40 @@ export const TAKE_PROFIT_PEAK_GAIN_PCT = 8;
 export const TAKE_PROFIT_GIVEBACK_FLOOR_PCT = 0;
 
 export interface TakeProfitCheck {
-  /** 買進後（近似）最高價相對成本的最大獲利（%） */
+  /** 買進日之後（含）最高價相對成本的最大獲利（%） */
   peakGainPct: number;
   peakPrice: number;
-  /** 一句話提示（含「近似」說明） */
+  /** 買進日（YYYY-MM-DD） */
+  buyDate: string;
+  /** 一句話提示 */
   message: string;
 }
 
 /**
- * 持有中是否觸發「曾獲利 ≥8% 後跌回成本」。買進日不知道（關注清單只有購買價格），
- * 近似做法：日K中「第一根成交區間涵蓋購買價格」的那天當買進日，取那天之後（含今天現價）的最高價；
- * 日K裡從沒成交到購買價格（買在更早以前）就從日K第一根開始算。
+ * 持有中是否觸發「曾獲利 ≥8% 後跌回成本」。**只在知道買進日（buyDate，YYYY-MM-DD 台北）時判斷**：
+ * 只看買進日（含）之後的日K最高價（加上現價）；沒有買進日就回 null、不觸發。
+ * （2026-10-06 使用者回報：國巨買進不到 10 天，AI 卻寫「買進後曾漲到約 732」——舊的近似法拿「日K第一次成交到購買價格的那天」
+ * 當買進日，抓到幾個月前的高點。買進日一律由使用者／自動記錄提供，不再用日K猜。）
+ * 日K需帶 time（YYYY-MM-DD 開頭）；沒帶 time 的K線無法判斷日期，一律不採計。
+ * 日K只涵蓋近 3 個月；買進日比日K最早一根還早，只能看日K涵蓋到的部分（最高價可能被低估，不會被高估）。
  */
 export function checkTakeProfit(
   costBasis: number,
-  candles: Array<{ high: number; low: number }>,
-  price: number
+  candles: Array<{ high: number; low: number; time?: string }>,
+  price: number,
+  buyDate?: string | null
 ): TakeProfitCheck | null {
-  if (!(costBasis > 0) || candles.length === 0) return null;
-  const start = Math.max(0, candles.findIndex((c) => c.low <= costBasis && costBasis <= c.high));
-  const peakPrice = Math.max(price, ...candles.slice(start).map((c) => c.high));
+  if (!(costBasis > 0) || !buyDate || !/^\d{4}-\d{2}-\d{2}$/.test(buyDate) || candles.length === 0) return null;
+  const since = candles.filter((c) => typeof c.time === "string" && c.time.slice(0, 10) >= buyDate);
+  const peakPrice = Math.max(price, ...since.map((c) => c.high));
   const peakGainPct = (peakPrice / costBasis - 1) * 100;
   const floor = costBasis * (1 + TAKE_PROFIT_GIVEBACK_FLOOR_PCT / 100);
   if (peakGainPct < TAKE_PROFIT_PEAK_GAIN_PCT || price > floor) return null;
   return {
     peakGainPct,
     peakPrice,
-    message: `買進後曾漲到約 ${fmt(peakPrice)}（獲利約 ${Math.round(peakGainPct * 10) / 10}%），現價 ${fmt(price)} 已跌回成本 ${fmt(costBasis)} 以下、由賺轉賠，依停利紀律建議減碼（買進日未知，最高價以日K中第一次成交到購買價格之後的最高價近似）`,
+    buyDate,
+    message: `買進（${buyDate.slice(5).replace("-", "/")}）後最高約 ${fmt(peakPrice)}（獲利約 ${Math.round(peakGainPct * 10) / 10}%），現價 ${fmt(price)} 已跌回成本 ${fmt(costBasis)} 以下、由賺轉賠，依停利紀律建議減碼`,
   };
 }
 

@@ -197,7 +197,7 @@ export default function WatchlistSection() {
     .filter((i) => holdingByKey.has(`${i.market}:${i.symbol.toUpperCase()}`))
     .map((i) => {
       const holding = holdingByKey.get(`${i.market}:${i.symbol.toUpperCase()}`);
-      return { ...i, costBasis: holding?.costBasis, shares: holding?.shares, order: holding?.order, sales: holding?.sales };
+      return { ...i, costBasis: holding?.costBasis, shares: holding?.shares, order: holding?.order, sales: holding?.sales, buyDate: holding?.buyDate, buyDateSrc: holding?.buyDateSrc };
     })
     ;
 

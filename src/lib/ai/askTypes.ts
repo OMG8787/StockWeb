@@ -18,6 +18,8 @@ export interface HoldingInput {
   name: string;
   costBasis?: number;
   shares?: number;
+  /** 買進日（YYYY-MM-DD 台北；停利規則只看這天之後的日K，沒有就不觸發停利） */
+  buyDate?: string;
   /** 賣出紀錄（關注清單「已賣出」；AI 的已賣出區塊用，見 grounding/soldHoldings.ts） */
   sales?: SaleRecord[];
 }

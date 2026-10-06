@@ -167,12 +167,14 @@ describe("同一檔股票：各入口結論與價位逐字相同", () => {
     expect(watch.get("1111")!.text).toBe(describeSiteRating(r.name, r.symbol, r.rating));
 
     const cost = 120;
-    const held = await rateHoldings([{ symbol: "1111", market: "TW", name: r.name, costBasis: cost, shares: 1000 }]);
-    const expected = describeRatingForHolding(r, { costBasis: cost, market: "TW", emerging: false }, fx.series["1111"]);
+    // 買進日也要一路帶到三個入口（停利規則只看買進日之後的日K）；日K最早那天當買進日。
+    const buyDate = fx.series["1111"][0].time.slice(0, 10);
+    const held = await rateHoldings([{ symbol: "1111", market: "TW", name: r.name, costBasis: cost, shares: 1000, buyDate }]);
+    const expected = describeRatingForHolding(r, { costBasis: cost, buyDate, market: "TW", emerging: false }, fx.series["1111"]);
     expect(held.get("1111")!.text).toBe(expected.text);
-    const light = await buildHoldingsGrounding([{ symbol: "1111", market: "TW", name: r.name, costBasis: cost, shares: 1000 }], false, true);
+    const light = await buildHoldingsGrounding([{ symbol: "1111", market: "TW", name: r.name, costBasis: cost, shares: 1000, buyDate }], false, true);
     expect(light).toContain(expected.text);
-    const g = (await buildStockGrounding({ symbol: "1111", market: "TW" }, { costBasis: cost }))!;
+    const g = (await buildStockGrounding({ symbol: "1111", market: "TW" }, { costBasis: cost, buyDate }))!;
     expect(g.text).toContain(expected.text);
   });
 

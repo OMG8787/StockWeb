@@ -44,7 +44,7 @@ export async function rateHoldings(holdings: HoldingInput[]): Promise<Map<string
     const quote = held ? await getQuote(rated.symbol, rated.market).catch(() => null) : null;
     const r = describeRatingForHolding(
       rated,
-      held ? { costBasis: h.costBasis, market: rated.market, emerging: quote?.board === "emerging" } : null,
+      held ? { costBasis: h.costBasis, buyDate: h.buyDate, market: rated.market, emerging: quote?.board === "emerging" } : null,
       chart?.candles
     );
     out.set(h.symbol.toUpperCase(), { name: rated.name, symbol: rated.symbol, ...r });
@@ -141,7 +141,7 @@ export async function buildHoldingsAnalysisGrounding(holdings: HoldingInput[]): 
     // 持有中帶購買價格：評等的「已持有」結論會套停利提示（siteRating.ts checkTakeProfit）。
     const grounding = await buildStockGrounding(
       { symbol: h.symbol, market: h.market },
-      { costBasis: isHeld ? h.costBasis : undefined }
+      { costBasis: isHeld ? h.costBasis : undefined, buyDate: isHeld ? h.buyDate : undefined }
     ).catch(() => undefined);
     if (!grounding) return `${h.name}(${h.symbol})：目前查不到完整資料，暫時無法分析`;
     let holdingLine = isSoldInput(h) ? "狀態：已賣出，目前未持有（賣出紀錄見【已賣出紀錄】）" : "狀態：僅關注，尚未持有";

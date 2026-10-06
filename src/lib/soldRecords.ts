@@ -25,6 +25,8 @@ export interface SaleRecord {
   shares: number;
   /** 買進價（賣出當時的購買價格）；缺＝不知道，算不出已實現損益 */
   buyPrice?: number;
+  /** 買進日期（YYYY-MM-DD，台北；賣出當時持有中那筆的買進日，緊跟著買進價保留；缺＝當時沒有記錄買進日）。 */
+  buyDate?: string;
   /** 賣出價；缺＝賣出當下抓不到報價、等使用者補填 */
   sellPrice?: number;
   /** 這筆賣出之後還剩幾股（>0＝部分賣出；0＝全部賣出） */
@@ -92,6 +94,7 @@ export function sanitizeSales(raw: unknown): SaleRecord[] {
       date: o.date,
       shares: o.shares,
       buyPrice: num(o.buyPrice),
+      buyDate: isValidSaleDate(o.buyDate) ? o.buyDate : undefined,
       sellPrice: num(o.sellPrice),
       remaining: num(o.remaining) ?? 0,
       autoAt: typeof o.autoAt === "number" && Number.isFinite(o.autoAt) ? o.autoAt : undefined,
@@ -111,6 +114,8 @@ export function newSaleId(salt: number = 0): string {
 interface HoldingState {
   shares?: number;
   costBasis?: number;
+  /** 持有中那筆的買進日（賣出時連同買進價記進賣出紀錄） */
+  buyDate?: string;
   sales?: SaleRecord[];
 }
 
@@ -144,6 +149,7 @@ export function applySharesChange(
       date: ctx.today,
       shares: prev - newShares,
       buyPrice: state.costBasis != null && state.costBasis > 0 ? state.costBasis : undefined,
+      buyDate: isValidSaleDate(state.buyDate) ? state.buyDate : undefined,
       sellPrice: ctx.price != null && ctx.price > 0 ? ctx.price : undefined,
       remaining: newShares,
       autoAt: ctx.now,

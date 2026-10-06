@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPoi
 import Link from "next/link";
 import type { Market, SearchItem } from "@/lib/data";
 import { formatAmount, formatAmountChange, formatPercent, formatPrice, formatVolume, priceDirectionClass } from "@/lib/format";
-import { hasHolding, hasManualUnheldOrder, hasSoldState, markManualUnheldOrder, reorderGroup, updateHolding } from "@/lib/watchlist";
+import { hasHolding, hasManualUnheldOrder, hasSoldState, markManualUnheldOrder, reorderGroup, updateBuyDate, updateHolding, type BuyDateSource } from "@/lib/watchlist";
+import { taipeiDayKey } from "@/lib/pollingSchedule";
 import type { SaleRecord } from "@/lib/soldRecords";
-import { visibleSales } from "@/lib/soldRecords";
+import { isValidSaleDate, visibleSales } from "@/lib/soldRecords";
 import SoldTable from "./SoldTable";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
 import { FINE_INDUSTRY_HINT, fineIndustryOf, sortByFineIndustry } from "@/lib/fineIndustry";
@@ -47,6 +48,9 @@ export interface HoldingItem extends WatchlistQuote {
   order?: number;
   /** 賣出紀錄（見 lib/soldRecords.ts）；已賣出分組與部分賣出都靠它 */
   sales?: SaleRecord[];
+  /** 買進日（台北 YYYY-MM-DD）與來源（auto＝自動記的估計值、user＝使用者改過），見 lib/watchlist.ts */
+  buyDate?: string;
+  buyDateSrc?: BuyDateSource;
 }
 
 /** 抓不到報價時那一列顯示的字樣，與全站「抓不到就誠實說沒有」的慣例一致。 */
@@ -520,7 +524,7 @@ function DraggableGroup({
             加大，手機照樣靠上方「可左右滑動」提示橫向捲動，不擠壓欄位。 */}
         <table
           className={`sticky-table w-full text-sm xl:min-w-0 ${
-            showChips ? (sortable ? "min-w-[1180px]" : "min-w-[1000px]") : sortable ? "min-w-[760px]" : "min-w-[560px]"
+            showChips ? (sortable ? "min-w-[1300px]" : "min-w-[1000px]") : sortable ? "min-w-[880px]" : "min-w-[560px]"
           }`}
         >
           <thead>
@@ -539,6 +543,14 @@ function DraggableGroup({
               <th className="py-2 pr-1.5 font-medium text-right text-balance">漲跌幅</th>
               <th className="py-2 pr-1.5 font-medium text-right text-balance">持有股數</th>
               <th className="py-2 pr-1.5 font-medium text-right text-balance">購買價格</th>
+              {sortable && (
+                <th
+                  className="py-2 pr-1.5 font-medium text-right text-balance"
+                  title="買進日期：AI 的停利判斷（買進後曾獲利再跌回成本）只看這天之後的走勢。填入持股時自動記為當天（標「估」），請改成實際買進日期；加碼不改這個日期"
+                >
+                  買進日期
+                </th>
+              )}
               {sortable && (
                 <th
                   className="py-2 pr-1.5 font-medium text-right text-balance"
@@ -593,6 +605,53 @@ function DraggableGroup({
           </tbody>
         </table>
       </StickyTableScroll>
+    </div>
+  );
+}
+
+/**
+ * 持有中那一列的「買進日期」欄（原生日期選擇器，手機會跳系統選日期、電腦可打字或點選）。
+ * 用本地草稿＋離開欄位／選好完整日期時才存：電腦上逐位打年份會經過 0002、0020…這些「格式合法」的中間值，不能每個都存。
+ * 自動記的（估）旁邊標「估」提示改成實際日期；沒有日期時提示「未填」（AI 不判斷停利）。
+ */
+function BuyDateCell({ item }: { item: HoldingItem }) {
+  const [draft, setDraft] = useState(item.buyDate ?? "");
+  const today = taipeiDayKey();
+  function commit(v: string) {
+    if (v === "") {
+      updateBuyDate(item.symbol, item.market, null);
+    } else if (isValidSaleDate(v) && v <= today && v >= "2000-01-01") {
+      updateBuyDate(item.symbol, item.market, v);
+    } else {
+      setDraft(item.buyDate ?? ""); // 不合格（未來日期等）：還原
+    }
+  }
+  const auto = item.buyDate && item.buyDateSrc === "auto";
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <input
+        type="date"
+        value={draft}
+        max={today}
+        aria-label={`${item.name} 買進日期`}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          // 選擇器選好一個完整、合理的日期就存；打字中的中間值等離開欄位再存。
+          if (e.target.value >= "2000-01-01" && isValidSaleDate(e.target.value)) commit(e.target.value);
+        }}
+        onBlur={() => draft !== (item.buyDate ?? "") && commit(draft)}
+        title="買進日期（AI 停利判斷只看這天之後的走勢）；加碼不改這個日期"
+        className="w-[8.5rem] rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
+      />
+      {auto ? (
+        <span className="text-[11px] text-(--text-muted)" title="自動記為你填入持股的那一天，不是實際買進日；請改成實際買進日期">
+          估・可改成實際日期
+        </span>
+      ) : !item.buyDate ? (
+        <span className="text-[11px] text-(--text-muted)" title="沒有買進日期時，AI 不會判斷「買進後曾獲利再跌回成本」的停利">
+          未填・AI 不判停利
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -776,6 +835,11 @@ function HoldingRow({
           className="w-16 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
         />
       </td>
+      {showHoldingColumns && (
+        <td className="py-2 pr-1.5 text-right">
+          {hasHolding(item) ? <BuyDateCell key={`${item.buyDate ?? ""}-${item.buyDateSrc ?? ""}`} item={item} /> : <span className="text-(--text-muted)">—</span>}
+        </td>
+      )}
       {showHoldingColumns && (
         <td className="py-2 pr-1.5 text-right tabular-nums text-(--text-secondary)">
           {breakEven != null ? formatPrice(breakEven, currency) : "—"}

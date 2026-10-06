@@ -1,6 +1,6 @@
 import type { Market } from "@/lib/data";
 import { breakEvenPrice, computeHoldingPnl, investedAmount } from "@/lib/portfolio";
-import { hasHolding, hasSoldState, type WatchlistItem } from "@/lib/watchlist";
+import { hasHolding, hasSoldState, type BuyDateSource, type WatchlistItem } from "@/lib/watchlist";
 import { isValidSaleDate, MAX_SALES_PER_ITEM, newSaleId, SALE_FIELDS, type SaleField, type SaleRecord } from "@/lib/soldRecords";
 
 /**
@@ -21,12 +21,17 @@ import { isValidSaleDate, MAX_SALES_PER_ITEM, newSaleId, SALE_FIELDS, type SaleF
  * 沒列到的是自動帶入的估計值）／已確認（1 或空白）。股票本身的那一列照舊（狀態＝持有中／已賣出／僅關注，
  * 已賣出＝持有股數 0 且購買價格保留）。v2／舊版檔沒有這些欄位，匯入時視為沒有賣出紀錄（舊檔裡的賣出價一律不存在，
  * 所以不會有「舊值被當成使用者值」的問題）。
+ *
+ * 買進日（2026-10-06，仍是 v3；只在最後多加 3 欄，舊檔沒有這些欄＝沒有買進日、舊版網站讀新檔會直接忽略多的欄）：
+ * 「買進日期」（持有中那列，YYYY-MM-DD）、「買進日期來源」（估計＝自動記的、使用者＝親手改過）、
+ * 「賣出買進日期」（賣出紀錄列，賣出當時持有那筆的買進日）。
  */
 
 export const CSV_FORMAT_VERSION = "v3";
 export const CSV_MAX_BYTES = 500 * 1024;
 export const CSV_MAX_ROWS = 1000;
 const SALE_ROW_STATUS = "賣出紀錄";
+const BUY_DATE_SRC_CODE: Record<BuyDateSource, string> = { auto: "估計", user: "使用者" };
 const FIELD_CODE: Record<SaleField, string> = { date: "日期", shares: "股數", buyPrice: "買進價", sellPrice: "賣出價" };
 export const CSV_ENCODING_HINT = "無法辨識檔案編碼（可能是 Big5／ANSI 編碼的 CSV）。請改用本網站「匯出 CSV」產生的檔案，或另存為 UTF-8 CSV 後再匯入。";
 
@@ -44,6 +49,8 @@ export interface WatchlistExportItem {
   shares?: number;
   order?: number;
   sales?: SaleRecord[];
+  buyDate?: string;
+  buyDateSrc?: BuyDateSource;
 }
 
 const HEADER = [
@@ -51,6 +58,7 @@ const HEADER = [
   "持有股數", "購買價格", "損益平衡價", "投資金額", "損益", "損益(%)",
   "格式版本", "清單順序", "僅關注手動排序",
   "賣出日期", "賣出股數", "賣出買進價", "賣出價", "賣出後剩餘股數", "賣出使用者改過欄位", "賣出已確認",
+  "買進日期", "買進日期來源", "賣出買進日期",
 ];
 
 function cell(v: unknown): string {
@@ -93,6 +101,9 @@ export function buildWatchlistCsv(
       i.order ?? "",
       !held && manualUnheld[i.market] ? "1" : "",
       "", "", "", "", "", "", "",
+      held && isValidSaleDate(i.buyDate) ? i.buyDate : "",
+      held && isValidSaleDate(i.buyDate) ? BUY_DATE_SRC_CODE[i.buyDateSrc === "auto" ? "auto" : "user"] : "",
+      "",
     ]);
     // 賣出紀錄一律全部匯出（含價格已清掉、目前不顯示的），往返才不會掉資料。
     for (const r of i.sales ?? []) {
@@ -106,6 +117,8 @@ export function buildWatchlistCsv(
         r.remaining,
         SALE_FIELDS.filter((f) => r.user?.includes(f)).map((f) => FIELD_CODE[f]).join("+"),
         r.confirmed ? "1" : "",
+        "", "",
+        r.buyDate ?? "",
       ]);
     }
   }
@@ -268,6 +281,9 @@ export function parseWatchlistCsv(text: string): ParseResult {
   const cSaleRemain = col(["賣出後剩餘股數"]);
   const cSaleUser = col(["賣出使用者改過欄位"]);
   const cSaleConfirmed = col(["賣出已確認"]);
+  const cBuyDate = col(["買進日期"]);
+  const cBuyDateSrc = col(["買進日期來源"]);
+  const cSaleBuyDate = col(["賣出買進日期"]);
 
   const dataRows = all
     .slice(headerIdx + 1)
@@ -329,6 +345,7 @@ export function parseWatchlistCsv(text: string): ParseResult {
         date,
         shares: sShares,
         buyPrice: (cSaleBuy >= 0 ? parseNum(r[cSaleBuy] ?? "", delim) : null) ?? undefined,
+        buyDate: cSaleBuyDate >= 0 && isValidSaleDate((r[cSaleBuyDate] ?? "").trim()) ? (r[cSaleBuyDate] ?? "").trim() : undefined,
         sellPrice: (cSaleSell >= 0 ? parseNum(r[cSaleSell] ?? "", delim) : null) ?? undefined,
         remaining: Math.max(0, (cSaleRemain >= 0 ? parseNum(r[cSaleRemain] ?? "", delim) : null) ?? 0),
         user: SALE_FIELDS.filter((f) => userCell.includes(FIELD_CODE[f])),
@@ -344,6 +361,11 @@ export function parseWatchlistCsv(text: string): ParseResult {
     if (shares != null && shares > 0 && cost != null && cost >= 0) {
       item.shares = shares;
       item.costBasis = cost;
+      const bd = cBuyDate >= 0 ? (r[cBuyDate] ?? "").trim() : "";
+      if (isValidSaleDate(bd)) {
+        item.buyDate = bd;
+        item.buyDateSrc = cBuyDateSrc >= 0 && (r[cBuyDateSrc] ?? "").trim() === BUY_DATE_SRC_CODE.auto ? "auto" : "user";
+      }
     } else if (version === "v3" && shares === 0 && cost != null && cost > 0) {
       // 已賣出：股數 0、購買價格保留
       item.shares = 0;

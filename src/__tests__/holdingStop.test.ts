@@ -11,7 +11,8 @@ import {
 } from "@/lib/ai/intent";
 
 /** closes（舊→新）→ 日K，高低各 ±spread。 */
-const candlesOf = (closes: number[], spread = 0.3) => closes.map((c) => ({ close: c, high: c + spread, low: c - spread }));
+const candlesOf = (closes: number[], spread = 0.3) =>
+  closes.map((c, i) => ({ time: new Date(Date.UTC(2026, 8, 1 + i)).toISOString().slice(0, 10), close: c, high: c + spread, low: c - spread }));
 
 describe("computeHoldingStop（持有中出場價，2026-10-05 使用者回報停損價離譜）", () => {
   it("友達 2409：現價 39.05、成本 36.48 → 用近端均線當移動停利，不是 32.65；距現價 ≤8% 且高於跌停 35.15", () => {
@@ -103,8 +104,14 @@ describe("describeRatingForHolding（三條路徑共用的含成本評等）", (
   it("曾獲利 ≥8% 又跌回成本 → 建議減碼（單一動作），並列進彙整的『該賣』（附目前虧損%）", () => {
     // 成本 40，期間最高 44（+10%），現價 39.5 跌回成本以下
     const c = candlesOf([...Array(10).fill(40), 44, 43, 42, 41, 40, 40, 39.8, 39.6, 39.5, 39.5]);
-    const r = describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, market: "TW" }, c);
+    // 沒有買進日 → 不觸發停利（不再用日K近似）
+    expect(describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, market: "TW" }, c).rating.holdingCode).not.toBe("reduce");
+    expect(describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, market: "TW" }, c).text).not.toMatch(/買進.{0,6}後最高約|曾漲到/);
+    const r = describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, buyDate: "2026-09-01", market: "TW" }, c);
     expect(r.rating.holdingCode).toBe("reduce");
+    expect(r.text).toContain("買進（09/01）後最高約 44.3");
+    // 買進日晚於那個高點（高點在 09/11）→ 只看之後的，不觸發
+    expect(describeRatingForHolding({ ...rated, price: 39.5 }, { costBasis: 40, buyDate: "2026-09-13", market: "TW" }, c).rating.holdingCode).not.toBe("reduce");
     const keep = describeRatingForHolding(rated, { costBasis: 36.48, market: "TW" }, candles);
     const summary = formatHoldingRatingSummary([
       { name: "A", symbol: "1528", ...r },

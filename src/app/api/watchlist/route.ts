@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getServerWatchlist, setServerWatchlist, watchlistSyncAvailable } from "@/lib/watchlistStore";
 import type { WatchlistItem } from "@/lib/watchlist";
-import { sanitizeSales } from "@/lib/soldRecords";
+import { isValidSaleDate, sanitizeSales } from "@/lib/soldRecords";
 
 // The stored value is whatever the client PUTs, so it is bounded here
 // rather than trusted: without a cap a signed-in client could park an
@@ -37,6 +37,7 @@ function normalize(item: WatchlistItem): WatchlistItem {
     name: item.name,
     costBasis: finitePositive(item.costBasis),
     shares: finitePositive(item.shares),
+    ...(isValidSaleDate(item.buyDate) ? { buyDate: item.buyDate, buyDateSrc: item.buyDateSrc === "auto" ? "auto" : "user" } : {}),
     ...(sales.length > 0 ? { sales } : {}),
   };
 }

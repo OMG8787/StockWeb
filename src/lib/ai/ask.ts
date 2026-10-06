@@ -257,7 +257,10 @@ export async function answerQuestion(
             // AI 判斷層只在問 1～2 檔個股時呼叫（關注清單深度分析不走這裡，避免一次十幾檔吃免費額度）。
             aiJudge: targets.length <= 2,
             decisionCard: tradeJudgment,
-            costBasis: holdings.find((h) => h.symbol.toUpperCase() === t.symbol.toUpperCase() && (h.shares ?? 0) > 0)?.costBasis,
+            // 持有中那筆的購買價格與買進日（停利規則只看買進日之後的日K，沒有買進日就不觸發；見 siteRating.checkTakeProfit）。
+            ...(({ costBasis, buyDate }) => ({ costBasis, buyDate }))(
+              holdings.find((h) => h.symbol.toUpperCase() === t.symbol.toUpperCase() && (h.shares ?? 0) > 0) ?? ({} as Partial<HoldingInput>)
+            ),
           })
         )
       ),

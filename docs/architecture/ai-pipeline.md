@@ -112,7 +112,7 @@ flowchart TD
 | 評等快取＋I/O | `getStockRating()`／`getStockRatings()`（stockRating.ts） | `STOCK_RATING_TTL_MS`＝10 分、失敗 60 秒 | 個股資料、持股、今日建議、技術篩選、AI 問答名單行、consistency 評測 |
 | 評等文字（給 AI 與名單） | `describeSiteRating()`（siteRating.ts） | `SITE_RATING_TITLE` | 個股資料、今日建議名單與「先不要買」區、AI 問答全市場名單、持股（未持有） |
 | 價位框架（支撐／壓力／支撐區／出場／不追價） | `ratingPriceFramework()`（ratingCore.ts，興櫃不給）→ `computePriceFramework()`（priceLevels.ts） | `MIN_CANDLES`、`NEAR_ZONE_PCT` | 評等（存在 StockRatingResult.framework）、個股資料【價位參考】（評等失敗時的備援也走同一個） |
-| 含成本的持股結論＋持有中出場 | `describeRatingForHolding()`（holdingRating.ts）＋`computeHoldingStop()`（holdingStop.ts）＋`applyHoldingCost()／checkTakeProfit()`（siteRating.ts） | `TAKE_PROFIT_PEAK_GAIN_PCT`＝8、`TAKE_PROFIT_GIVEBACK_FLOOR_PCT`＝0 | 個股資料（帶 costBasis）、`rateHoldings()`（輕量清單、深度分析、持股彙整） |
+| 含成本的持股結論＋持有中出場 | `describeRatingForHolding()`（holdingRating.ts）＋`computeHoldingStop()`（holdingStop.ts）＋`applyHoldingCost()／checkTakeProfit()`（siteRating.ts） | `TAKE_PROFIT_PEAK_GAIN_PCT`＝8、`TAKE_PROFIT_GIVEBACK_FLOOR_PCT`＝0；**停利只在有買進日（`buyDate`）時判斷、只看買進日（含）之後的日K，沒有買進日就不觸發**（2026-10-06 國巨：舊近似法抓到幾個月前的高點）。買進日資料流：`WatchlistItem.buyDate／buyDateSrc`（watchlist.ts，股數由空變 >0 自動記台北今天＝auto、使用者改＝user 不被覆蓋、加碼不變、買回重設、賣出紀錄帶 `buyDate`）→ CSV（watchlistCsv.ts 末尾 3 欄）→ ChatWidget → /api/ask `parseHoldings` → `HoldingInput.buyDate` → grounding/holdings.ts、ask.ts（個股題）→ `describeRatingForHolding({costBasis, buyDate})`；模擬組合傳 `holdings.buyDay` | 個股資料（帶 costBasis＋buyDate）、`rateHoldings()`（輕量清單、深度分析、持股彙整） |
 | 「賣哪些」彙整 | `formatHoldingRatingSummary()`（holdingRating.ts） | `HOLDING_SUMMARY_TITLE` | 輕量清單、深度分析 |
 | 今日建議名單（分組上限、去重、不建議追） | `selectPickGroups()`、`selectNotChase()`（actionPicks.ts）；不建議追最後再用 `getStockRating` 驗證不是建議買進（actionGrounding.ts） | `PICK_GROUP_LIMIT`＝5、`NOT_CHASE_MAX_SUPPORT`＝1、`NOT_CHASE_VERIFY_ATTEMPTS`＝3 | 今日建議卡片、AI 問答全市場推薦（只取名單代號，評等行即時重讀） |
 | 操作計畫（明日開盤／盤中可分批買、拉回加碼、出場） | `buildPlan()`（actionPicks.ts，價位全部來自評等） | — | 今日建議／明日操作建議 |
@@ -161,7 +161,7 @@ flowchart TD
 
 | 入口 | 評等 | 價位 | 持股成本 | 時段立場 | 弱市況 | 相似案例／教訓 | AI 判斷層 | 評等紀錄 source |
 |---|---|---|---|---|---|---|---|---|
-| AI 問答個股題 | getStockRating | 評等的 framework | 有持股就帶 costBasis | stanceLine | 評等 reason/marketNote | ✓（experienceText） | 1～2 檔時寫紀錄（不顯示） | `ai-ask` |
+| AI 問答個股題 | getStockRating | 評等的 framework | 有持股就帶 costBasis＋buyDate | stanceLine | 評等 reason/marketNote | ✓（experienceText） | 1～2 檔時寫紀錄（不顯示） | `ai-ask` |
 | 個股頁「問AI關於」 | 同上 | 同上 | 同上 | 同上 | 同上 | ✓ | 同上 | `stock-button` |
 | 關注清單深度分析 | rateHoldings＋buildStockGrounding（前 12 檔） | 同上 | ✓ | ✓ | ✓ | ✓（前 12 檔） | ✗ | `ai-ask` |
 | 持股輕量清單（賣哪些） | rateHoldings | 持有中出場參考 | ✓ | ✓ | ✓ | ✗ | ✗ | `ai-ask` |

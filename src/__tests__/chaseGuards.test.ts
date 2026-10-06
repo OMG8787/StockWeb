@@ -116,14 +116,15 @@ describe("computeSiteRating＋追高防護", () => {
 });
 
 describe("持有中停利提示", () => {
+  const BUY = "2026-09-01";
   const cs = [
-    { high: 101, low: 99 }, // 買進日（涵蓋成本 100）
-    { high: 112, low: 104 }, // 曾漲到 112（+12%）
-    { high: 105, low: 99 },
+    { time: "2026-09-01", high: 101, low: 99 }, // 買進日
+    { time: "2026-09-02", high: 112, low: 104 }, // 曾漲到 112（+12%）
+    { time: "2026-09-03", high: 105, low: 99 },
   ];
 
   it("曾獲利 ≥8% 後現價跌回成本以下 → 觸發，套到已持有結論", () => {
-    const check = checkTakeProfit(100, cs, 99);
+    const check = checkTakeProfit(100, cs, 99, BUY);
     expect(check?.peakGainPct).toBeCloseTo(12);
     expect(check!.peakGainPct).toBeGreaterThanOrEqual(TAKE_PROFIT_PEAK_GAIN_PCT);
     const base = computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110) });
@@ -131,22 +132,34 @@ describe("持有中停利提示", () => {
     expect(r.holdingCode).toBe("reduce");
     expect(r.holdingLabel).toBe("建議減碼（買進後曾獲利約 12%，現已跌回成本以下）");
     expect(r.holdingLabel).not.toMatch(/或出場|獲利已吐回/);
-    expect(r.reason).toContain("近似");
+    expect(r.reason).toContain("買進（09/01）後最高約 112");
+    expect(r.reason).not.toMatch(/近似|買進日未知|曾漲到/);
     expect(r.label).toBe(base.label); // 未持有結論不變
   });
 
   it("現價仍高於成本、或從沒獲利到 8% → 不觸發", () => {
-    expect(checkTakeProfit(100, cs, 101)).toBeNull();
-    expect(checkTakeProfit(100, [{ high: 105, low: 99 }], 98)).toBeNull();
+    expect(checkTakeProfit(100, cs, 101, BUY)).toBeNull();
+    expect(checkTakeProfit(100, [{ time: "2026-09-01", high: 105, low: 99 }], 98, BUY)).toBeNull();
   });
 
-  it("買進日之前的高點不算（日K第一根涵蓋成本的那天才開始）", () => {
-    expect(checkTakeProfit(100, [{ high: 130, low: 120 }, { high: 101, low: 99 }, { high: 103, low: 99 }], 99)).toBeNull();
+  it("買進日之前的高點不算：只看買進日（含）之後的日K（國巨 10/6 回報：幾個月前的 732 不可算進去）", () => {
+    const old = [{ time: "2026-06-10", high: 130, low: 120 }, { time: "2026-09-02", high: 101, low: 99 }, { time: "2026-09-03", high: 103, low: 99 }];
+    expect(checkTakeProfit(100, old, 99, "2026-09-02")).toBeNull();
+    // 買進日當天算（含）
+    expect(checkTakeProfit(100, old, 99, "2026-06-10")?.peakPrice).toBe(130);
+  });
+
+  it("沒有買進日 → 不觸發（不再用日K近似），舊式沒有 time 的K線也不採計", () => {
+    expect(checkTakeProfit(100, cs, 99)).toBeNull();
+    expect(checkTakeProfit(100, cs, 99, null)).toBeNull();
+    expect(checkTakeProfit(100, cs, 99, "")).toBeNull();
+    expect(checkTakeProfit(100, cs, 99, "not-a-date")).toBeNull();
+    expect(checkTakeProfit(100, [{ high: 112, low: 104 }], 99, BUY)).toBeNull();
   });
 
   it("原本就是出場 → 維持出場", () => {
     const base = { ...computeSiteRating({ ...facets(GOOD), signals: [], framework: frame(110) }), holdingCode: "exit" as const };
-    expect(applyHoldingCost(base, checkTakeProfit(100, cs, 99)).holdingCode).toBe("exit");
+    expect(applyHoldingCost(base, checkTakeProfit(100, cs, 99, BUY)).holdingCode).toBe("exit");
   });
 });
 

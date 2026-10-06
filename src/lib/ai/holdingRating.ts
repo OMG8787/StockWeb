@@ -11,15 +11,15 @@ import { applyHoldingCost, checkTakeProfit, confidenceRank, describeSiteRating, 
  */
 export function describeRatingForHolding(
   rated: { name: string; symbol: string; price: number; rating: SiteRating },
-  holding: { costBasis?: number | null; market: "TW" | "US"; emerging?: boolean } | null,
-  candles: Array<{ high: number; low: number; close: number }> | null | undefined
+  holding: { costBasis?: number | null; /** 買進日（YYYY-MM-DD 台北）；沒有就不觸發停利規則 */ buyDate?: string | null; market: "TW" | "US"; emerging?: boolean } | null,
+  candles: Array<{ high: number; low: number; close: number; time?: string }> | null | undefined
 ): { text: string; rating: SiteRating; held: boolean; pnlPct?: number | null } {
   const cost = holding?.costBasis != null && holding.costBasis > 0 ? holding.costBasis : null;
   if (!holding || cost == null || !candles || candles.length === 0)
     return { text: describeSiteRating(rated.name, rated.symbol, rated.rating), rating: rated.rating, held: false };
   // 現價對成本的漲跌%（未含手續費，只用來分賺賠給回答後檢查用：虧損中不可寫「獲利已吐回」）。
   const pnlPct = rated.price > 0 ? Math.round(((rated.price - cost) / cost) * 1000) / 10 : null;
-  const applied = applyHoldingCost(rated.rating, checkTakeProfit(cost, candles, rated.price));
+  const applied = applyHoldingCost(rated.rating, checkTakeProfit(cost, candles, rated.price, holding?.buyDate));
   const stop = computeHoldingStop({ candles, price: rated.price, costBasis: cost, market: holding.market, emerging: holding.emerging });
   // 已持有：評等行不印「買進後跌破 X 出場」（那是新買進者的遠端出場價），改附持有中出場參考。
   const line = describeSiteRating(rated.name, rated.symbol, stop ? { ...applied, exit: null } : applied);

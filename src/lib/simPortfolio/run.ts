@@ -70,7 +70,7 @@ async function reviewHolding(
   const candles = await dailyCandles(h.symbol);
   // 停利檢查只看買進日之後的日K（買進日已知，比關注清單的近似更準）；出場價用完整 3 個月日K（MA20 等支撐）。
   const sinceBuy = candles.filter((c) => c.time.slice(0, 10) >= h.buyDay);
-  const held = describeRatingForHolding({ name: rated.name, symbol: h.symbol, price: p, rating: rated.rating }, { costBasis: h.avgCost, market: "TW" }, sinceBuy);
+  const held = describeRatingForHolding({ name: rated.name, symbol: h.symbol, price: p, rating: rated.rating }, { costBasis: h.avgCost, buyDate: h.buyDay, market: "TW" }, sinceBuy);
   const stop = computeHoldingStop({ candles, price: p, costBasis: h.avgCost, market: "TW" });
   return { review: { symbol: h.symbol, price: p, changePercent, rating: held.rating, newStop: stop?.price ?? null }, rated };
 }
