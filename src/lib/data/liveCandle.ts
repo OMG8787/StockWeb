@@ -63,5 +63,8 @@ export function completedCandles(candles: Candle[]): Candle[] {
 }
 
 /** 資料裡有 live 那根時，附在技術指標說明後面的程式字樣（AI 提到交叉／指標要照這個意思講）。 */
-export const LIVE_BAR_INDICATOR_NOTE =
-  "；注意：最後一根日K是今天盤中用即時價補上的（開高低＝今天盤中、收盤價＝目前成交價，跟券商 App 盤中的算法一致），所以下面的 RSI／KD／MACD／均線／交叉都是盤中訊號、收盤才確定，提到時要講「盤中」";
+export function liveBarIndicatorNote(marketOpen: boolean): string {
+  return marketOpen
+    ? "；注意：最後一根日K是今天盤中用即時價補上的（開高低＝今天盤中、收盤價＝目前成交價，跟券商 App 盤中的算法一致），所以下面的 RSI／KD／MACD／均線／交叉都是盤中訊號、收盤才確定，提到時要講「盤中」"
+    : "；注意：最後一根日K是今天已收盤、用最後成交價補上的（官方日K還沒公布，開高低收量就是今天的最終值，跟券商 App 一致），指標是用今天收盤價算的，不是盤中訊號";
+}

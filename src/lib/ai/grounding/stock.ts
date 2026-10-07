@@ -20,7 +20,7 @@ async function fetchStockNews(quote: { symbol: string; market: Market }, newsQue
 }
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { resolveMarketCap } from "@/lib/data/marketCap";
-import { completedCandles, LIVE_BAR_INDICATOR_NOTE } from "@/lib/data/liveCandle";
+import { completedCandles, liveBarIndicatorNote } from "@/lib/data/liveCandle";
 import { formatTwReportDeadline } from "@/lib/data/twReportDeadline";
 import { formatRevenueMom } from "@/lib/data/monthlyRevenue";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
@@ -198,7 +198,7 @@ export async function buildStockGrounding(
     // 哪一側），讓任何被指名問到的指標都有真實數字可以回答，不必靠猜或改答別的。
     const indicatorLine = describeIndicatorState(computeIndicatorState(chart.candles, quote.price));
     // 最後一根是盤中（或官方未公布前）用即時價補的今天這根：指標跟券商 App 盤中算法一致，但是盤中訊號、收盤才確定（liveCandle.ts）。
-    const liveBarNote = chart.candles.at(-1)?.live ? LIVE_BAR_INDICATOR_NOTE : "";
+    const liveBarNote = chart.candles.at(-1)?.live ? liveBarIndicatorNote(getMarketStatus(quote.market) === "open") : "";
     if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「${dayWord === "今日" ? "今天" : "最近一個交易日"}沒有交叉」，不要改用別的指標代答）${liveBarNote}：${indicatorLine}`);
     // 近幾天逐日的交叉紀錄：使用者會追問「昨天有沒有」「這幾天交叉過嗎」，沒有這行 AI 只能
     // 回「無法回溯」（2026-10-04 實測）。見 describeRecentCrosses 的說明。
