@@ -118,7 +118,21 @@ export class MemoryStore implements TableStore {
     return this.data!;
   }
 
-  async batch(ops: StoreOp[]): Promise<unknown[]> {
+  /**
+   * 檔案模式要排隊：同一個 next dev 程序裡 proxy 與各 API 是不同的模組實例，若兩個請求同時
+   * 「讀檔→改→寫檔」，後寫的會用舊資料蓋掉前一個的變更（2026-10-08 實際發生：模擬倉剛建立
+   * 就被同時進行的關注清單同步蓋掉）。鎖放在 globalThis，所有實例共用。正式環境的試算表
+   * 由 Apps Script 的 LockService 排隊，不受影響。
+   */
+  batch(ops: StoreOp[]): Promise<unknown[]> {
+    if (!this.file) return this.run(ops);
+    const g = globalThis as { __swStoreQueue?: Promise<unknown> };
+    const next = (g.__swStoreQueue ?? Promise.resolve()).catch(() => {}).then(() => this.run(ops));
+    g.__swStoreQueue = next;
+    return next;
+  }
+
+  private async run(ops: StoreOp[]): Promise<unknown[]> {
     const db = await this.load();
     const results = ops.map((op) => {
       const rows = db[op.table];

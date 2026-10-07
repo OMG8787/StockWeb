@@ -1,4 +1,4 @@
-import { getChart, getEarnings, getFundamentals, getIndices, getQuote, searchStocks } from "@/lib/data";
+import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQuote, normalizeSymbol, searchStocks } from "@/lib/data";
 import { getTwChipsHistory, type TwChipsDay } from "@/lib/data/chipsHistory";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { getStockRating } from "@/lib/ai/stockRating";
@@ -200,10 +200,9 @@ async function finish(sim: SimView, note: string, day: string, ran: boolean): Pr
 export async function manualTrade(
   sim: SimView,
   o: { side: "buy" | "sell"; symbol: string; market?: "TW" | "US"; shares: number },
-): Promise<{ price: number; fee: number; pnl?: number }> {
-  const quote = await getQuote(o.symbol, o.market);
-  if (!quote || !(quote.price > 0)) throw new StrategyError("抓不到這檔股票的報價");
-  const market = quote.market === "US" ? "US" : "TW";
+): Promise<{ price: number; fee: number; pnl?: number; priceNote: string }> {
+  const quote = await resolveTradePrice(o.symbol, o.market);
+  const market = quote.market;
   const day = taipeiToday();
   const state: SimState = { initialCash: sim.initialCash, cash: sim.cash, positions: sim.positions };
   let r;
@@ -218,7 +217,26 @@ export async function manualTrade(
   }
   const prices = new Map([[`${market}:${quote.symbol}`, quote.price]]);
   await persistSimResult(sim, { cash: r.state.cash, positions: r.state.positions, equity: simEquity(r.state, prices) }, [{ ...r.trade, day, pnl: r.trade.pnl ?? null }], { day });
-  return { price: quote.price, fee: r.trade.fee, pnl: r.trade.pnl };
+  return { price: quote.price, fee: r.trade.fee, pnl: r.trade.pnl, priceNote: quote.note };
+}
+
+/** 手動下單的成交價：先用即時報價；報價來源暫時不通時退回最近一個交易日的收盤價（並註明）。 */
+async function resolveTradePrice(
+  symbolRaw: string,
+  marketHint?: "TW" | "US",
+): Promise<{ symbol: string; market: "TW" | "US"; name: string; price: number; note: string }> {
+  const quote = await getQuote(symbolRaw, marketHint).catch(() => null);
+  if (quote && quote.price > 0) {
+    return { symbol: quote.symbol, market: quote.market === "US" ? "US" : "TW", name: quote.name, price: quote.price, note: "最新報價" };
+  }
+  const symbol = normalizeSymbol(symbolRaw);
+  const market = marketHint ?? (detectMarket(symbol) === "US" ? "US" : "TW");
+  const chart = await getChart(symbol, "1m", market).catch(() => null);
+  const last = chart?.candles.filter((c) => !c.live).at(-1);
+  if (!last) throw new StrategyError("抓不到這檔股票的報價（代號不存在，或資料來源暫時忙碌）");
+  if (market === "TW") await ensureTwUniverseWarm().catch(() => {});
+  const name = (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol;
+  return { symbol, market, name, price: last.close, note: `即時報價暫時抓不到，以 ${last.time} 收盤價成交` };
 }
 
 /** 試算：用策略判斷單一股票（策略頁的「測試一檔」）。 */
@@ -226,10 +244,13 @@ export async function previewStrategy(userId: string, strategyId: string, target
   const [strategies, indicators] = await Promise.all([listStrategies(userId), listIndicators(userId)]);
   const strategy = strategies.find((s) => s.id === strategyId);
   if (!strategy) throw new StrategyError("找不到這個策略", 404);
-  const quote = await getQuote(target.symbol, target.market);
-  if (!quote) throw new StrategyError("找不到這檔股票");
-  const t: Target = { symbol: quote.symbol, market: quote.market === "US" ? "US" : "TW", name: quote.name };
+  // 只需要日K：股名從股票清單查，不依賴即時報價（報價伺服器限流時也能測）
+  const symbol = normalizeSymbol(target.symbol);
+  if (!symbol) throw new StrategyError("請輸入股票代號");
+  const market = target.market ?? (detectMarket(symbol) === "US" ? "US" : "TW");
+  if (market === "TW") await ensureTwUniverseWarm().catch(() => {});
+  const t: Target = { symbol, market, name: (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol };
   const ctx = await new DataCache(needsOf(strategy.config, indicators)).get(t);
-  if (!ctx) throw new StrategyError("抓不到這檔股票的日K");
+  if (!ctx) throw new StrategyError(`抓不到 ${symbol} 的日K（代號不存在，或資料來源暫時忙碌，請稍後再試）`);
   return { symbol: t.symbol, name: t.name, lastDay: ctx.candles.at(-1)?.time ?? "", decision: evaluateStrategy(strategy.config, indicators, ctx) };
 }

@@ -255,3 +255,9 @@ flowchart TD
 4. 新增題型或改路由：只改 questionType.ts `classifyQuestion()`（加測試 questionType.test.ts），ask.ts 只讀它的結果，不要再在 ask.ts 加零散的意圖正則；改完跑 `npx tsx scripts/eval/run.ts --tag open` 與既有整套比較。
 
 5. 新增 AI 入口：用 `callAiProviders`（自動繁中正規化＋模型標示＋Gemini 配額）；回答有價位就套 `guardAnswerNumbers`；有個股結論就讀 `getStockRating`＋`describeSiteRating`，不可自己判斷買賣；把入口加進第 4、5 節矩陣與 consistency.ts。
+
+## 模擬倉／策略庫／參考指標（2026-10-08）
+
+- 參考指標計算一律呼叫 `lib/indicators.ts`（RSI 券商 Wilder、KD 券商遞迴、MACD 12/26/9）與 `getStockRating()`（本站綜合評等），不另外重算；改這些函式時，策略的判斷會跟著變，要一併確認 `src/__tests__/strategyEngine.test.ts`。
+- 手續費／證交稅沿用 `lib/simPortfolio/rules.ts` 的 `buyFee`／`sellFee`（與 AI 模擬組合同一份）。
+- 日K來源與全站相同（`getChart`），已結束月份經 `lib/data/closedMonthCache.ts` 長期快取。

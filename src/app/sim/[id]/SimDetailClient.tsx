@@ -118,7 +118,7 @@ export default function SimDetailClient({ id }: { id: string }) {
       return { ...p, price, value, pnlPct: price ? (price / p.avgCost - 1) * 100 : null };
     });
     const equity = data.sim.cash + rows.reduce((a, r) => a + r.value, 0);
-    return { rows, equity };
+    return { rows, equity, missingQuotes: rows.filter((r) => r.price == null).length };
   }, [data, quotes]);
 
   async function act(fn: () => Promise<string>) {
@@ -162,7 +162,7 @@ export default function SimDetailClient({ id }: { id: string }) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          ["總值（即時）", money(live.equity), ""],
+          [live.missingQuotes ? `總值（${live.missingQuotes} 檔現價暫缺，以成本計）` : "總值（即時）", money(live.equity), ""],
           ["報酬率", pct(totalReturn), upDownCls(totalReturn)],
           ["現金", money(sim.cash), ""],
           ["已平倉勝率", sells.length ? `${Math.round((wins / sells.length) * 100)}%（${wins}/${sells.length}）` : "—", ""],
@@ -248,8 +248,8 @@ export default function SimDetailClient({ id }: { id: string }) {
             disabled={busy || !symbol.trim() || !(shares >= 1)}
             onClick={() =>
               act(async () => {
-                const r = await api<{ price: number; fee: number; pnl?: number }>(`/api/strategy/sims/${id}/trade`, { body: { side, symbol, shares } });
-                return `已${side === "buy" ? "買進" : "賣出"} ${symbol.toUpperCase()} ${shares} 股，成交價 ${r.price}，手續費／稅 ${money(r.fee)}${r.pnl != null ? `，損益 ${money(r.pnl)}` : ""}`;
+                const r = await api<{ price: number; fee: number; pnl?: number; priceNote: string }>(`/api/strategy/sims/${id}/trade`, { body: { side, symbol, shares } });
+                return `已${side === "buy" ? "買進" : "賣出"} ${symbol.toUpperCase()} ${shares} 股，成交價 ${r.price}（${r.priceNote}），手續費／稅 ${money(r.fee)}${r.pnl != null ? `，損益 ${money(r.pnl)}` : ""}`;
               })
             }
           >
