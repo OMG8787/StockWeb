@@ -10,6 +10,7 @@ import {
   type NearCrossReading,
 } from "@/lib/nearCross";
 import { currentKdMethod, kdFromRsv, type KdMethod } from "@/lib/kdFormula";
+import { latestRsi } from "@/lib/rsiFormula";
 
 export interface Signal {
   label: string;
@@ -125,9 +126,7 @@ export function computeSignals(candles: Candle[], currentPrice: number, range: C
     signals.push({ label: `連${direction === "up" ? "漲" : "跌"} ${streak} 天`, tone: direction });
   }
 
-  // RSI (14-period, simple average of gains/losses — not Wilder-smoothed,
-  // consistent with the simple-average MA20 above rather than mixing
-  // smoothing methods within the same signal set).
+  // RSI (14-period)：2026-10-07 起預設為券商慣用的 Wilder 平滑（舊版為簡單平均，見 lib/rsiFormula.ts）。
   const rsi = computeRSI(candles, 14);
   if (rsi != null) {
     if (rsi >= 70) signals.push({ label: `RSI ${rsi.toFixed(0)}（超買區）`, tone: "up" });
@@ -289,20 +288,9 @@ export function computeKd(candles: Candle[], method: KdMethod = currentKdMethod(
   return { k: lastK, d: lastD, prevK, prevD, cross, zone };
 }
 
-/** Simple (non-Wilder-smoothed) RSI over the trailing `period` closes. */
+/** RSI(period)：預設 Wilder 平滑（券商慣用），算法與預設的唯一來源見 lib/rsiFormula.ts。 */
 function computeRSI(candles: Candle[], period: number): number | null {
-  if (candles.length < period + 1) return null;
-  let gains = 0;
-  let losses = 0;
-  for (let i = candles.length - period; i < candles.length; i++) {
-    const change = candles[i].close - candles[i - 1].close;
-    if (change > 0) gains += change;
-    else losses -= change;
-  }
-  if (gains === 0 && losses === 0) return null;
-  if (losses === 0) return 100;
-  const rs = gains / losses;
-  return 100 - 100 / (1 + rs);
+  return latestRsi(candles.map((c) => c.close), period);
 }
 
 /**

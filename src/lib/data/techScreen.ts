@@ -80,10 +80,11 @@ export function getLastTechScreenRun(): Record<string, string> {
  */
 export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
   return cachedListWithDegradedEmptyTtl(
+    // v5（2026-10-07）：RSI 改 Wilder 版（rsiFormula.ts），RSI 數值與超買／超賣不同，舊快取不可沿用。
     // v4（2026-10-07）：MACD 即將交叉門檻回測重校、IndicatorState 新增 macdReading，舊快取沒有也不可沿用。
     // v3（2026-10-07）：KD 預設改券商遞迴版、即將交叉門檻重新校準，舊快取的 KD 數值與名單不可沿用。
     // v2（2026-10-05）：IndicatorState 新增 kdNearCross／macdNearCross（即將交叉），舊快取沒有這兩欄。
-    `tech-screen:${market}:v4`,
+    `tech-screen:${market}:v5`,
     // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
     sessionAwareTtl(market, TECH_SCREEN_TTL_MS),
     TECH_SCREEN_DEGRADED_TTL_MS,

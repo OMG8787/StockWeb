@@ -1,5 +1,6 @@
 import type { Candle } from "@/lib/data/types";
 import { computeMacdLines, MACD_MIN_BARS } from "@/lib/ema";
+import { rsiSeries } from "@/lib/rsiFormula";
 import { KD_DEFAULT_METHOD, kdFromRsv, type KdMethod } from "@/lib/kdFormula";
 
 // Full-series versions of the same indicators lib/signals.ts already
@@ -65,23 +66,13 @@ export function computeBollingerSeries(candles: Candle[], period = 20, mult = 2)
   return { upper, middle, lower };
 }
 
-/** Simple (non-Wilder-smoothed) RSI, one value per candle once `period`
- *  trailing closes are available — same method as lib/signals.ts's
- *  computeRSI, just returning every day's value instead of only the last. */
+/** RSI 逐日序列（預設 Wilder 平滑＝券商慣用，算法與預設的唯一來源見 lib/rsiFormula.ts；與 signals.ts computeRSI 同一個實作）。 */
 export function computeRsiSeries(candles: Candle[], period = 14): IndicatorPoint[] {
+  const values = rsiSeries(candles.map((c) => c.close), period);
   const points: IndicatorPoint[] = [];
-  for (let i = period; i < candles.length; i++) {
-    let gains = 0;
-    let losses = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const change = candles[j].close - candles[j - 1].close;
-      if (change > 0) gains += change;
-      else losses -= change;
-    }
-    if (gains === 0 && losses === 0) continue;
-    const value = losses === 0 ? 100 : 100 - 100 / (1 + gains / losses);
-    points.push({ time: candles[i].time, value });
-  }
+  values.forEach((v, i) => {
+    if (v != null) points.push({ time: candles[i].time, value: v });
+  });
   return points;
 }
 

@@ -18,7 +18,7 @@ import type { EvalRecord } from "@/lib/ai/learning/types";
 import type { HorizonOutcome } from "@/lib/ai/learning/reward";
 
 const feat = (over: Partial<RatingFeatures> = {}): RatingFeatures => ({
-  v: 1, rsi: 55, r5: 2, r10: 3, r20: 5, b20: 1, b60: 4, vr: 1, k: 50, kx: null, mx: null, m0: 1,
+  v: 1, rsi: 55, rsm: "w", r5: 2, r10: 3, r20: 5, b20: 1, b60: 4, vr: 1, k: 50, kx: null, mx: null, m0: 1,
   ii: 1, fi: 1, ti: 0, ist: null, mu: 20, mud: 0.1, ry: 10, sf: null, lu: 0, pos: "in", ...over,
 });
 
@@ -55,6 +55,13 @@ describe("features 分桶與依據鍵", () => {
     const cur = featureBases(feat({ k: 25, kx: "g", kdm: "r" }));
     expect(cur.some((x) => x.startsWith("k:"))).toBe(true);
     expect(cur).toContain("kx:黃金交叉");
+  });
+  it("RSI 依據只認 Wilder 版（rsm=w）：舊簡單平均紀錄（沒有 rsm）不產生 rsi 依據、不參與相似案例比對", () => {
+    const old = featureBases(feat({ rsi: 72, rsm: undefined }));
+    expect(old.some((x) => x.startsWith("rsi:"))).toBe(false);
+    expect(similarKey(feat({ rsm: undefined }), "bull")).toBeNull();
+    const cur = featureBases(feat({ rsi: 72 }));
+    expect(cur.some((x) => x.startsWith("rsi:"))).toBe(true);
   });
   it("similarKey 缺市況或 RSI 回 null", () => {
     expect(similarKey(feat(), "bull")).toBe("bull|50~70|0~5");

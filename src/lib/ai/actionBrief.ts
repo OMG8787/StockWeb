@@ -219,7 +219,7 @@ async function getActionList(stance: TradingStance, forceRefresh: boolean): Prom
   // v3：2026-10-06 名單依本站把握程度排序、每檔附程式把握程度（confidence）。
   // v4：2026-10-07 每檔附程式風險原句（riskNote，四入口比較）。
   // v5：2026-10-07 KD 改券商遞迴算法（舊 KD 算的名單不可沿用）。
-  const key = `action-list:v5:${taipeiDayKey()}:${stance.briefMode}`;
+  const key = `action-list:v6:${taipeiDayKey()}:${stance.briefMode}`;
   const isDegraded = (l: ActionListLayer) => (l.degradedReasons?.length ?? 0) > 0;
   if (forceRefresh) {
     const fresh = await computeActionList(stance);

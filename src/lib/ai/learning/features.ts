@@ -1,5 +1,6 @@
 import type { Candle, Chips, ChipsRatios, Earnings } from "@/lib/data/types";
 import { KD_DEFAULT_METHOD } from "@/lib/kdFormula";
+import { RSI_DEFAULT_METHOD } from "@/lib/rsiFormula";
 import { computeIndicatorState } from "@/lib/signals";
 import type { ChaseMetrics } from "../chaseGuards";
 import { NEAR_ZONE_PCT, type PriceFramework } from "../grounding/priceLevels";
@@ -38,6 +39,12 @@ export interface RatingFeatures {
    * featureBases() 對沒有 kdm 的紀錄不產生 `k:`／`kx:` 判斷依據（等於 KD 這個依據從 0 樣本重新累積，權重中性起步）。
    */
   kdm?: "r";
+  /**
+   * rsi 用哪種 RSI 算法算的：2026-10-07 起一律寫 "w"（Wilder 平滑，券商版，見 rsiFormula.ts）。
+   * 沒有這個欄位的舊紀錄＝舊簡單平均版 RSI（同一天數字高很多，例：6278 83 vs 73），**不可混進同一組統計**：
+   * featureBases() 對沒有 rsm 的紀錄不產生 `rsi:` 判斷依據、similarKey() 回 null（RSI 區間依據從 0 樣本重新累積，權重中性起步）。
+   */
+  rsm?: "w";
   /** MACD 今天交叉、DIF 在 0 軸上（1）或下（0） */
   mx: "g" | "d" | null;
   m0: 1 | 0 | null;
@@ -100,6 +107,7 @@ export function computeRatingFeatures(input: FeatureInput): RatingFeatures {
     k: r1(ind?.kd?.k),
     kx: ind?.kd?.cross === "golden" ? "g" : ind?.kd?.cross === "death" ? "d" : null,
     ...(KD_DEFAULT_METHOD === "recursive" ? { kdm: "r" as const } : {}),
+    ...(RSI_DEFAULT_METHOD === "wilder" ? { rsm: "w" as const } : {}),
     mx: ind?.macdCross === "golden" ? "g" : ind?.macdCross === "death" ? "d" : null,
     m0: ind?.macdAboveZero == null ? null : ind.macdAboveZero ? 1 : 0,
     ii: sign(chips?.institutionalNetShares),
@@ -189,6 +197,7 @@ export function featureBases(
   const out: string[] = [];
   if (f) {
     for (const key of ["rsi", "r5", "r20", "b20", "b60", "vr", "k", "ry"] as const) {
+      if (key === "rsi" && f.rsm !== "w") continue; // 舊簡單平均版 RSI，不與 Wilder 版混用（見 RatingFeatures.rsm）
       if (key === "k" && f.kdm !== "r") continue; // 舊 SMA 版 KD 的 K 值，不與遞迴版混用（見 RatingFeatures.kdm）
       const b = bucketOf(key, f[key]);
       if (b) out.push(`${key}:${b}`);
@@ -222,6 +231,7 @@ export function describeBasis(basis: string): string {
 /** 相似案例的比對鍵：同市況＋同 RSI 區間＋同 5 日漲幅區間（任一缺值就無法比對）。 */
 export function similarKey(f: RatingFeatures | undefined, regime: MarketRegime | null | undefined): string | null {
   if (!f || !regime) return null;
+  if (f.rsm !== "w") return null; // 舊簡單平均版 RSI 的區間跟 Wilder 版不同義，不拿來比對相似案例
   const rsi = bucketOf("rsi", f.rsi);
   const r5 = bucketOf("r5", f.r5);
   if (!rsi || !r5) return null;

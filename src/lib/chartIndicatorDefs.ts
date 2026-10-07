@@ -144,7 +144,7 @@ export const INDICATOR_DEFS: IndicatorDef[] = [
     key: "rsi",
     label: "RSI",
     pane: "sub",
-    legend: { title: "RSI(14)", items: [{ name: "line", label: "RSI", color: RSI_COLOR, digits: 1 }] },
+    legend: { title: "RSI(14) 券商常用算法", items: [{ name: "line", label: "RSI", color: RSI_COLOR, digits: 1 }] },
     createSeries: (chart, _palette, paneIndex) => {
       const line = chart.addSeries(LineSeries, { ...LINE_OPTS, color: RSI_COLOR }, paneIndex);
       addRefLines(line, [30, 70]);
