@@ -1,5 +1,5 @@
 // ============================================================
-// 股情雷達 帳號資料庫（Google Apps Script，綁在 Google 試算表上）
+// 股情雷達 帳號與回饋資料庫（Google Apps Script，綁在 Google 試算表上）
 //
 // 架構（參考 FonegleWeb 的帳號／權限設計）：
 //   瀏覽器 ──> Next.js（Vercel，帳號邏輯、密碼雜湊、權限檢查都在這裡）
@@ -29,6 +29,12 @@ const TABLES = {
         key: 'ID',
         cols: ['ID', 'LoginAt', 'UserId', 'Account', 'Name', 'Result', 'Device', 'UserAgent', 'Ip',
             'LastActiveAt', 'EndAt', 'EndReason']
+    },
+    // 使用者回饋：AI 回答的 👍／👎／📝回報，與「🛠 回報網站」
+    Feedback: {
+        key: 'ID',
+        cols: ['ID', 'Date', 'At', 'Rating', 'Status', 'Confirm', 'Account', 'Name', 'Reason', 'Question', 'Answer',
+            'ResolveNote', 'ResolvedAt', 'ConfirmedBy', 'ConfirmedAt', 'AdminNote', 'Symbol', 'Page', 'Model', 'UserId', 'AtUtc']
     }
 };
 
@@ -44,7 +50,16 @@ const COLUMN_NOTES = {
     MustChangePassword: 'TRUE＝下次登入必須先改密碼（臨時密碼）',
     TokenHash: '登入憑證的雜湊（刪除整列＝讓該裝置立即登出）',
     LastActiveAt: '最後活動時間（約每 5 分鐘更新一次）',
-    EndReason: '結束原因：登出／強制登出／帳號停用…'
+    EndReason: '結束原因：登出／強制登出／帳號停用…',
+    Rating: 'up＝👍、down＝👎、report＝📝回報、site＝🛠回報網站',
+    Reason: '使用者寫的原因／回報內容',
+    AtUtc: '回報時間（UTC，給檢查腳本比對用）',
+    Date: '回報日期（台北）',
+    At: '回報時間（台北）',
+    Status: '處理狀態：待處理／已完成（程式已修改）／不處理',
+    Confirm: '管理員確認：未確認／已確認／需重改（退回重改時狀態會回到待處理）',
+    ResolveNote: '處理說明（改了什麼、commit）',
+    AdminNote: '管理員備註（退回重改的原因等）'
 };
 
 // ============================================================

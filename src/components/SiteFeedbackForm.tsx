@@ -11,7 +11,7 @@ const SITE_REPORT_MAX_CHARS = 1000;
  * AI 問答面板裡的「🛠 回報網站問題／建議」（2026-10-04 使用者要求）：跟每則 AI 回答下方的
  * 📝回報不同，這裡可以回報整個網站任何地方要修正、改進或優化的內容。可以打字或🎤語音
  * （共用 lib/useVoiceInput）。送出時自動附上「目前所在頁面」，方便開發者對照查證。
- * 存進同一個 Redis list（/api/ask-feedback，rating＝site），開發者用 scripts/check-feedback.py 讀。
+ * 存進 Google 試算表 Feedback 分頁（/api/ask-feedback，rating＝site），開發者用 scripts/check-feedback.py 讀。
  */
 export default function SiteFeedbackForm({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState("");

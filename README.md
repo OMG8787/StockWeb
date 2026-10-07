@@ -77,7 +77,7 @@ GEMINI_API_KEY=xxxx
 
 ### AI 回答回饋（👍／👎）
 
-聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因）／📝回報（自由描述問題或建議，可打字或語音，最多 1000 字），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：以帳號登入（需 AI 問答權限）或帶 `Authorization: Bearer $SERVICE_API_KEY``GET /api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report），回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
+聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因）／📝回報（自由描述問題或建議，可打字或語音，最多 1000 字），使用者真的按了才會 POST `/api/ask-feedback`，寫進帳號同一份 Google 試算表的 **Feedback 分頁**（記錄回報的帳號，只留最近 3000 筆；問答本身不寫任何東西），AI 面板「🛠 回報網站」也存在這裡（rating＝site）。查看：直接打開試算表，或以管理員登入／帶 `Authorization: Bearer $SERVICE_API_KEY` 呼叫 `GET /api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report／site），回傳新到舊的 JSON。寫入失敗會回 503，前端提示送出失敗並保留內容。每筆有日期、處理狀態（待處理／已完成／不處理）與管理員確認（未確認／已確認／需重改）：開發者改完用 `scripts/resolve-feedback.py` 標已完成，管理員在 `/admin`「💬 使用者回饋」確認或退回重改，也可直接改試算表。
 
 ### 共用快取（Redis，選用但正式站已設定）
 

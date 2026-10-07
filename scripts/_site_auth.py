@@ -22,3 +22,8 @@ def service_key() -> str:
 
 def auth_headers(user_agent: str = "stockweb-script") -> dict:
     return {"Authorization": f"Bearer {service_key()}", "User-Agent": user_agent}
+
+
+def site_url() -> str:
+    """正式站網址；本機測試可設環境變數 STOCKWEB_SITE=http://localhost:3100。"""
+    return os.environ.get("STOCKWEB_SITE", "https://stock-web-blond.vercel.app").rstrip("/")

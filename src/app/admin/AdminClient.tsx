@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PERM, PERMISSION_LIST, ROLE_TEMPLATES, STRATEGIES, type PermCode } from "@/lib/auth/permissions";
 import { useProfile } from "@/lib/auth/useProfile";
 import { btnGhost, btnPrimary, cardCls, inputCls, sendJson } from "@/components/auth/ui";
+import FeedbackPanel from "./FeedbackPanel";
 
 interface UserView {
   userId: string;
@@ -52,7 +53,7 @@ interface Overview {
   onlineMinutes: number;
 }
 
-type Tab = "users" | "sessions" | "log";
+type Tab = "users" | "sessions" | "log" | "feedback";
 const REFRESH_MS = 60_000;
 
 const th = "px-2 py-2 text-left text-xs font-medium text-(--text-muted) whitespace-nowrap";
@@ -130,19 +131,20 @@ export default function AdminClient() {
         </button>
       </div>
 
-      <div className="flex gap-1 border-b border-(--gridline)">
+      <div className="flex gap-1 overflow-x-auto border-b border-(--gridline)">
         {(
           [
             ["users", "👥 帳號與權限"],
             ["sessions", "🟢 登入狀態"],
             ["log", "🕒 登入紀錄"],
+            ["feedback", "💬 使用者回饋"],
           ] as Array<[Tab, string]>
         ).map(([id, label]) => (
           <button
             key={id}
             type="button"
             onClick={() => setTab(id)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === id ? "border-(--accent) font-semibold" : "border-transparent text-(--text-secondary)"}`}
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm ${tab === id ? "border-(--accent) font-semibold" : "border-transparent text-(--text-secondary)"}`}
           >
             {label}
           </button>
@@ -159,6 +161,8 @@ export default function AdminClient() {
         </div>
       )}
       {!data && !error && <p className="text-sm text-(--text-muted)">載入中…</p>}
+
+      {tab === "feedback" && <FeedbackPanel />}
 
       {data && tab === "users" && (
         <>

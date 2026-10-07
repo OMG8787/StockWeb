@@ -2,18 +2,19 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 /**
- * 帳號資料的儲存層。正式環境＝Google 試算表（透過 gas/Code.gs），本機沒設定
+ * 帳號資料（以及使用者回饋）的儲存層。正式環境＝Google 試算表（透過 gas/Code.gs），本機沒設定
  * AUTH_GAS_URL 時改用 .cache/auth-dev-store.json 模擬同一組操作——兩者只做
  * 「通用表格讀寫」，帳號規則全部在 accounts.ts，所以本機測到的行為就是正式行為。
  */
 
-export type TableName = "Users" | "Sessions" | "LoginLog";
+export type TableName = "Users" | "Sessions" | "LoginLog" | "Feedback";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
   Users: "UserId",
   Sessions: "SessionId",
   LoginLog: "ID",
+  Feedback: "ID",
 };
 
 export type StoreOp =
@@ -70,7 +71,7 @@ export class MemoryStore implements TableStore {
   }
 
   private async load(): Promise<Record<TableName, Row[]>> {
-    const empty = { Users: [], Sessions: [], LoginLog: [] };
+    const empty = { Users: [], Sessions: [], LoginLog: [], Feedback: [] };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);
     try {
