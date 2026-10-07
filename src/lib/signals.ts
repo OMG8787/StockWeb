@@ -347,6 +347,13 @@ function computeMacdCross(candles: Candle[]): { type: "golden" | "death" | null;
  * 字串來做交集既脆弱又不精確（標籤文字隨時會改、也無法表達「RSI 小於 70」
  * 這種數值條件），必須有結構化的原始數值才做得到任意組合的篩選。
  */
+export interface MacdReading {
+  dif: number;
+  signal: number;
+  prevDif: number;
+  prevSignal: number;
+}
+
 export interface IndicatorState {
   macdCross: "golden" | "death" | null;
   /** MACD 線（DIF）本身在 0 軸上方還是下方；沒算得出 MACD 時為 null。 */
@@ -362,6 +369,8 @@ export interface IndicatorState {
   streakDirection: "up" | "down" | null;
   /** 最新一根量 ÷ 前 20 日均量（不含最新一根）；算不出來時 null。 */
   volumeRatio: number | null;
+  /** MACD 最新兩天的 DIF／訊號線（「最接近同時交叉」排序用）；根數不足時 null。 */
+  macdReading: MacdReading | null;
   /** KD「即將交叉」（K 未穿 D 但差距小且連續收斂），見 lib/nearCross.ts；不符合時 null。 */
   kdNearCross: NearCrossReading | null;
   /** MACD「即將交叉」（DIF 未穿訊號線但柱狀體連續縮小、接近 0），見 lib/nearCross.ts；不符合時 null。 */
@@ -388,6 +397,16 @@ export function computeMacdNearCross(candles: Candle[]): NearCrossReading | null
     convergingDays: MACD_NEAR_CROSS_CONVERGING_DAYS,
     maxEstDays: MACD_NEAR_CROSS_MAX_EST_DAYS,
   });
+}
+
+/** MACD 最新兩天的 DIF／訊號線（根數不足或沒有有效值時 null）。 */
+export function computeMacdReading(candles: Candle[]): MacdReading | null {
+  if (candles.length < MACD_MIN_BARS) return null;
+  const { macdLine, signalLine } = computeMacdLines(candles.map((c) => c.close));
+  const last = macdLine.length - 1;
+  const [dif, signal, prevDif, prevSignal] = [macdLine[last], signalLine[last], macdLine[last - 1], signalLine[last - 1]];
+  if (dif == null || signal == null || prevDif == null || prevSignal == null) return null;
+  return { dif, signal, prevDif, prevSignal };
 }
 
 export function computeIndicatorState(candles: Candle[], currentPrice: number): IndicatorState | null {
@@ -418,6 +437,7 @@ export function computeIndicatorState(candles: Candle[], currentPrice: number): 
     streakDays: streak.days,
     streakDirection: streak.direction,
     volumeRatio: avgVolume > 0 ? latest.volume / avgVolume : null,
+    macdReading: computeMacdReading(candles),
     kdNearCross: computeKdNearCross(candles),
     macdNearCross: computeMacdNearCross(candles),
   };

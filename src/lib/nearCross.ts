@@ -48,10 +48,14 @@ export const KD_NEAR_CROSS_CONVERGING_DAYS = 2;
 export const KD_NEAR_CROSS_MAX_EST_DAYS = 2;
 
 // ---- MACD（12,26,9）的「即將交叉」門檻：本站自訂經驗值，不是權威標準 ----
+// 2026-10-07：用回測校準（scripts/backtest/macdNearCross.ts，docs/backtest/2026-10-macd-near-cross.md），方法同 KD：
+// 命中＝訊號後 3 個交易日內 DIF 真的往預測方向穿越訊號線；規則看結果前寫死——樣本內命中率不低於舊門檻（收斂 3 天／外推 2 天，
+// 72.2%）者中取訊號頻率最高，再用樣本外確認。結果：收斂 1 天／外推 1.5 天，命中 75.2%（舊 72.2%）、每檔每月 2.33 次（舊 1.74），
+// 樣本外 75.4%（舊 72.4%），命中率與頻率都比舊門檻好。
 /** 柱狀體（DIF−訊號線）絕對值要連續縮小幾天。 */
-export const MACD_NEAR_CROSS_CONVERGING_DAYS = 3;
+export const MACD_NEAR_CROSS_CONVERGING_DAYS = 1;
 /** 照目前柱狀體縮小速度外推，最多幾個交易日內歸零（＝柱狀體已經很接近 0）。 */
-export const MACD_NEAR_CROSS_MAX_EST_DAYS = 2;
+export const MACD_NEAR_CROSS_MAX_EST_DAYS = 1.5;
 
 export interface NearCrossOptions {
   convergingDays: number;

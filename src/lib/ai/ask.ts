@@ -292,7 +292,9 @@ export async function answerQuestion(
         .then(([indices, taifexFutures, macro]) => buildMarketOverviewText(indices, taifexFutures, macro))
         .catch(() => ""),
       wantsMovers ? buildMoversGrounding() : Promise.resolve(""),
-      wantsTechScreen ? buildTechScreenGrounding().catch(() => "") : Promise.resolve(""),
+      wantsTechScreen
+        ? buildTechScreenGrounding({ question, lastUserTurn: [...history].reverse().find((t) => t.role === "user")?.content }).catch(() => "")
+        : Promise.resolve(""),
       // 兩個以上類股（「半導體跟航運哪個強」）：各類股的漲跌家數與加權漲跌由程式算好（theme.ts buildSectorCompareGrounding）。
       themeMatch
         ? detectSectorThemes(question).length >= 2
