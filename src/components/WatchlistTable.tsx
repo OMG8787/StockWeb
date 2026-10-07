@@ -546,7 +546,7 @@ function DraggableGroup({
               {sortable && (
                 <th
                   className="py-2 pr-1.5 font-medium text-right text-balance"
-                  title="買進日期：AI 的停利判斷（買進後曾獲利再跌回成本）只看這天之後的走勢。填入持股時自動記為當天（標「估」），請改成實際買進日期；加碼不改這個日期"
+                  title="買進日期：AI 的停利判斷（買進後曾獲利再跌回成本）只看這天之後的走勢。填入持股時自動帶入當天，可改成實際買進日期；加碼不改這個日期"
                 >
                   買進日期
                 </th>
@@ -612,7 +612,8 @@ function DraggableGroup({
 /**
  * 持有中那一列的「買進日期」欄（原生日期選擇器，手機會跳系統選日期、電腦可打字或點選）。
  * 用本地草稿＋離開欄位／選好完整日期時才存：電腦上逐位打年份會經過 0002、0020…這些「格式合法」的中間值，不能每個都存。
- * 自動記的（估）旁邊標「估」提示改成實際日期；沒有日期時提示「未填」（AI 不判斷停利）。
+ * 自動記的日期（buyDateSrc="auto"，填股數與成本時帶入當天）畫面上直接當一般日期顯示，不再標「估」（2026-10-07 使用者要求）；
+ * 來源標記只留在資料層（CSV 匯出入與邏輯用）。沒有日期時提示「未填」（AI 不判斷停利）。
  */
 function BuyDateCell({ item }: { item: HoldingItem }) {
   const [draft, setDraft] = useState(item.buyDate ?? "");
@@ -626,7 +627,6 @@ function BuyDateCell({ item }: { item: HoldingItem }) {
       setDraft(item.buyDate ?? ""); // 不合格（未來日期等）：還原
     }
   }
-  const auto = item.buyDate && item.buyDateSrc === "auto";
   return (
     <div className="flex flex-col items-end gap-0.5">
       <input
@@ -643,11 +643,7 @@ function BuyDateCell({ item }: { item: HoldingItem }) {
         title="買進日期（AI 停利判斷只看這天之後的走勢）；加碼不改這個日期"
         className="w-[8.5rem] rounded border border-(--gridline) bg-(--surface-2) px-1.5 py-1 text-right text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-(--accent)"
       />
-      {auto ? (
-        <span className="text-[11px] text-(--text-muted)" title="自動記為你填入持股的那一天，不是實際買進日；請改成實際買進日期">
-          估・可改成實際日期
-        </span>
-      ) : !item.buyDate ? (
+      {!item.buyDate ? (
         <span className="text-[11px] text-(--text-muted)" title="沒有買進日期時，AI 不會判斷「買進後曾獲利再跌回成本」的停利">
           未填・AI 不判停利
         </span>

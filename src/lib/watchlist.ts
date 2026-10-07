@@ -27,7 +27,7 @@ export interface WatchlistItem {
    * 來源見 buyDateSrc。第一版加碼（股數增加）不改買進日，仍是第一次買進的日期。
    */
   buyDate?: string;
-  /** 買進日來源：auto＝股數由 0／空變成 >0 時自動記的台北今天（是估計值，畫面標「估」）；user＝使用者親手改過（自動流程不可覆蓋）。 */
+  /** 買進日來源：auto＝股數由 0／空變成 >0 時自動記的台北今天（是估計值，畫面不標「估」，只供資料層與 CSV 區分）；user＝使用者親手改過（自動流程不可覆蓋）。 */
   buyDateSrc?: BuyDateSource;
 }
 
