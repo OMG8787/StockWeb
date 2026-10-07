@@ -25,7 +25,7 @@ export const CHART_RANGE = "6m";
 export const CACHE_DIR = process.env.BACKTEST_CACHE ?? path.join(process.cwd(), ".cache", "backtest");
 
 /** 正式站（日K從這裡抓，跟網站用同一份資料源）。 */
-export const SITE = process.env.BACKTEST_SITE ?? "https://stock-web-blond.vercel.app";
+export const SITE = process.env.BACKTEST_SITE ?? "https://stock-web-rho.vercel.app";
 
 /** 每個訊號日往前再抓幾個交易日的三大法人（「法人連買 N 日」規則要用）。 */
 export const T86_LOOKBACK_DAYS = 2;

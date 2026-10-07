@@ -12,7 +12,7 @@ import json, sys, time, urllib.request
 from _site_auth import auth_headers
 from datetime import datetime, timezone, timedelta
 
-SITE = "https://stock-web-blond.vercel.app"
+SITE = "https://stock-web-rho.vercel.app"
 HEADERS = auth_headers("check-rating-log")
 TPE = timezone(timedelta(hours=8))
 HORIZONS = (1, 5, 20)

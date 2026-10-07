@@ -33,7 +33,7 @@ export const WEIGHTS_EMBARGO_DAYS = 10;
 /** 後段至少幾筆才下結論。 */
 export const WEIGHTS_MIN_TEST_SAMPLES = 300;
 
-const SITE = process.env.BACKTEST_SITE ?? "https://stock-web-blond.vercel.app";
+const SITE = process.env.BACKTEST_SITE ?? "https://stock-web-rho.vercel.app";
 
 const mean = (v: number[]) => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : NaN);
 const f2 = (v: number) => (Number.isFinite(v) ? `${v >= 0 ? "+" : ""}${v.toFixed(2)}%` : "—");

@@ -10,7 +10,7 @@ from _site_auth import auth_headers
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 
-SITE = "https://stock-web-blond.vercel.app"
+SITE = "https://stock-web-rho.vercel.app"
 HEADERS = auth_headers("check-sim-portfolio")
 TPE = timezone(timedelta(hours=8))
 

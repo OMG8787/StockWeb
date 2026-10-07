@@ -21,7 +21,7 @@ import { siteAuthHeaders } from "../siteAuth";
 import { CASE_GAP_MS, arg, callVariant, captureCase, judge, log, postProcess, regenerateWith, sleep, type Captured } from "./runtime";
 import { extractCardLine, extractStockSegment, gradeEntryStock, type EntryStock } from "./entryGraders";
 
-const SITE = "https://stock-web-blond.vercel.app";
+const SITE = "https://stock-web-rho.vercel.app";
 const DEFAULT_STOCKS = "6278:台表科,6285:啟碁,2313:華通,4720:德淵,2330:台積電";
 
 export type EntryId = "card-prod" | "card-local" | "watchlist" | "button" | "direct";

@@ -17,7 +17,7 @@ AI 問答。Next.js (App Router) + TypeScript + Tailwind CSS，圖表用
 存取限制」，如果之後又要把網站改回公開，AI 問答的系統提示詞（`lib/ai/ask.ts`）務必要
 改回客觀描述、不做買賣建議的版本，順序不能顛倒。**
 
-- **正式站**：https://stock-web-blond.vercel.app（進入密碼預設寫在 `src/app/api/unlock/route.ts`，或看有沒有設定 `SITE_PASSWORD` 環境變數蓋掉它）
+- **正式站**：https://stock-web-rho.vercel.app（2026-10-07 起，OMG8787 的 Vercel 專案 stock-web，Hobby；帳號制登入，帳號存 Google 試算表，見 docs/auth-setup.md）。舊站 stock-web-blond.vercel.app 在 hj110b13-Andy 的 Vercel，已不再更新。
 - **GitHub**：hj110b13-Andy/Stock-web
 - **開發分支**：`claude/relaxed-curie-c69kp0`（所有工作都在這個分支上，push 上去 Vercel 會自動部署）
 - **功能完整說明、環境變數設定、資料來源限制**：見 `README.md`，這份文件不重複列，只補「檔案功能地圖」跟「工作日誌」。
@@ -388,7 +388,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 **新方向（2026-10-07 下午，使用者在新裝置／新 GitHub 帳號 OMG8787 接手）：重構整個框架**
 - 使用者原話：「我需要重構整個框架」「幫我先去讀取 D:\claude\FonegleWeb 框架，我要將網站改成這樣，可以自由選擇登入。管理員可以看到登入狀態，不同使用者有不同權限、策略、功能等。先幫我把網頁改成這種框架，之後會再開一個試算表」「發布的部分可以先暫緩，我要先改好程式碼」。
 - 使用者決定：混合式（股票功能留 Next.js＋Vercel，帳號／權限／登入紀錄改用 Google 試算表＋Apps Script）；**一定要登入才能用**；**只有管理員能開帳號**；先寫好 Apps Script，試算表之後使用者自己建。
-- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）～（深夜）。試算表已建好並驗證。**待使用者**：⓪把新版 gas/Code.gs 貼進 Apps Script 並「管理部署作業→編輯→新版本」（Holdings 分頁與 replaceWhere 需要）；①在 Vercel 新專案補 AUTH_GAS_URL／AUTH_GAS_SECRET（值在 .env.local）與舊專案的 AI／Redis／資料 API 金鑰，Redeploy，用 ADMIN_SETUP_CODE 建第一個管理員；新正式站網址待使用者提供（CLAUDE.md 規則三的網址要跟著換）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
+- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）～（深夜）。試算表已建好並驗證。**10/7 23:50 已完成**：Apps Script 新版已部署、Vercel 已補 AUTH_GAS_URL／AUTH_GAS_SECRET 並重新部署，正式站 stock-web-rho 回應「需建立第一個管理員」。**待使用者**：①用 ADMIN_SETUP_CODE 建第一個管理員；補舊專案的 AI／Redis／資料 API 金鑰（Redis 未設時登入確認是同步的、會卡）；舊站停用與否待決定（值在 .env.local）與舊專案的 AI／Redis／資料 API 金鑰，Redeploy，用 ADMIN_SETUP_CODE 建第一個管理員；新正式站網址待使用者提供（CLAUDE.md 規則三的網址要跟著換）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
 - **安全待辦**：OMG8787/StockWeb 是 public repo（金鑰掃描全部歷史未發現外洩），建議改 Private；舊正式站的預設密碼與 `site_unlocked=granted` 偽造 cookie 漏洞會在新版部署後消失。
 - 本機開發：沒設 AUTH_GAS_URL 時用 .cache/auth-dev-store.json 當假資料庫；這台電腦沒有 .env.local（check-feedback.py 等腳本目前無法執行；新版腳本改用 SERVICE_API_KEY，舊正式站不認這把金鑰）。
 
@@ -465,7 +465,7 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 1. **規則一**：同一類問題卡關連續失敗 2 次，第 3 次要同步派 2 個不同模型 agent 上網查解法，交疊進行不間斷。
 2. **規則二**：自己先做一次完整的實測（build+start+curl，模擬瀏覽器操作）地毯式檢查，抓到的問題全部修好；之後只要針對這次修的問題複查即可，不必每次重新全站掃。
 3. **規則三**：規則二做完後，派 1 個 Opus agent（額度不夠才臨時換模型頂替，之後仍改回 Opus）做一次完整地毯式檢查；抓到的問題自己修，修不好就讓 Opus 直接動手；之後只需針對這次修的問題再複查，直到 Opus 確認「沒有發現問題」才能回報「更新完成」。
-4. **規則四**：每次回覆使用者都要附上網站網址 https://stock-web-blond.vercel.app 。**網址跟密碼絕對不能寫在同一行/緊接在一起**（會被通訊軟體自動連結辨識吞掉變成壞連結，這件事已經真實發生過不只一次），務必分開兩行。
+4. **規則四**：每次回覆使用者都要附上網站網址 https://stock-web-rho.vercel.app 。**網址跟密碼絕對不能寫在同一行/緊接在一起**（會被通訊軟體自動連結辨識吞掉變成壞連結，這件事已經真實發生過不只一次），務必分開兩行。
 5. **規則五（跨裝置接續）**：每次回覆使用者之前，都要更新這份 PROGRESS.md 並 push，讓其他裝置的 Claude Code 接得上。
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 

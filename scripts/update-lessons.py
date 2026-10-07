@@ -4,12 +4,12 @@
 - 讀正式站 /api/learning（每日學習工作產生的彙總；驗證邏輯在 src/lib/ai/learning/lessonMatch.ts validateLessons）。
 - 列出每條教訓：符合條件、已滿 5 個交易日的紀錄筆數、平均 5 日超額、跑贏比例、判定（樣本不足／證據仍成立／證據已不成立）。
 - 「證據已不成立」的教訓只列出來給主 agent 檢查，程式不會自動刪除；確認後手動改 lessons.ts 的 status 或刪除。
-- 想立刻重算彙總：curl "https://stock-web-blond.vercel.app/api/cron/learning?force=1"（有設 CRON_SECRET 要帶 Authorization）。
+- 想立刻重算彙總：curl "https://stock-web-rho.vercel.app/api/cron/learning?force=1"（有設 CRON_SECRET 要帶 Authorization）。
 """
 import json, sys, urllib.request
 from _site_auth import auth_headers
 
-SITE = "https://stock-web-blond.vercel.app"
+SITE = "https://stock-web-rho.vercel.app"
 HEADERS = auth_headers("update-lessons")
 
 sys.stdout.reconfigure(encoding="utf-8")

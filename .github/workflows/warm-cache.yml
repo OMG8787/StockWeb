@@ -49,7 +49,7 @@ jobs:
       - name: Ping warm-cache endpoint
         run: |
           body=$(mktemp)
-          code=$(curl -sS --max-time 90 -o "$body" -w '%{http_code}' "https://stock-web-blond.vercel.app/api/cron/warm-cache" || echo "000")
+          code=$(curl -sS --max-time 90 -o "$body" -w '%{http_code}' "https://stock-web-rho.vercel.app/api/cron/warm-cache" || echo "000")
           echo "HTTP $code"
           jq -r '.outcomes // {} | to_entries[] | "\(.key): \(.value)"' "$body" 2>/dev/null || cat "$body"
           jq -r '.outcomes // {} | to_entries[] | select(.value | startswith("失敗")) | "::warning title=預熱失敗::\(.key) — \(.value)"' "$body" 2>/dev/null || true
