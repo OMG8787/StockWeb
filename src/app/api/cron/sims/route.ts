@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
       continue;
     }
     try {
-      results.push(await runSim(sim, { cache }));
+      // 每個模擬倉抓資料的期限＝整體剩餘時間，留 30 秒寫回
+      results.push(await runSim(sim, { cache, deadline: started + BUDGET_MS - 30_000 }));
     } catch (err) {
       results.push({ simId: sim.id, error: (err as Error).message });
     }

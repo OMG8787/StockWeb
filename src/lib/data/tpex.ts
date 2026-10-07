@@ -3,6 +3,7 @@ import https from "node:https";
 import tls from "node:tls";
 import { chunk, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
+import { closedMonthCandles, isClosedYm } from "./closedMonthCache";
 import { parseMonthlyRevenueRow, type MonthlyRevenueRow } from "./monthlyRevenue";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
@@ -498,6 +499,15 @@ interface TpexHistoryResponse {
  * whole calendar month containing it comes back.
  */
 async function fetchTpexMonth(stockNo: string, year: number, month: number): Promise<Candle[]> {
+  // 已結束的月份走長期快取（記憶體＋Redis，見 closedMonthCache.ts）
+  const { year: ty, month: tm } = taipeiToday();
+  if (isClosedYm(year, month, { year: ty, month: tm })) {
+    return closedMonthCandles(`tpex:${stockNo}:${year}${pad(month)}`, () => fetchTpexMonthRaw(stockNo, year, month));
+  }
+  return fetchTpexMonthRaw(stockNo, year, month);
+}
+
+async function fetchTpexMonthRaw(stockNo: string, year: number, month: number): Promise<Candle[]> {
   const dateParam = `${year}/${pad(month)}/01`;
   const url = `https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock/st43_result.php?l=zh-tw&date=${dateParam}&code=${stockNo}`;
   const data = await fetchTpexJson<TpexHistoryResponse>(url, 6000);

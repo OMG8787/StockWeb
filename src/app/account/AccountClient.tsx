@@ -65,7 +65,7 @@ export default function AccountClient() {
             <dd>{profile.name}</dd>
             <dt className="text-(--text-muted)">帳號</dt>
             <dd>{profile.account}</dd>
-            <dt className="text-(--text-muted)">投資策略</dt>
+            <dt className="text-(--text-muted)">投資風格</dt>
             <dd>{strategyLabel(profile.strategy)}</dd>
             <dt className="text-(--text-muted)">可用功能</dt>
             <dd className="flex flex-wrap gap-1">

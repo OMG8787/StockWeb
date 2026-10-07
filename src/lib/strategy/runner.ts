@@ -25,8 +25,11 @@ import { listIndicators, listStrategies, persistSimResult, StrategyError, strate
  */
 
 const CANDLE_RANGE = "1y" as const;
-const CONCURRENCY = 3;
+// 跟網站其他批次抓日K的地方一樣保守：每檔本身就會並行抓多個月份，檔數再並行太多會被證交所限流
+const CONCURRENCY = 2;
 const CHIPS_DAYS = 20;
+/** 一次執行最多花多少時間抓資料（Vercel 上限 300 秒，要留時間判斷與寫回試算表） */
+const FETCH_BUDGET_MS = 200_000;
 
 async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
@@ -122,12 +125,12 @@ export interface RunResult {
 }
 
 /**
- * 依策略跑一次模擬倉。force＝今天已經跑過也再跑（手動按「立即執行」）；
- * 不是交易日、或收盤資料還沒出來就不交易，只記下原因。
+ * 依策略跑一次模擬倉，以「最新一個有收盤資料的交易日」為準（平日 16:40 排程＝當天；
+ * 晚上或假日手動執行＝最近一個交易日）。同一個交易日只會執行一次，不會重複交易。
  */
-export async function runSim(sim: SimView, opts: { force?: boolean; cache?: DataCache } = {}): Promise<RunResult> {
-  const day = taipeiToday();
-  if (!opts.force && sim.lastRunDay === day) return { simId: sim.id, ran: false, note: "今天已經執行過", trades: 0 };
+export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?: number } = {}): Promise<RunResult> {
+  const today = taipeiToday();
+  const deadline = opts.deadline ?? Date.now() + FETCH_BUDGET_MS;
   const [strategies, indicators] = await Promise.all([listStrategies(sim.userId), listIndicators(sim.userId)]);
   const strategy = strategies.find((s) => s.id === sim.strategyId);
   if (!strategy) throw new StrategyError("模擬倉沒有設定策略，或策略已被刪除");
@@ -141,12 +144,20 @@ export async function runSim(sim: SimView, opts: { force?: boolean; cache?: Data
   const all = new Map<string, Target>();
   for (const t of [...heldTargets, ...universe]) all.set(`${t.market}:${t.symbol}`, t);
 
-  const contexts = await mapLimit([...all.values()], CONCURRENCY, async (t) => ({ t, ctx: await cache.get(t) }));
+  // 持股優先抓（要判斷停損停利）；時間到就不再抓新的，用已經抓到的判斷
+  let skipped = 0;
+  const contexts = await mapLimit([...all.values()], CONCURRENCY, async (t) => {
+    if (Date.now() > deadline) {
+      skipped++;
+      return { t, ctx: null };
+    }
+    return { t, ctx: await cache.get(t) };
+  });
   // 以多數股票的最後一根日K日期判斷「今天的收盤資料出來了沒」
   const lastDays = contexts.map((c) => c.ctx?.candles[c.ctx.candles.length - 1]?.time).filter((x): x is string => !!x);
-  if (lastDays.length === 0) return finish(sim, "抓不到任何股票的日K，這次不交易", day, false);
-  const latest = lastDays.sort().at(-1)!;
-  if (latest !== day) return finish(sim, `最新收盤資料是 ${latest}（今天休市或資料尚未公布），這次不交易`, day, false);
+  if (lastDays.length === 0) return finish(sim, "抓不到任何股票的日K，這次不交易", today, false);
+  const day = lastDays.sort().at(-1)!;
+  if (sim.lastRunDay >= day) return { simId: sim.id, ran: false, note: `最新交易日 ${day} 已經執行過，等下一個交易日收盤後再執行`, trades: 0 };
 
   const decisions = new Map<string, Candidate>();
   for (const { t, ctx } of contexts) {
@@ -166,7 +177,10 @@ export async function runSim(sim: SimView, opts: { force?: boolean; cache?: Data
   const equity = simEquity(result.state, prices);
   const buys = result.trades.filter((t) => t.side === "buy").length;
   const sells = result.trades.length - buys;
-  const note = `掃描 ${candidates.length} 檔，${result.trades.length ? `買進 ${buys} 筆、賣出 ${sells} 筆` : "沒有符合條件的交易"}`;
+  const missing = universe.length - candidates.length;
+  const note =
+    `${day} 收盤：掃描 ${candidates.length} 檔，${result.trades.length ? `買進 ${buys} 筆、賣出 ${sells} 筆` : "沒有符合條件的交易"}` +
+    (missing > 0 ? `（${missing} 檔資料沒抓到${skipped ? "，時間不夠先略過" : ""}）` : "");
   await persistSimResult(
     sim,
     { cash: result.state.cash, positions: result.state.positions, equity },

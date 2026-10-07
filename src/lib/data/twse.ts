@@ -1,4 +1,5 @@
 import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
+import { closedMonthCandles } from "./closedMonthCache";
 import { chunk, fetchWithTimeout, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
 import { parseMonthlyRevenueRow, type MonthlyRevenueRow } from "./monthlyRevenue";
@@ -379,13 +380,10 @@ const MONTH_FETCH_CONCURRENCY = 10;
 // （Vercel 出口 IP）實測 2330 5y 連續好幾分鐘回 503，但同時間本機直連 TWSE 61 個月
 // 全部成功，代表是個別月份請求被限流/逾時、不是資料問題。兩層補強：
 // ①單月請求失敗自動重試（最多3次、帶隨機退避），長區間並行數也降到 6，降低被限流機率；
-// ②已經收盤的歷史月份資料不會再變，成功抓到的月份存進同一個實例的記憶體（30分鐘），
+// ②已經收盤的歷史月份資料不會再變，成功抓到的月份長期快取（記憶體＋Redis 45 天，見 closedMonthCache.ts），
 //   下一次請求（含失敗後重試）只需要補沒抓到的月份，進度會累積、越試越容易成功。
 const LONG_RANGE_MONTH_CONCURRENCY = 6;
 const MONTH_RETRY_ATTEMPTS = 3;
-const CLOSED_MONTH_CACHE_TTL_MS = 30 * 60_000;
-const CLOSED_MONTH_CACHE_MAX = 900;
-const closedMonthCache = new Map<string, { candles: Candle[]; expiresAt: number }>();
 
 interface StockDayResponse {
   stat: string;
@@ -475,24 +473,16 @@ function isClosedMonth(dateParam: string): boolean {
 }
 
 async function fetchMonthResilient(stockNo: string, dateParam: string): Promise<Candle[]> {
-  const closed = isClosedMonth(dateParam);
-  const key = `${stockNo}:${dateParam}`;
-  if (closed) {
-    const hit = closedMonthCache.get(key);
-    if (hit && hit.expiresAt > Date.now()) return hit.candles;
-  }
+  // 已結束的月份走長期快取（記憶體＋Redis，見 closedMonthCache.ts）
+  if (isClosedMonth(dateParam)) return closedMonthCandles(`twse:${stockNo}:${dateParam}`, () => fetchMonthWithRetry(stockNo, dateParam));
+  return fetchMonthWithRetry(stockNo, dateParam);
+}
+
+async function fetchMonthWithRetry(stockNo: string, dateParam: string): Promise<Candle[]> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < MONTH_RETRY_ATTEMPTS; attempt++) {
     try {
-      const candles = await fetchMonth(stockNo, dateParam);
-      if (closed) {
-        if (closedMonthCache.size >= CLOSED_MONTH_CACHE_MAX) {
-          const oldest = closedMonthCache.keys().next().value;
-          if (oldest !== undefined) closedMonthCache.delete(oldest);
-        }
-        closedMonthCache.set(key, { candles, expiresAt: Date.now() + CLOSED_MONTH_CACHE_TTL_MS });
-      }
-      return candles;
+      return await fetchMonth(stockNo, dateParam);
     } catch (err) {
       lastErr = err;
       await new Promise((r) => setTimeout(r, 250 * (attempt + 1) + Math.random() * 250));

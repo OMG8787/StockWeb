@@ -189,7 +189,7 @@ export default function AdminClient() {
                       {p.label}
                     </th>
                   ))}
-                  <th className={th}>策略</th>
+                  <th className={th}>投資風格</th>
                   <th className={th}>狀態</th>
                   <th className={th}>操作</th>
                 </tr>
@@ -423,7 +423,7 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
             onClick={() =>
               run(async () => {
                 await sendJson("/api/admin/users", { userId: user.userId, perms, strategy }, "PATCH");
-                return `已更新 ${user.name} 的權限與策略`;
+                return `已更新 ${user.name} 的權限與投資風格`;
               })
             }
           >
@@ -539,7 +539,7 @@ function CreateUserForm({ isSuper, busy, run }: { isSuper: boolean; busy: boolea
         ))}
       </div>
       <label className="flex items-center gap-2 text-sm">
-        <span className="text-(--text-muted)">投資策略：</span>
+        <span className="text-(--text-muted)">投資風格：</span>
         <select value={strategy} onChange={(e) => setStrategy(e.target.value)} className="rounded border border-(--gridline) bg-(--surface-2) px-2 py-1">
           {STRATEGIES.map((s) => (
             <option key={s.id} value={s.id}>

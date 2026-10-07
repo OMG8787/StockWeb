@@ -212,7 +212,7 @@ export function toSim(r: Row): SimView {
     strategyId: r.StrategyId ?? "",
     universe: r.Universe === "market" ? "market" : "list",
     symbols: parseJson(r.Symbols, []),
-    marketTopN: Number(r.MarketTopN) || 50,
+    marketTopN: Number(r.MarketTopN) || 30,
     initialCash,
     cash: Number.isFinite(cash) ? cash : initialCash,
     equity: Number(r.Equity) || initialCash,
@@ -275,7 +275,7 @@ export async function saveSim(
   if (strategyId && !strategies.some((s) => s.ID === strategyId)) throw new StrategyError("找不到選擇的策略");
   const universe = input.universe === "market" ? "market" : "list";
   const symbols = await withNames(cleanSymbols(input.symbols));
-  const topN = Math.round(Math.min(MAX_MARKET_TOP_N, Math.max(10, Number(input.marketTopN) || 50)));
+  const topN = Math.round(Math.min(MAX_MARKET_TOP_N, Math.max(10, Number(input.marketTopN) || 30)));
   const autoTrade = input.autoTrade !== false && input.autoTrade !== "false";
   if (autoTrade && !strategyId) throw new StrategyError("開啟自動交易要先選擇策略");
   if (autoTrade && universe === "list" && symbols.length === 0) throw new StrategyError("自選清單模式至少要有一檔股票");
