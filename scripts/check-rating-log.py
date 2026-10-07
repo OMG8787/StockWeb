@@ -9,10 +9,11 @@
 寫入端：src/lib/ai/ratingLog.ts；讀取 API：/api/rating-log。CLAUDE.md 規定主 agent 每則使用者訊息都要跑。
 """
 import json, sys, time, urllib.request
+from _site_auth import auth_headers
 from datetime import datetime, timezone, timedelta
 
 SITE = "https://stock-web-blond.vercel.app"
-HEADERS = {"Cookie": "site_unlocked=granted", "User-Agent": "check-rating-log"}
+HEADERS = auth_headers("check-rating-log")
 TPE = timezone(timedelta(hours=8))
 HORIZONS = (1, 5, 20)
 BUY_DROP_PCT = -5.0

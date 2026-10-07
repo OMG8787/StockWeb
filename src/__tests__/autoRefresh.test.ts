@@ -39,7 +39,7 @@ describe("自動更新節奏（待在同一頁不動也要更新）", () => {
     expect(serverRefreshMs("/scoreboard", now)).toBe(SERVER_REFRESH_IDLE_MS);
     expect(serverRefreshMs("/", now)).toBe(SERVER_REFRESH_SHELL_MS);
     expect(serverRefreshMs("/highlights", now)).toBe(SERVER_REFRESH_SHELL_MS);
-    for (const p of ["/search", "/action", "/news", "/unlock", "/portfolio"]) expect(serverRefreshMs(p, now)).toBeNull();
+    for (const p of ["/search", "/action", "/news", "/login", "/portfolio"]) expect(serverRefreshMs(p, now)).toBeNull();
   });
 
   it("盤中節奏不比全站報價輪詢（30 秒）更密，避免大幅增加伺服器用量", () => {

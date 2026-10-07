@@ -1,38 +1,91 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
+import { hasPerm, routeAccess } from "@/lib/auth/permissions";
+import {
+  REVALIDATE_MS,
+  SESSION_COOKIE,
+  clearSessionCookies,
+  decodeSession,
+  writeSessionCookies,
+} from "@/lib/auth/sessionCookie";
+import { revalidate } from "@/lib/auth/accounts";
 
-// This site went from "public research tool" to "just for me and family" —
-// see PROGRESS.md's 2026-09-11 entry. A public URL with no gate meant the AI
-// chat handing out direct buy/sell language would be public investment
-// advice (a regulated activity in Taiwan) regardless of who the operator
-// intended the audience to be; a real access gate is what actually changes
-// that. Deliberately simple (one shared password, no accounts) since the
-// audience is a handful of known people, not a security boundary against a
-// determined attacker.
-export const UNLOCK_COOKIE = "site_unlocked";
+// 帳號制門禁（2026-10-07 起取代原本的共用密碼）：每個人用自己的帳號登入，
+// 依帳號權限決定能用哪些功能。網址需要哪個權限只寫在 lib/auth/permissions.ts。
+// 本站仍是只給特定人使用的私人工具（AI 會給出明確買賣建議，不能對公眾開放）。
 
-export function proxy(request: NextRequest) {
-  if (request.cookies.get(UNLOCK_COOKIE)?.value === "granted") {
-    return NextResponse.next();
-  }
+function isApi(pathname: string) {
+  return pathname.startsWith("/api/");
+}
 
+function toLogin(request: NextRequest): NextResponse {
+  const { pathname, search } = request.nextUrl;
+  if (isApi(pathname)) return NextResponse.json({ error: "未登入或登入已失效" }, { status: 401 });
   const url = request.nextUrl.clone();
-  url.pathname = "/unlock";
-  const next = request.nextUrl.pathname + request.nextUrl.search;
+  url.pathname = "/login";
+  const next = pathname + search;
   url.search = next === "/" ? "" : `?next=${encodeURIComponent(next)}`;
   return NextResponse.redirect(url);
 }
 
+function toAccount(request: NextRequest, query: string, apiError: string, status: number): NextResponse {
+  if (isApi(request.nextUrl.pathname)) return NextResponse.json({ error: apiError }, { status });
+  const url = request.nextUrl.clone();
+  url.pathname = "/account";
+  url.search = query;
+  return NextResponse.redirect(url);
+}
+
+/** 本機腳本（scripts/*.py、backtest、eval）用的服務金鑰：可讀一般功能，不能進管理頁。 */
+function isServiceRequest(request: NextRequest): boolean {
+  const key = process.env.SERVICE_API_KEY;
+  if (!key || key.length < 24) return false;
+  return request.headers.get("authorization") === `Bearer ${key}`;
+}
+
+export async function proxy(request: NextRequest, event: NextFetchEvent) {
+  const { pathname } = request.nextUrl;
+  const access = routeAccess(pathname);
+  if (access.kind === "public") return NextResponse.next();
+
+  if (isServiceRequest(request) && !pathname.startsWith("/admin") && !pathname.startsWith("/api/admin")) {
+    return NextResponse.next();
+  }
+
+  let session = decodeSession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) return toLogin(request);
+
+  let refreshed = false;
+  if (Date.now() - session.chk > REVALIDATE_MS) {
+    try {
+      const result = await revalidate(session);
+      if (result.touch) event.waitUntil(result.touch().catch(() => {}));
+      if (!result.payload) {
+        const res = toLogin(request);
+        clearSessionCookies(res);
+        return res;
+      }
+      session = result.payload;
+      refreshed = true;
+    } catch (err) {
+      // 試算表暫時連不上：沿用 cookie 裡的資料放行，下一次請求再確認（不因 Google 短暫故障把所有人登出）
+      console.warn("[proxy] 登入確認失敗，暫時沿用舊資料", err);
+    }
+  }
+
+  let res: NextResponse;
+  if (session.mcp && pathname !== "/account" && !pathname.startsWith("/api/auth/")) {
+    res = toAccount(request, "?force=1", "請先變更臨時密碼", 403);
+  } else if (!hasPerm(session.perms, access.need)) {
+    res = toAccount(request, `?denied=${encodeURIComponent(pathname)}`, "這個帳號沒有使用此功能的權限", 403);
+  } else {
+    res = NextResponse.next();
+  }
+  if (refreshed) writeSessionCookies(res, session);
+  return res;
+}
+
 export const config = {
-  // api/cron/* excluded too: Vercel's own cron trigger (and, for the new
-  // warm-cache route, an external GitHub Actions schedule) hits these with
-  // no browser session and never had the unlock cookie — this was silently
-  // breaking the existing daily-brief cron ever since this gate went in
-  // (confirmed: it was 307-redirecting to /unlock instead of running). Each
-  // cron route still checks its own CRON_SECRET when one is set, same as
-  // before this gate existed — being excluded here doesn't leave it
-  // unauthenticated, it just moves the check to where it already was.
-  matcher: [
-    "/((?!unlock|api/unlock|api/cron|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
-  ],
+  // api/cron/* 由 Vercel Cron 與 GitHub Actions 呼叫（沒有登入），各自檢查 CRON_SECRET。
+  matcher: ["/((?!api/cron|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.svg$).*)"],
 };

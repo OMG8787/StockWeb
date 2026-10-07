@@ -7,9 +7,10 @@
 - 想立刻重算彙總：curl "https://stock-web-blond.vercel.app/api/cron/learning?force=1"（有設 CRON_SECRET 要帶 Authorization）。
 """
 import json, sys, urllib.request
+from _site_auth import auth_headers
 
 SITE = "https://stock-web-blond.vercel.app"
-HEADERS = {"Cookie": "site_unlocked=granted", "User-Agent": "update-lessons"}
+HEADERS = auth_headers("update-lessons")
 
 sys.stdout.reconfigure(encoding="utf-8")
 

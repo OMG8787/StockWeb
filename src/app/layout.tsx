@@ -4,7 +4,8 @@ import SiteHeader from "@/components/SiteHeader";
 import ChatWidget from "@/components/ChatWidget";
 import PriceAlertWatcher from "@/components/PriceAlertWatcher";
 import PageAutoRefresh from "@/components/PageAutoRefresh";
-import AuthProvider from "@/components/AuthProvider";
+import RequirePerm from "@/components/RequirePerm";
+import { PERM } from "@/lib/auth/permissions";
 import WatchlistSync from "@/components/WatchlistSync";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { THEME_STORAGE_KEY } from "@/lib/theme";
@@ -30,7 +31,7 @@ export const metadata: Metadata = {
     title: TITLE,
     description: DESCRIPTION,
   },
-  robots: { index: true, follow: true },
+  robots: { index: false, follow: false },
 };
 
 // Runs before first paint so a dark-mode visitor never sees a light flash.
@@ -40,24 +41,22 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.str
 )});if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  // Google sign-in needs all three; if any is missing, auth is fully
-  // disabled — SessionProvider isn't even mounted, so no component ever
-  // calls useSession() without a provider, and no request ever reaches
-  // NextAuth's session handler without a secret configured for it.
-  const authEnabled = Boolean(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET && process.env.AUTH_SECRET);
-
   const body = (
     <>
-      <SiteHeader authEnabled={authEnabled} />
+      <SiteHeader />
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">{children}</main>
       <footer className="border-t border-(--gridline) py-6 text-center text-xs text-(--text-muted)">
         <p>本站資訊為公開資料整理與 AI 生成內容，僅供研究參考，不構成投資建議。</p>
         <p className="mt-1">股情雷達 StockRadar · Demo</p>
       </footer>
-      <ChatWidget />
+      <RequirePerm need={[PERM.AI_CHAT]}>
+        <ChatWidget />
+      </RequirePerm>
       <PriceAlertWatcher />
       <PageAutoRefresh />
-      {authEnabled && <WatchlistSync />}
+      <RequirePerm need={[PERM.WATCHLIST_SYNC]}>
+        <WatchlistSync />
+      </RequirePerm>
     </>
   );
 
@@ -95,7 +94,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col bg-(--page-plane) text-(--text-primary)">
-        {authEnabled ? <AuthProvider>{body}</AuthProvider> : body}
+        {body}
       </body>
     </html>
   );

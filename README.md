@@ -4,17 +4,23 @@
 
 用 Next.js (App Router) + TypeScript + Tailwind CSS 打造，圖表使用 [lightweight-charts](https://github.com/tradingview/lightweight-charts)。
 
-> **這不是公開 Demo，是有密碼保護的私人工具**（見下方「存取限制」），只有知道密碼的人（開發者跟家人）能用。這一點很重要：AI 問答會直接給「建議買進/賣出」「這檔目前偏多/偏空」這類具體個人看法與價位建議，這種內容如果對不特定多數人公開，在台灣屬於《證券投資顧問事業管理規則》規範的業務；靠密碼把使用者限定在少數已知的人，才是這個網站能這樣設計 AI 問答的前提。**如果之後把密碼保護拿掉、或網站變成任何人都能進來，AI 問答的系統提示詞（`src/lib/ai/ask.ts`）務必要改回客觀數據描述、不給具體買賣建議的版本。**
+> **這不是公開 Demo，是需要帳號登入的私人工具**（見下方「帳號與權限」），帳號只能由管理員建立。這一點很重要：AI 問答會直接給「建議買進/賣出」「這檔目前偏多/偏空」這類具體個人看法與價位建議，這種內容如果對不特定多數人公開，在台灣屬於《證券投資顧問事業管理規則》規範的業務；靠帳號把使用者限定在少數已知的人，才是這個網站能這樣設計 AI 問答的前提。**如果之後開放任何人註冊或拿掉登入，AI 問答的系統提示詞（`src/lib/ai/ask.ts`）務必要改回客觀數據描述、不給具體買賣建議的版本。**
 
-## 存取限制
+## 帳號與權限
 
-`src/proxy.ts`（Next.js 16 的 middleware）攔截所有頁面與大多數 API 路由：沒有 `site_unlocked` cookie 一律導去 `/unlock` 輸入密碼。密碼比對邏輯在 `src/app/api/unlock/route.ts`：
+架構參考 FonegleWeb：帳號、登入中的裝置、登入紀錄存在一份 **Google 試算表**（透過 `gas/Code.gs` 這支 Apps Script 讀寫），網站本身仍是 Next.js＋Vercel。
 
-```ts
-const SITE_PASSWORD = process.env.SITE_PASSWORD || "1118";
+```
+瀏覽器 ──> Next.js（proxy 擋請求、帳號規則、密碼雜湊）──> Apps Script（只讀寫表格，需 API_SECRET）──> Google 試算表
 ```
 
-正式站建議在 Vercel 環境變數設定 `SITE_PASSWORD` 覆蓋掉這個預設值；沒設定的話就是字面值 `"1118"`（本 repo 目前是**私人 repo**，所以這個字面值不會被公開讀到，但仍建議設定成真正的密鑰）。Vercel Cron 與 GitHub Actions 觸發的 `api/cron/*` 路由被排除在密碼閘門外（各自用自己的 `CRON_SECRET` 驗證）。
+- **一定要登入才能使用**，帳號只能由管理員在「👥 帳號與權限」（`/admin`）建立；建立時產生臨時密碼，對方第一次登入必須先改密碼。
+- **權限以功能模組授權**（唯一來源：`src/lib/auth/permissions.ts`）：13 最高管理員、3 系統管理、30 行情瀏覽、31 AI 問答、32 今日建議、33 AI 模擬組合、34 評等看板、35 關注清單同步；另有角色範本一鍵套用。proxy、導覽列、管理頁都讀同一份。
+- **每個帳號可設定投資策略**（目前只記錄與顯示，尚未影響 AI 建議內容）。
+- **管理員可看到登入狀態**：誰在線上（15 分鐘內有活動）、每台登入中的裝置、登入紀錄（含失敗嘗試），可強制登出單一裝置或整個帳號、停用帳號、重設密碼。權限調整與停用最慢 5 分鐘內生效。
+- 連續輸錯密碼 5 次會鎖 15 分鐘；試算表只存密碼雜湊與登入憑證雜湊。
+- `api/cron/*` 不需要登入（各自用 `CRON_SECRET` 驗證）；本機腳本用 `SERVICE_API_KEY` 呼叫正式站 API。
+- 部署步驟（建立試算表、貼上 Apps Script、設定環境變數、建立第一個管理員）：見 [docs/auth-setup.md](docs/auth-setup.md)。
 
 ## 功能
 
@@ -23,7 +29,7 @@ const SITE_PASSWORD = process.env.SITE_PASSWORD || "1118";
 - **搜尋 / 篩選** `/search`：台股、美股分頁切換，可依產業（多選，含本站自行整理的細分產業如 IC 載板/矽光子/記憶體，比官方大分類更細）、股價區間、漲跌幅、成交量、成交金額篩選與排序，另有「價量關係」偏多/偏空推論篩選。
 - **每日焦點榜單** `/highlights`：漲幅榜／跌幅榜／成交量榜／技術訊號共振股，台股、美股分開排名。
 - **重大新聞** `/news`：AI 從近期新聞裡挑出「可能影響大盤等級」的消息置頂，其餘一般新聞附全文摘要，無限捲動。
-- **我的關注**：預設用瀏覽器 localStorage 儲存自選股，可填入持有股數／購買價格，自動算損益平衡價（已計入台股買賣手續費 0.1425%×2、賣出證交稅 0.3%，捨去到整數元對齊真實券商計費方式）、投資金額、損益金額/百分比；持有股票自動排在最上面並可依投資金額/漲跌幅/損益%/細分產業排序，支援拖曳調整順序、匯出 CSV；設定 Google 登入後可跨裝置同步（見下方「帳號登入」）。
+- **我的關注**：預設用瀏覽器 localStorage 儲存自選股，可填入持有股數／購買價格，自動算損益平衡價（已計入台股買賣手續費 0.1425%×2、賣出證交稅 0.3%，捨去到整數元對齊真實券商計費方式）、投資金額、損益金額/百分比；持有股票自動排在最上面並可依投資金額/漲跌幅/損益%/細分產業排序，支援拖曳調整順序、匯出 CSV；有「關注清單同步」權限的帳號可跨裝置同步。
 - **AI 問答**：右下角浮動聊天視窗（支援語音輸入），多輪對話記憶，可針對目前瀏覽的個股、任何代碼/公司名、排行榜篩選（技術指標多重條件、本益比/殖利率/股價淨值比、法人買賣超等）提問，也能對關注清單整批做深度分析（持有/未持有分開講、給具體價位建議與理由）。
 - **到價提醒**：設定股價到達某個區間時的網頁內提醒（localStorage，尚未接外部通知管道）。
 - **深色模式**：右上角手動切換，選擇會記住在瀏覽器；未手動選擇時跟隨系統設定。
@@ -71,7 +77,7 @@ GEMINI_API_KEY=xxxx
 
 ### AI 回答回饋（👍／👎）
 
-聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因）／📝回報（自由描述問題或建議，可打字或語音，最多 1000 字），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：登入後（或帶 `site_unlocked=granted` cookie）`GET /api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report），回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
+聊天視窗每則 AI 回答下方有 👍／👎（👎 可選填原因）／📝回報（自由描述問題或建議，可打字或語音，最多 1000 字），使用者真的按了才會 POST `/api/ask-feedback`，寫進 Redis list `ask-feedback:v1`（LPUSH＋LTRIM 只留最近 300 筆，每次回饋 1 次 pipeline、2 個指令；問答本身不寫任何東西）。開發者查看：以帳號登入（需 AI 問答權限）或帶 `Authorization: Bearer $SERVICE_API_KEY``GET /api/ask-feedback?limit=50&rating=down`（rating 可為 up／down／report），回傳新到舊的 JSON。沒設 Redis 時 POST 安靜略過、GET 回空陣列。
 
 ### 共用快取（Redis，選用但正式站已設定）
 
@@ -84,17 +90,9 @@ GEMINI_API_KEY=xxxx
 
 任何一個 Redis 讀寫失敗都會自動退回即時重新抓資料，不會讓頁面壞掉。
 
-## 帳號登入（選用，Google 一鍵登入）
+## 關注清單跨裝置同步
 
-預設不需要登入即可使用全部功能（自選股存在瀏覽器 localStorage）。設定好下面三個環境變數後，右上角會出現「使用 Google 登入」按鈕，登入後自選股會同步到帳號，換裝置/換瀏覽器登入同一個 Google 帳號就能看到同一份清單。三個變數只要有一個沒設定，登入按鈕就不會顯示，網站其餘功能完全不受影響。
-
-1. 到 [Google Cloud Console → API 憑證](https://console.cloud.google.com/apis/credentials) 建立一組 **OAuth 用戶端 ID**（應用程式類型選「網頁應用程式」），「已授權的重新導向 URI」填：
-   - 正式站：`https://你的網域/api/auth/callback/google`
-   - 本機開發：`http://localhost:3000/api/auth/callback/google`
-2. 把取得的用戶端 ID / 密碼填進環境變數：`AUTH_GOOGLE_ID`、`AUTH_GOOGLE_SECRET`
-3. `AUTH_SECRET`：任意隨機字串（可用 `npx auth secret` 產生），用來加密登入 session
-
-**跨裝置同步需要「共用快取」章節提到的 Redis** 來存放每個帳號的自選股清單；只設定登入、沒設定 Redis 的話，登入功能本身仍然正常，但自選股不會真的跨裝置同步（`/api/watchlist` 會回報 `syncAvailable: false`）。首次登入時，會把「這台裝置當下的本機清單」與「帳號裡已同步的清單」取聯集合併，之後每次加入/移除都會即時推上雲端。
+有「關注清單同步」（35）權限的帳號，自選股會同步到帳號，換裝置登入同一個帳號就能看到同一份清單。**需要「共用快取」章節提到的 Redis** 來存放（鍵為 `watchlist:user:<UserId>`）；沒設定 Redis 時 `/api/watchlist` 會回報 `syncAvailable: false`，清單只存在這台瀏覽器。登入後會把「這台裝置當下的本機清單」與「帳號裡已同步的清單」取聯集合併，之後每次加入/移除都會即時推上雲端。
 
 ## 開發
 
@@ -116,12 +114,12 @@ npm test        # 單元測試（vitest，純函式、不打真實網路）
 ```
 src/
   app/
-    page.tsx / action/ / stock/[symbol]/ / search/ / highlights/ / news/ / unlock/
+    page.tsx / action/ / stock/[symbol]/ / search/ / highlights/ / news/ / login/ / account/ / admin/
     api/
       quote/[symbol]/ chart/[symbol]/ search/ sectors/ indices/ taifex-futures/
       symbol-lookup/ momentum/ ask/ daily-brief/ action-brief/ news-feed/
-      watchlist/ auth/[...nextauth]/ unlock/ cron/{daily-brief,warm-cache,backfill-volume-history}/
-  proxy.ts                  全站密碼保護閘門（Next.js 16 middleware）
+      watchlist/ auth/{login,logout,password,setup}/ admin/{users,reset-password,kick}/ cron/{daily-brief,warm-cache,backfill-volume-history}/
+  proxy.ts                  帳號登入與權限閘門（Next.js 16 middleware；規則在 lib/auth/permissions.ts）
   components/               UI 元件（StockChart、ChatWidget、WatchlistTable、TaifexFuturesCard 等）
   lib/
     data/                   資料層——所有股票資料的唯一進出口

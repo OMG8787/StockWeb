@@ -6,10 +6,11 @@
 CLAUDE.md「AI 回饋自動檢查」規則要求每次對話都跑一次。
 """
 import json, sys, urllib.request
+from _site_auth import auth_headers
 from datetime import datetime, timezone, timedelta
 
 URL = "https://stock-web-blond.vercel.app/api/ask-feedback?limit=300"
-req = urllib.request.Request(URL, headers={"Cookie": "site_unlocked=granted"})
+req = urllib.request.Request(URL, headers=auth_headers("check-feedback"))
 data = json.load(urllib.request.urlopen(req, timeout=30))
 items = data.get("items", [])
 since = sys.argv[1] if len(sys.argv) > 1 else None

@@ -4,6 +4,8 @@ import MarketTabs from "@/components/MarketTabs";
 import MacroCard from "@/components/MacroCard";
 import WatchlistSection from "@/components/WatchlistSection";
 import DailyBriefCard from "@/components/DailyBriefCard";
+import RequirePerm from "@/components/RequirePerm";
+import { PERM } from "@/lib/auth/permissions";
 import SimPortfolioCard from "@/components/simPortfolio/SimPortfolioCard";
 import LiveIndices from "@/components/LiveIndices";
 import LiveMoversBoard from "@/components/LiveMoversBoard";
@@ -88,7 +90,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <DailyBriefCard />
+      <RequirePerm need={[PERM.ACTION]}>
+        <DailyBriefCard />
+      </RequirePerm>
 
       <section>
         <h2 className="mb-3 text-lg font-semibold">大盤指數</h2>

@@ -4,6 +4,8 @@ import ChipsRatioSummary, { ChipsRatioSummarySkeleton } from "@/components/Chips
 import type { Metadata } from "next";
 import StockChart from "@/components/StockChartLazy";
 import AskAboutButton from "@/components/AskAboutButton";
+import RequirePerm from "@/components/RequirePerm";
+import { PERM } from "@/lib/auth/permissions";
 import WatchlistButton from "@/components/WatchlistButton";
 import FundamentalsCard from "@/components/FundamentalsCard";
 import EarningsCard from "@/components/EarningsCard";
@@ -97,7 +99,9 @@ export default async function StockDetailPage({ params, searchParams }: PageProp
               </span>
             </div>
           </div>
-          <AskAboutButton symbol={quote.symbol} market={quote.market} name={quote.name} />
+          <RequirePerm need={[PERM.AI_CHAT]}>
+            <AskAboutButton symbol={quote.symbol} market={quote.market} name={quote.name} />
+          </RequirePerm>
         </div>
 
         {/* 融資使用率／外資持股比例／大戶持股比例：放在價格正下方、開高低收格子之前，

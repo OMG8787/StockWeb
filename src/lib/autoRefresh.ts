@@ -42,7 +42,7 @@ export const SERVER_REFRESH_SHELL_MS = 5 * 60_000;
  *  - /stock/*：基本面（本益比隨股價）、五檔、籌碼、財報、重大訊息——盤中 60 秒、其餘 10 分鐘。
  *  - /scoreboard：每日學習彙總，10 分鐘。
  *  - /、/highlights：5 分鐘（只剩總經卡與市場狀態徽章是伺服器渲染；報價與榜單由用戶端 30 秒輪詢）。
- *  - /search、/action、/news、/unlock 與其他：伺服器端只有外殼，內容全是用戶端抓取，不需要。
+ *  - /search、/action、/news、/login 與其他：伺服器端只有外殼，內容全是用戶端抓取，不需要。
  */
 export function serverRefreshMs(pathname: string, now: Date = new Date()): number | null {
   if (pathname.startsWith("/stock/")) return isAnyMarketLive(now) ? SERVER_REFRESH_LIVE_MS : SERVER_REFRESH_IDLE_MS;

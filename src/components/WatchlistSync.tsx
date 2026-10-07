@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useSession } from "next-auth/react";
 import { WATCHLIST_CHANGED_EVENT, getWatchlist, replaceWatchlist, type WatchlistItem } from "@/lib/watchlist";
 
 function mergeByKey(a: WatchlistItem[], b: WatchlistItem[]): WatchlistItem[] {
@@ -19,7 +18,8 @@ function pushToServer() {
 }
 
 /**
- * Headless — mounted once near the app root. On sign-in, merges this
+ * Headless — mounted once near the app root (signed-in users with the
+ * watchlist-sync permission only). On mount, merges this
  * device's local (localStorage) watchlist with whatever's already stored
  * for the account (union, never a destructive overwrite, so a fresh device
  * never wipes out an existing account watchlist or vice versa), then keeps
@@ -29,11 +29,11 @@ function pushToServer() {
  * sign-in existed.
  */
 export default function WatchlistSync() {
-  const { status } = useSession();
+  // 只在有「關注清單同步」權限時掛載（見 layout.tsx 的 RequirePerm），掛載＝已登入
   const mergedRef = useRef(false);
 
   useEffect(() => {
-    if (status !== "authenticated" || mergedRef.current) return;
+    if (mergedRef.current) return;
     mergedRef.current = true;
     (async () => {
       try {
@@ -48,13 +48,12 @@ export default function WatchlistSync() {
         // sync is best-effort; local watchlist keeps working regardless
       }
     })();
-  }, [status]);
+  }, []);
 
   useEffect(() => {
-    if (status !== "authenticated") return;
     window.addEventListener(WATCHLIST_CHANGED_EVENT, pushToServer);
     return () => window.removeEventListener(WATCHLIST_CHANGED_EVENT, pushToServer);
-  }, [status]);
+  }, []);
 
   return null;
 }

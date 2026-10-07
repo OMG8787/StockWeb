@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { sessionFrom } from "@/lib/auth/server";
 import { getServerWatchlist, setServerWatchlist, watchlistSyncAvailable } from "@/lib/watchlistStore";
 import type { WatchlistItem } from "@/lib/watchlist";
 import { isValidSaleDate, sanitizeSales } from "@/lib/soldRecords";
@@ -42,21 +42,20 @@ function normalize(item: WatchlistItem): WatchlistItem {
   };
 }
 
-export async function GET() {
-  const session = await auth();
-  const email = session?.user?.email;
-  if (!email) return NextResponse.json({ error: "未登入" }, { status: 401 });
+// 以帳號內部編號（UserId）當儲存鍵；舊版 Google 登入用 email 存的資料不會自動搬移。
+export async function GET(req: NextRequest) {
+  const userId = sessionFrom(req)?.uid;
+  if (!userId) return NextResponse.json({ error: "未登入" }, { status: 401 });
   if (!watchlistSyncAvailable) {
     return NextResponse.json({ items: [], syncAvailable: false });
   }
-  const items = await getServerWatchlist(email);
+  const items = await getServerWatchlist(userId);
   return NextResponse.json({ items, syncAvailable: true });
 }
 
 export async function PUT(req: NextRequest) {
-  const session = await auth();
-  const email = session?.user?.email;
-  if (!email) return NextResponse.json({ error: "未登入" }, { status: 401 });
+  const userId = sessionFrom(req)?.uid;
+  if (!userId) return NextResponse.json({ error: "未登入" }, { status: 401 });
   if (!watchlistSyncAvailable) {
     return NextResponse.json({ error: "尚未設定共用儲存，無法跨裝置同步" }, { status: 503 });
   }
@@ -68,7 +67,7 @@ export async function PUT(req: NextRequest) {
   }
   const items: WatchlistItem[] = body.items.filter(isWatchlistItem).map(normalize);
 
-  const ok = await setServerWatchlist(email, items);
+  const ok = await setServerWatchlist(userId, items);
   if (!ok) return NextResponse.json({ error: "儲存失敗，請稍後再試" }, { status: 503 });
   return NextResponse.json({ items });
 }

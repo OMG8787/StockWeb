@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { CheckResult, EvalCase } from "./types";
+import { siteAuthHeaders } from "../siteAuth";
 import { CASE_GAP_MS, arg, callVariant, captureCase, judge, log, postProcess, regenerateWith, sleep, type Captured } from "./runtime";
 import { extractCardLine, extractStockSegment, gradeEntryStock, type EntryStock } from "./entryGraders";
 
@@ -190,7 +191,7 @@ async function collectCard(entry: "card-prod" | "card-local", saved: Saved, stoc
   let model = "";
   try {
     if (entry === "card-prod") {
-      const res = await fetch(`${SITE}/api/action-brief`, { headers: { Cookie: "site_unlocked=granted" }, signal: AbortSignal.timeout(90_000) });
+      const res = await fetch(`${SITE}/api/action-brief`, { headers: siteAuthHeaders(), signal: AbortSignal.timeout(90_000) });
       const d = (await res.json()) as { actionBrief?: { text: string; model?: { name: string }; fellBackToLite?: boolean } };
       text = d.actionBrief?.text ?? "";
       model = `${d.actionBrief?.model?.name ?? "（程式版）"}${d.actionBrief?.fellBackToLite ? "（較強模型額度用完，退回 lite）" : ""}`;

@@ -6,11 +6,12 @@
 寫入端：src/lib/simPortfolio/run.ts、archive.ts。
 """
 import json, sys, urllib.request
+from _site_auth import auth_headers
 from collections import Counter
 from datetime import datetime, timezone, timedelta
 
 SITE = "https://stock-web-blond.vercel.app"
-HEADERS = {"Cookie": "site_unlocked=granted", "User-Agent": "check-sim-portfolio"}
+HEADERS = auth_headers("check-sim-portfolio")
 TPE = timezone(timedelta(hours=8))
 
 sys.stdout.reconfigure(encoding="utf-8")

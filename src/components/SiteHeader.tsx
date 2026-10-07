@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useBriefStance } from "./ActionBriefHeading";
 import ThemeToggle from "./ThemeToggle";
-import AuthButton from "./AuthButton";
+import UserMenu from "./UserMenu";
+import { canSeePath } from "@/lib/auth/permissions";
+import { useProfile } from "@/lib/auth/useProfile";
 
 interface SymbolSuggestion {
   symbol: string;
@@ -47,10 +49,14 @@ function isTwStockCode(input: string): boolean {
 
 const SUGGEST_DEBOUNCE_MS = 200;
 
-export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
+export default function SiteHeader() {
   // 「今日建議」在 14:30 後到隔天開盤前改叫「明日操作建議」（跟 /action 頁首、卡片同一個判斷，見 tradingStance.ts）。
   const briefTitle = useBriefStance().briefTitle;
-  const navItems = NAV_ITEMS.map((item) => (item.href === "/action" ? { ...item, label: briefTitle } : item));
+  // 只顯示這個帳號有權限的項目；未登入（登入頁）時不顯示導覽與搜尋
+  const profile = useProfile();
+  const navItems = NAV_ITEMS.filter((item) => profile && canSeePath(profile.perms, item.href)).map((item) =>
+    item.href === "/action" ? { ...item, label: briefTitle } : item,
+  );
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
@@ -223,6 +229,7 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
           ))}
         </nav>
 
+        {profile ? (
         <div ref={boxRef} className="relative ml-auto flex-1 max-w-sm">
           <form onSubmit={handleSubmit}>
             <input
@@ -284,7 +291,10 @@ export default function SiteHeader({ authEnabled }: { authEnabled: boolean }) {
             </ul>
           ) : null}
         </div>
-        {authEnabled && <AuthButton />}
+        ) : (
+          <div className="ml-auto" />
+        )}
+        <UserMenu />
         <ThemeToggle />
       </div>
       {/* overflow-x-auto + whitespace-nowrap: 5 nav items no longer fit an

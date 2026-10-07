@@ -383,9 +383,16 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **環境變數裡有付費服務金鑰就被自動使用**：按量計費的供應商必須另有 opt-in 開關（Claude 需 `ALLOW_PAID_AI=true`）；新增服務前先確認免費。→ CLAUDE.md「專案最高原則：零花費」。
 - **GitHub Actions 預熱排程沒照「每5分鐘」跑**：免費排程常延遲數小時或丟棄，不能當主力；主力是 SWR（過期先回舊資料、背景重算），預熱改由 cron-job.org 觸發，回應期限 25 秒以配合其 30 秒逾時。→ PROGRESS-ARCHIVE.md 工作日誌 2026-10-04，搜尋「cron-job」。
 
-## 接手狀態（CLAUDE.md 規則十；最後更新 2026-10-07 14:25 台北，使用者告知用量 90%，完整存檔）
+## 接手狀態（CLAUDE.md 規則十；最後更新 2026-10-07 17:40 台北）
 
-**進行中**
+**新方向（2026-10-07 下午，使用者在新裝置／新 GitHub 帳號 OMG8787 接手）：重構整個框架**
+- 使用者原話：「我需要重構整個框架」「幫我先去讀取 D:\claude\FonegleWeb 框架，我要將網站改成這樣，可以自由選擇登入。管理員可以看到登入狀態，不同使用者有不同權限、策略、功能等。先幫我把網頁改成這種框架，之後會再開一個試算表」「發布的部分可以先暫緩，我要先改好程式碼」。
+- 使用者決定：混合式（股票功能留 Next.js＋Vercel，帳號／權限／登入紀錄改用 Google 試算表＋Apps Script）；**一定要登入才能用**；**只有管理員能開帳號**；先寫好 Apps Script，試算表之後使用者自己建。
+- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）。**待使用者**：①建 Google 試算表、貼 gas/Code.gs、部署，把 /exec 網址與 API_SECRET 給我（步驟 docs/auth-setup.md）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
+- **安全待辦**：OMG8787/StockWeb 是 public repo（金鑰掃描全部歷史未發現外洩），建議改 Private；舊正式站的預設密碼與 `site_unlocked=granted` 偽造 cookie 漏洞會在新版部署後消失。
+- 本機開發：沒設 AUTH_GAS_URL 時用 .cache/auth-dev-store.json 當假資料庫；這台電腦沒有 .env.local（check-feedback.py 等腳本目前無法執行；新版腳本改用 SERVICE_API_KEY，舊正式站不認這把金鑰）。
+
+**進行中（舊，10/7 14:25 前）**
 1. 消融實驗與權重最佳化（Opus，`0fb5360` 工具已提交）：切分 A＝訓練 2024-10～2025-06／驗證 2025-08～2026-01／測試 2026-03～2026-08；B＝訓練 2022～2023／驗證 2024-02～2025-06／測試 2025-08～2026-08；樣本外 2022～2024 最終測試。結果至今：A、B 門檻版搜尋在驗證集都選回「現行」（A 訓練好、驗證變差；B 弱市段買進占比 6% 低於事先定的 8%）。事先登錄假設 H1「大盤 60 日<0% 不買」待測試段一次評估。本益比／殖利率歷史下載中（FinMind，約 1.5 小時），之後做加權版。中間結果 scratchpad\ablation\，報告 docs/backtest/2026-10-ablation.md（可能仍是草稿）。**若被中斷：用 SendMessage 接續同一 agent，或照報告與 scratchpad 接手。不改正式程式，除非通過事先寫死的上線條件。**
 
 **今天（10/7）已完成上線**
@@ -463,6 +470,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-07（晚）：框架重構第一階段——帳號制（參考 FonegleWeb）
+- 全站共用密碼改成帳號制：帳號／登入中的裝置／登入紀錄存 Google 試算表（`gas/Code.gs` 只做有金鑰保護的通用表格讀寫），帳號規則、scrypt 密碼雜湊、權限判斷都在 Next.js（`src/lib/auth/`）；本機無試算表時用 JSON 檔模擬同一組操作。理由：使用者要 Fonegle 式「管理員開帳號、不同帳號不同權限／策略、看得到登入狀態」，股票功能仍需伺服器所以採混合式。
+- 權限唯一來源 `lib/auth/permissions.ts`（13/3/30～35＋角色範本＋網址對應），proxy、導覽列、管理頁、RequirePerm 共用；登入 cookie HMAC 簽章，每 5 分鐘回試算表確認（停用／強制登出／改權限最慢 5 分鐘生效）；連錯 5 次鎖 15 分鐘；臨時密碼首次登入強制改密碼。新頁 /login（無帳號時變「建立第一個管理員」，正式環境需 ADMIN_SETUP_CODE）、/account、/admin（帳號與權限、登入狀態、登入紀錄）。移除 next-auth、/unlock；關注清單同步改以 UserId 為鍵；本機腳本改用 SERVICE_API_KEY。
+- 驗證：tsc、全部 636 測試（新增 authAccounts 11 項）通過；本機 dev curl 端到端（未登入 401／導登入、偽造舊 cookie 無效、臨時密碼強制改密、權限 403、權限變更與停用在重新確認時生效、登出）全過；獨立 Sonnet agent 本機瀏覽器驗證進行中。
 
 ### 2026-10-06 晚～10-07 凌晨：評等穩定化上線、四入口比較、KD 換券商版、圖表指標
 - 評等穩定化整包 `e169654`：新結論連 2 交易日確認、程式把握程度（高＝大盤不弱且建議買進連續≥3 日，樣本外 20 日 +1.01% t 2.63）、持有建議單一動作、評等變動說明；評測新舊皆過。Lite 下限改版（51b4087）前後比較：gemini 97→99%、nvidia 95→97%，保留。
@@ -649,5 +661,6 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 - 本機 Windows PC：對外網路正常、可連正式站；Node.js LTS 已用 winget 安裝；Playwright＋Chromium 裝在系統暫存資料夾（非專案內）。
 - `node_modules` 與暫存資料夾裡的 playwright npm 套件**不會一直保留**，接手時若 `npm run build` 找不到 next，先 `npm install`；Playwright 不見就重裝 npm 套件（瀏覽器本體通常還在）。
-- `origin` 已改成 `https://hj110b13-Andy@github.com/hj110b13-Andy/Stock-web.git`，避免 Git Credential Manager 跳出選帳號視窗；若又跳出請使用者選一次。repo 本地 git 身分＝`hj110b13-Andy <hj110b13@gmail.com>`（否則 Vercel 會擋部署）。
+- **2026-10-07 起**：repo 改為 `https://github.com/OMG8787/StockWeb.git`（public），本地 git 身分 OMG8787。Vercel 正式站仍綁舊的 `hj110b13-Andy/Stock-web`（private），推到新 repo **不會**觸發部署；要在 OMG8787 的 Vercel 重新匯入或改接 Git（使用者決定先暫緩）。這台 Windows 使用者目錄是 C:\Users\jason（CLAUDE.md 規則十的 C:/Users/88691 用量檔是舊裝置路徑）。
+- （舊）`origin` 曾是 `hj110b13-Andy/Stock-web`，git 身分須為 hj110b13-Andy 否則 Vercel 擋部署。
 - 2026-09-11 的完整原始紀錄已搬到 PROGRESS-ARCHIVE.md（搜尋「這次的環境變化」）。

@@ -2,12 +2,13 @@
  * 回測資料下載（只補本機快取沒有的）：
  *   npx tsx scripts/backtest/fetch.ts
  *
- * - 日K：正式站 /api/chart/{代號}?range=6m&market=TW（帶 site_unlocked cookie）。
+ * - 日K：正式站 /api/chart/{代號}?range=6m&market=TW（帶服務金鑰，見 scripts/siteAuth.ts）。
  * - 三大法人：證交所 T86（每個訊號日一份）。
  * 證交所對連續請求會限流（428/503，曾擋 30 分鐘以上）：一律循序、每筆間隔 3 秒，失敗就停，不重試轟炸。
  */
 import fs from "node:fs";
 import path from "node:path";
+import { siteAuthHeaders } from "../siteAuth";
 import { CACHE_DIR, CHART_RANGE, REVENUE_MONTHS, SIGNAL_DATES, SITE, T86_LOOKBACK_DAYS, UNIVERSE } from "./config";
 
 const GAP_MS = 3000;
@@ -28,7 +29,7 @@ async function main() {
   for (const sym of UNIVERSE) {
     const fn = path.join(chartDir, `${sym}.json`);
     if (fs.existsSync(fn)) continue;
-    const data = await getJson(`${SITE}/api/chart/${sym}?range=${CHART_RANGE}&market=TW`, { Cookie: "site_unlocked=granted" });
+    const data = await getJson(`${SITE}/api/chart/${sym}?range=${CHART_RANGE}&market=TW`, siteAuthHeaders());
     fs.writeFileSync(fn, JSON.stringify(data));
     console.log(`日K ${sym} OK`);
     await sleep(GAP_MS);

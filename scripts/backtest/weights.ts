@@ -15,6 +15,7 @@
  * 只新增這個檔案，不改 run.ts／wide*.ts 既有行為（只 import wideData.ts 的唯讀載入函式）。
  */
 import type { Candle } from "@/lib/data/types";
+import { siteAuthHeaders } from "../siteAuth";
 import { computeRatingCore } from "@/lib/ai/ratingCore";
 import { ACTIVE_CHASE_GUARDS } from "@/lib/ai/chaseGuards";
 import { computeRatingFeatures, featureBases, similarKey } from "@/lib/ai/learning/features";
@@ -86,7 +87,7 @@ function loadChipsCached(d: string) {
 }
 
 async function buildFromSite(): Promise<EvalRecord[]> {
-  const res = await fetch(`${SITE}/api/learning?records=1`, { headers: { Cookie: "site_unlocked=granted" } });
+  const res = await fetch(`${SITE}/api/learning?records=1`, { headers: siteAuthHeaders() });
   const j = (await res.json()) as { items?: EvalRecord[] };
   return (j.items ?? []).filter((r) => r.o["5"]?.brw != null);
 }
