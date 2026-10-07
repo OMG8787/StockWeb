@@ -41,8 +41,30 @@ const TABLES = {
         key: 'ID',
         cols: ['ID', 'Account', 'UserName', 'Market', 'Symbol', 'StockName', 'HoldStatus', 'Shares', 'CostBasis', 'BuyDate',
             'SalesCount', 'UpdatedAt', 'BuyDateSrc', 'Order', 'Sales', 'UserId']
-    }
+    },
+    // 參考指標、策略庫、模擬倉（每個帳號自己的）
+    Indicators: { key: 'ID', cols: ['ID', 'Account', 'Name', 'TypeId', 'Summary', 'Params', 'Note', 'CreatedAt', 'UpdatedAt', 'UserId'] },
+    Strategies: { key: 'ID', cols: ['ID', 'Account', 'Name', 'Mode', 'Summary', 'Config', 'Note', 'CreatedAt', 'UpdatedAt', 'UserId'] },
+    Sims: {
+        key: 'ID',
+        cols: ['ID', 'Account', 'Name', 'StrategyId', 'Universe', 'MarketTopN', 'InitialCash', 'Cash', 'Equity', 'ReturnPct',
+            'AutoTrade', 'LastRunDay', 'LastRunNote', 'Symbols', 'Positions', 'CreatedAt', 'UpdatedAt', 'UserId']
+    },
+    SimTrades: {
+        key: 'ID',
+        cols: ['ID', 'SimId', 'Account', 'Day', 'At', 'Side', 'Market', 'Symbol', 'Name', 'Shares', 'Price', 'Fee', 'Pnl', 'Source', 'Reason', 'UserId']
+    },
+    SimNav: { key: 'ID', cols: ['ID', 'SimId', 'Day', 'Equity', 'Cash', 'IndexClose', 'UserId'] }
 };
+
+// 之後新增的資料表不必再改這支程式：名稱符合規則就接受，主鍵一律 ID、欄位依寫入資料自動建立
+const GENERIC_TABLE_NAME = /^[A-Z][A-Za-z0-9]{2,40}$/;
+
+function tableDef_(name) {
+    if (TABLES[name]) return TABLES[name];
+    if (GENERIC_TABLE_NAME.test(name)) return { key: 'ID', cols: ['ID'] };
+    return null;
+}
 
 // 表頭的中文說明（滑鼠移到表頭上會顯示）
 const COLUMN_NOTES = {
@@ -72,7 +94,16 @@ const COLUMN_NOTES = {
     HoldStatus: '持有中／關注／已賣出',
     Shares: '持有股數（股，不是張）',
     CostBasis: '平均成本（每股）',
-    Sales: '賣出紀錄（JSON，網站自動維護，請勿手動修改）'
+    Sales: '賣出紀錄（JSON，網站自動維護，請勿手動修改）',
+    TypeId: '指標類型（程式代碼）',
+    Params: '指標參數（JSON，請在網站修改）',
+    Config: '策略設定（JSON，請在網站修改）',
+    Mode: 'rules＝條件式；score＝加權計分',
+    Universe: 'list＝自選清單；market＝全市場成交量前 N 名',
+    Positions: '目前持股（JSON，網站自動維護）',
+    Side: 'buy＝買進；sell＝賣出',
+    Source: 'auto＝依策略自動；manual＝手動下單',
+    Pnl: '賣出的已實現損益（已扣手續費、證交稅）'
 };
 
 // ============================================================
@@ -95,7 +126,7 @@ function doPost(e) {
         return json_({ success: false, message: '驗證失敗', code: 'AUTH' });
 
     const ops = Array.isArray(req.ops) ? req.ops : [];
-    if (!ops.length || ops.length > 50) return json_({ success: false, message: '操作數量錯誤' });
+    if (!ops.length || ops.length > 300) return json_({ success: false, message: '操作數量錯誤' });
 
     const lock = LockService.getScriptLock();
     try {
@@ -113,7 +144,8 @@ function doPost(e) {
 
 function runOp_(op) {
     const name = String(op.table || '');
-    if (!TABLES[name]) throw new Error('未知的資料表：' + name);
+    const def = tableDef_(name);
+    if (!def) throw new Error('未知的資料表：' + name);
     const sheet = sheet_(name);
 
     switch (op.op) {
@@ -123,13 +155,13 @@ function runOp_(op) {
             appendRow_(sheet, op.row || {});
             return true;
         case 'update': {
-            const found = findRow_(sheet, TABLES[name].key, op.key);
+            const found = findRow_(sheet, def.key, op.key);
             if (!found) return false;
             writeRow_(sheet, found.row, op.patch || {});
             return true;
         }
         case 'delete': {
-            const found = findRow_(sheet, TABLES[name].key, op.key);
+            const found = findRow_(sheet, def.key, op.key);
             if (!found) return false;
             sheet.deleteRow(found.row);
             return true;
@@ -202,7 +234,7 @@ function sheet_(name) {
         sheet = ss.insertSheet(name);
         // 全部以純文字儲存，避免帳號「0050」被轉成數字、時間被轉成日期
         sheet.getRange('A:Z').setNumberFormat('@');
-        ensureCols_(sheet, TABLES[name].cols);
+        ensureCols_(sheet, tableDef_(name).cols);
     }
     return sheet;
 }

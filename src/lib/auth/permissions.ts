@@ -15,6 +15,7 @@ export const PERM = {
   ACTION: 32,
   SIM_PORTFOLIO: 33,
   SCOREBOARD: 34,
+  STRATEGY_LAB: 36,
   // 35（關注清單同步）2026-10-07 取消：關注清單與庫存一律綁定帳號，試算表裡殘留的 35 會被 parsePerms 忽略
 } as const;
 
@@ -28,12 +29,13 @@ export const PERMISSION_LIST: Array<{ code: PermCode; label: string; detail: str
   { code: PERM.ACTION, label: "今日建議", detail: "今日建議／明日操作、每日快報" },
   { code: PERM.SIM_PORTFOLIO, label: "AI 模擬組合", detail: "AI 模擬投資組合" },
   { code: PERM.SCOREBOARD, label: "評等看板", detail: "評等紀錄、勝率統計、學習紀錄" },
+  { code: PERM.STRATEGY_LAB, label: "模擬倉與策略", detail: "自己的模擬倉、策略庫、參考指標" },
 ];
 
 export const ROLE_TEMPLATES: Array<{ id: string; label: string; perms: PermCode[] }> = [
-  { id: "admin", label: "管理員", perms: [PERM.ADMIN, PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD] },
-  { id: "advanced", label: "進階使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD] },
-  { id: "basic", label: "一般使用者", perms: [PERM.MARKET, PERM.AI_CHAT] },
+  { id: "admin", label: "管理員", perms: [PERM.ADMIN, PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD, PERM.STRATEGY_LAB] },
+  { id: "advanced", label: "進階使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD, PERM.STRATEGY_LAB] },
+  { id: "basic", label: "一般使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.STRATEGY_LAB] },
   { id: "viewer", label: "只看行情", perms: [PERM.MARKET] },
 ];
 
@@ -95,6 +97,7 @@ const ROUTE_RULES: Array<{ prefixes: string[]; need: PermCode[] }> = [
   { prefixes: ["/action", "/api/action-brief", "/api/daily-brief", "/api/brief-archive"], need: [PERM.ACTION] },
   { prefixes: ["/portfolio", "/api/sim-portfolio"], need: [PERM.SIM_PORTFOLIO] },
   { prefixes: ["/scoreboard", "/api/rating-log", "/api/learning"], need: [PERM.SCOREBOARD] },
+  { prefixes: ["/sim", "/strategies", "/indicators", "/api/strategy"], need: [PERM.STRATEGY_LAB] },
   { prefixes: ["/api/ask"], need: [PERM.AI_CHAT] }, // 含 /api/ask-feedback（AI 回答回饋與網站回報）
 ];
 

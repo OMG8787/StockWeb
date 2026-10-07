@@ -7,7 +7,17 @@ import path from "node:path";
  * 「通用表格讀寫」，帳號規則全部在 accounts.ts，所以本機測到的行為就是正式行為。
  */
 
-export type TableName = "Users" | "Sessions" | "LoginLog" | "Feedback" | "Holdings";
+export type TableName =
+  | "Users"
+  | "Sessions"
+  | "LoginLog"
+  | "Feedback"
+  | "Holdings"
+  | "Indicators"
+  | "Strategies"
+  | "Sims"
+  | "SimTrades"
+  | "SimNav";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
@@ -16,6 +26,11 @@ export const TABLE_KEYS: Record<TableName, string> = {
   LoginLog: "ID",
   Feedback: "ID",
   Holdings: "ID",
+  Indicators: "ID",
+  Strategies: "ID",
+  Sims: "ID",
+  SimTrades: "ID",
+  SimNav: "ID",
 };
 
 export type StoreOp =
@@ -90,7 +105,9 @@ export class MemoryStore implements TableStore {
   }
 
   private async load(): Promise<Record<TableName, Row[]>> {
-    const empty = { Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [] };
+    const empty: Record<TableName, Row[]> = {
+      Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [], Indicators: [], Strategies: [], Sims: [], SimTrades: [], SimNav: [],
+    };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);
     try {

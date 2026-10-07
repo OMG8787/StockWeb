@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/daily-brief",
       "schedule": "50 0 * * *"
+    },
+    {
+      "path": "/api/cron/sims",
+      "schedule": "40 8 * * 1-5"
     }
   ]
 }
