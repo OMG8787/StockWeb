@@ -117,7 +117,7 @@ export function classifyQuestion(input: QuestionClassInput): QuestionClass {
     return make("screen-concept", concepts);
   }
   if (DEFINITION_PATTERN.test(q) && !/推薦|哪些股票|哪幾檔|名單/.test(q)) return make("general-knowledge");
-  if ((MARKET_SUBJECT_PATTERN.test(q) && OUTLOOK_ASK_PATTERN.test(q)) || (MACRO_TOPIC_PATTERN.test(q) && /影響|怎麼看|會不會|如何|衝擊|利多|利空/.test(q))) {
+  if ((MARKET_SUBJECT_PATTERN.test(q) && OUTLOOK_ASK_PATTERN.test(q)) || (MACRO_TOPIC_PATTERN.test(q) && /影響|怎麼看|會不會|如何|衝擊|利多|利空|為什麼|為何|原因|嗎|呢/.test(q))) {
     // 「台股有哪些股票…」是全市場篩選，不是大盤看法。
     if (/哪些|哪幾|哪[檔支]|推薦|名單|股票有/.test(q) && !/台指期|夜盤|指數/.test(q)) return make("other");
     return make("market-outlook");

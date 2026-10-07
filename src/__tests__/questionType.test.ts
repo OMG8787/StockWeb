@@ -8,7 +8,7 @@ const cls = (question: string, namedStockCount = 0, hasHoldings = false) => clas
 
 describe("classifyQuestion（2026-10-07 開放題根因）", () => {
   it("台指期／大盤漲跌看法 → market-outlook，不沿用上文個股、不可套個股判斷", () => {
-    for (const q of ["你覺得今天台指期收盤會漲還是跌", "明天台股會漲嗎？", "今天台股為什麼跌？", "那大盤現在怎麼樣？", "Fed 降息對台股有什麼影響？", "台指期夜盤現在多少？"]) {
+    for (const q of ["你覺得今天台指期收盤會漲還是跌", "明天台股會漲嗎？", "今天台股為什麼跌？", "那大盤現在怎麼樣？", "Fed 降息對台股有什麼影響？", "台指期夜盤現在多少？", "為什麼美國會升息？", "油價大漲對股市是利空嗎"]) {
       const c = cls(q);
       expect(c.type, q).toBe("market-outlook");
       expect(c.useContextStock, q).toBe(false);

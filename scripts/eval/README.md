@@ -7,6 +7,7 @@
 
 | 檔案 | 內容 |
 |---|---|
+| `casesOpen.ts` | 開放／一般題題組（大盤看法、概念篩選、名詞常識、有上文時換題；2026-10-07）。JSON 的 captures[].route 記錄每題組了哪些資料區塊與 RULE_* 規則 |
 | `cases.ts` | 題庫（純資料）。每題＝問題＋（可選）對話紀錄／持股／個股頁按鈕代號／假時鐘＋題目專屬檢查 |
 | `types.ts` | 題目與檢查的型別（`CheckSpec` 列出所有可用的檢查種類） |
 | `graders.ts` | 程式評分器（純函式，測試在 `src/__tests__/evalGraders.test.ts`） |
@@ -26,6 +27,8 @@ npx tsx scripts/eval/run.ts --judge --judge-with nvidia   # 評審全部交給 N
 npx tsx scripts/eval/run.ts --no-aux-ai             # 組參考資料時擋下 AI 判斷層等輔助呼叫（省額度；改前改後設定要相同）
 npx tsx scripts/eval/run.ts --gemini-auto           # Gemini 用正式流程的自動挑選（預設固定 lite，原因見 run.ts）
 npx tsx scripts/eval/run.ts --out 2026-10-05-before # 自訂輸出檔名（改動前後各跑一次方便比較）
+npx tsx scripts/eval/run.ts --tag open              # 只跑開放／一般題題組（casesOpen.ts；題型路由改動後必跑）
+npx tsx scripts/eval/run.ts --exclude-tag open      # 既有整套（不含開放題）
 ```
 
 - 金鑰只從 `.env.local` 讀（GEMINI_API_KEY／NVIDIA_API_KEY／GROQ_API_KEY），不會印出；全部免費額度，**不會呼叫付費的 Claude**（forceProvider 只會打指定那一家）。

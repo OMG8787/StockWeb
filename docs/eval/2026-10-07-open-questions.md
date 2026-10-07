@@ -1,0 +1,51 @@
+# 開放／一般題根因報告（2026-10-07）
+
+## 起因（使用者原話）
+
+- 🛠 02:18：「最近雖然規則與流程整體有變更完善了，但我發現現在問一些基本問題反而沒辦法像一般AI一樣都能回答，常常回答會過於死板，甚至與問題本身無關，這部分非常重要需要改進，且要找出根本的原因，而不是只改一部份，要全面問題都能根據現在資訊來分析與推理並回答。」
+- 📝 01:12（Lite，上文聊 AMD）「你覺得今天台指期收盤會漲還是跌」→「建議先不要買。Advanced Micro Devices(AMD)…」——「你回答的跟我問的完全沒相關」
+- 📝 02:12（Lite，啟碁個股頁）「有看起來抗壓性強且有上漲趨勢的股票嗎?」→ 只答啟碁＋「今天開盤現價可分批買」——「這是因為前面都聊啟碁所以才又說啟碁嗎?」
+- 📝 02:14（Lite）同題 →「偏多，台股大盤…」沒列股票——「沒回答到我的問題。」
+- 📝 02:15（NVIDIA）同題 →「偏多」＋台積電「參考價約600元」、台光電「120元」（實際約 2,570／5,900）——「回答與問題無關」
+
+## 方法
+
+新增題組 `scripts/eval/casesOpen.ts`（18 題，tag `open`）：4 則原題（含上文脈絡）、大盤／台指期漲跌與原因（5）、美股與總經（2）、概念篩選（低波動高殖利率、多頭站上季線、上文個股時問法人連買）、類股比較、名詞（本益比、殖利率、ETF）、防禦型類股、台指期夜盤。評測 JSON 的 `captures[].route` 逐題記錄附了哪些資料區塊與組了哪些 `RULE_*`（run.ts `describeRoute`）。兩個模型：gemini-flash-lite-latest、NVIDIA nemotron；`--no-aux-ai`；LLM 評審全交 NVIDIA。
+
+## 改前逐題路由（docs/eval/2026-10-07-open-before.json，摘要）
+
+| 題 | 被路由到 | 附的資料／規則 | 後處理 | 結果 |
+|---|---|---|---|---|
+| 台指期收盤漲跌（上文 AMD） | 「追問上文個股」：`resolveFollowupTargets` 的 `VERIFY_OR_TIME_FOLLOWUP_PATTERN` 含「還是」→ 找回 AMD；`TRADE_JUDGMENT_EXTRA_PATTERN` 含「會漲／會跌」→ 買賣判斷 | AMD 個股資料＋**結論卡**＋`RULE_DECISION_CARD`／`FOLLOW_SITE_RATING`／`ONLY_ASKED_STOCKS`；聚焦模式只附指數本身，**不附夜盤** | `answerCardIssues` 要求第一句照抄 AMD 評等→兩模型都被**重生**成 AMD 結論；`ensureStockFactsMentioned` 補 AMD 現價 | 兩模型 6/10、評審 1 分 |
+| 抗壓＋上漲趨勢（啟碁個股頁） | `contextSymbol` 一律當目標（只有「把握程度高」題有例外） | 啟碁個股資料＋評等＋`FOLLOW_SITE_RATING`、`ONLY_ASKED_STOCKS` | — | 只答啟碁「建議買進」 |
+| 抗壓＋上漲趨勢（無上文／上文啟碁） | 沒有任何意圖命中（`MOVERS_INTENT_PATTERN` 沒有「抗壓」「上漲趨勢」）→ 什麼全市場資料都沒附 | 只有大盤概況＋新聞；`RULE_CONCISE_ANSWER` 要「第一句就給結論（是／否／偏多／偏空／觀望）」 | 價位檢查只認程式價位，**沒有程式價位時完全不檢查** | Lite 答「偏多」＋從新聞標題撈代號；NVIDIA 答「查不到」；正式站 NVIDIA 編台積電 600 元 |
+| 殖利率是什麼（上文台積電） | `METRIC_FOLLOWUP_PATTERN`（短句含「殖利率」）→ 追問台積電 | 台積電個股資料＋評等規則 | — | Lite 只回 24 字 |
+| ETF 跟個股差在哪 | 一般 | `RULE_TRADING_STANCE` 每題都帶 | — | Lite 結尾補「明天開盤或盤中可分批」；第一句「偏向 ETF」 |
+| 大盤震盪適合買什麼類型 | 「買什麼」→ `wantsMarketWideBuyIdea` 全市場推薦 | 今日建議名單（逾時）＋`RULE_MARKET_WIDE_RECOMMENDATION` | — | Lite 第一句「名單暫時讀不到…」 |
+| 半導體 vs 航運 | `detectTheme` 只取第一個類股 | 只有半導體主題股 | — | 兩模型都說「查不到航運」 |
+| 法人連續買超（上文台積電） | 排行意圖命中 | 只有單日買超排行 | — | 兩模型只回大盤法人合計、0 檔 |
+| 明天台股會漲嗎／那大盤怎樣／美股為什麼漲／Fed | 大盤題 | 指數、夜盤、法人、總經 | NVIDIA 寫「回測至 49,500 點加碼」（沒出處） | 大致切題 |
+
+改前分數：gemini 規則 93%（141/152）、全過 11/18、評審 2.83；nvidia 90%（137/152）、全過 7/18、評審 2.78。
+
+## 根因（不是個別題目，是結構）
+
+1. **沒有「題型」這個概念**：ask.ts 的路由是十幾個各自獨立的正則旗標（targets、追問上文、`wantsMovers`、`wantsTechScreen`、`wantsMarketWide`、`tradeJudgment`…），每個都只看自己的字眼。任何沒被列舉到的問法都會掉進「沒指到個股 → 去上文找一檔」或「什麼資料都不附」。追問偵測的字眼（「還是」「所以」「為什麼」、短句含「殖利率」）又很寬，等於把大量一般問題預設成「追問上一檔」。
+2. **個股頁的 `contextSymbol` 無條件綁定**：只有「把握程度高的名單」一種問法有例外，其他全市場／大盤／名詞題一律被綁在那一檔。
+3. **個股化的強制機制沒有題型閘門**：決策卡、「第一句照抄評等」、`ONLY_ASKED_STOCKS`、現價與把握程度補述、回答後檢查＋重生，只要「有個股目標＋句子含買賣／漲跌字眼」就啟動——於是問台指期也被程式**強制**改寫成 AMD 結論（模型就算答對大盤也會被重生蓋掉）。
+4. **格式規則預設每題都是買賣判斷**：`RULE_CONCISE_ANSWER` 要第一句是「是／否／偏多／偏空／觀望」、`RULE_TRADING_STANCE` 每題都帶、`RULE_STAY_ON_TOPIC` 要短句「一律延續上一檔」——名單題被答成「偏多」，知識題被加上買進時機。
+5. **本站沒有的概念沒有資料，也沒有「照實做近似」的路**：抗壓性、上漲趨勢、低波動、多個類股比較都沒有對應的程式資料，模型只能亂接、說查不到或用記憶編。
+6. **數字防線只保護程式價位**：`guardAnswerNumbers` 只更正「評等行／價位參考」裡有的價位；參考資料沒有個股價位時，模型憑記憶寫的股價、點數完全不檢查。
+
+## 修正（結構性、程式決定、單一來源）
+
+- `src/lib/ai/questionType.ts` `classifyQuestion()`：唯一題型分類（market-outlook／screen-concept／general-knowledge／method／holdings／other），決定 ①能不能沿用個股頁與上文的股票（`useContextStock`）②能不能套個股買賣判斷（`allowStockJudgment`）③附哪些全市場資料 ④組哪些題型規則。點名或指代個股（含「這些／這3檔」）一律走原路由，所以既有個股題行為不變。刻意不用 AI 分類（零額度、零延遲；分不出來就落到 other＝原行為）。
+- ask.ts：所有路由旗標改由題型推出（`stockScoped`、`genericRouting`、`tradeJudgment` 要 `allowStockJudgment`）；大盤看法題附今日漲跌榜、夜盤規則與市場歷史；概念篩選題附程式名單；兩個以上類股附類股比較。
+- 概念篩選：`data/conceptScreen.ts`（成交金額前 120 檔、同一份 3 個月日K快取＋加權指數日K，算 20／60 日均線、報酬、最大回撤、日波動、大盤下跌日抗跌、beta、殖利率）＋`grounding/conceptScreen.ts`（概念→條件、名單、每檔本站綜合評等與現價）。
+- 類股比較：`grounding/theme.ts` `buildSectorCompareGrounding()`（官方產業分類全部個股的漲跌家數、成交金額加權漲跌）。
+- 規則：`RULE_MARKET_OUTLOOK`、`RULE_SCREEN_CONCEPT`、`RULE_GENERAL_KNOWLEDGE`（只在該題型組入）；`RULE_CONCISE_ANSWER` 第一句改成「直接回答問的那件事」；`RULE_STAY_ON_TOPIC` 明講換題要照新問題；`RULE_TRADING_STANCE` 只在會談到買賣時組入；`RULE_MOVERS` 補「法人連續買超」的近似答法。
+- 編造數字：`numberGuard.ts` `findUngroundedPrices()`（同一句點名的個股不在參考資料＝必編；否則與參考資料數字差 >1.2% 算沒出處）→ `finalizeAiAnswer` 帶錯誤說明重生一次，仍有就刪句。
+
+## 改後結果
+
+（見下節，評測完成後填入）

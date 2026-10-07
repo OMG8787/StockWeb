@@ -50,6 +50,8 @@ flowchart TD
     HG[grounding/holdings.ts<br/>持股輕量清單／深度分析]
     AG[actionGrounding.ts＋actionPicks.ts<br/>今日建議／明日操作建議名單]
     TSG[grounding/techScreen.ts 技術篩選]
+    QT[questionType.ts classifyQuestion<br/>題型：大盤看法／概念篩選／名詞常識／方法／持股／其他]
+    CSG[grounding/conceptScreen.ts＋data/conceptScreen.ts<br/>概念篩選（抗壓、上漲趨勢、低波動、高殖利率）]
     ASK[ask.ts answerQuestion]
     AB[actionBrief.ts getActionBrief]
     BR[brief.ts 今日快報]
@@ -58,13 +60,15 @@ flowchart TD
   HR --> SG & HG
   AG --> AB
   AB -->|名單| ASK
-  SG & HG & TSG --> ASK
+  SG & HG & TSG & CSG --> ASK
+  QT -->|路由：能否沿用個股頁／上文股票、能否套決策卡、附哪些資料、組哪些規則| ASK
+  SR --> CSG
   TS --> ASK & AB
 
   subgraph AI["AI 呼叫與回答後檢查"]
     PV[provider.ts callAiProviders<br/>繁中正規化 normalizeZhTw]
     GM[gemini.ts 分級＋每日配額<br/>gemini:calls:{太平洋日}:{模型}]
-    PP[ask.ts finalizeAiAnswer<br/>postProcessAiAnswer（清標記→去評等標籤→名稱星號→錯字確認句→numberGuard→ratingConsistencyGuard 先不要買刪價位→guardHeldAnswer 持有建議逐字→ensureRatingChangeExplained 評等變動補說明）<br/>→answerCardIssues→同模型重生一次→仍不過用程式版]
+    PP[ask.ts finalizeAiAnswer<br/>postProcessAiAnswer（清標記→去評等標籤→名稱星號→錯字確認句→numberGuard→ratingConsistencyGuard 先不要買刪價位→guardHeldAnswer 持有建議逐字→ensureRatingChangeExplained 評等變動補說明）<br/>→answerCardIssues＋findUngroundedPrices（股價／指數沒有出處）→同模型重生一次→仍不過：卡片問題用程式版、只剩價格／截斷就刪句／留完整句]
     NG[numberGuard.ts guardAnswerNumbers]
     PV --> GM
   end
@@ -108,6 +112,9 @@ flowchart TD
 
 | 結論／數字 | 唯一來源函式（檔案） | 常數 | 誰用 |
 |---|---|---|---|
+| 題型（要不要沿用個股頁／上文的股票、要不要套個股決策卡與「第一句照抄評等」、附哪些全市場資料、組哪些題型規則） | `classifyQuestion()`（questionType.ts，純函式、無 AI 呼叫） | `SCREEN_CONCEPT_LABEL`、概念條件文字 `CONCEPT_RULE_TEXT`（grounding/conceptScreen.ts） | ask.ts（唯一使用者；所有路由旗標 `stockScoped`／`genericRouting`／`tradeJudgment` 都由它推出）、askSystemCompose（`RULE_MARKET_OUTLOOK`／`RULE_SCREEN_CONCEPT`／`RULE_GENERAL_KNOWLEDGE`） |
+| 概念篩選名單（抗壓性＝大盤下跌日少跌＋回撤≤中位數；上漲趨勢＝站上20日線、20日線＞季線且上升；低波動＝近20日日波動最低三成；高殖利率≥4%） | `computeConceptStats()`（data/conceptScreen.ts，母體＝技術篩選同一份前120檔、K線同一份 3m 快取、加權指數用 marketHistory `getTaiexDailyCloses()`）＋`pickConceptStocks()`（grounding/conceptScreen.ts）；每檔評等讀 `getStockRatings`＋`describeSiteRating` | `concept-screen:TW:v1`、`CONCEPT_SCREEN_MAX`＝6 | ask.ts（screen-concept 題型） |
+| 回答裡的股價／指數必須有出處 | `findUngroundedPrices()`（numberGuard.ts；同一句有點名的個股不在參考資料裡＝一定是編的；否則跟參考資料數字差 >1.2% 才算沒出處） | `UNGROUNDED_PRICE_TOLERANCE`＝0.012 | ask.ts finalizeAiAnswer（重生→刪句）、評測 `noUngroundedPrice` 檢查 |
 | 評等（建議買進／先不要買、已持有字樣、理由、拉回加碼價、出場價、改判條件） | `computeRatingCore()`（ratingCore.ts）→ `computeSiteRating()`（siteRating.ts） | `QUALIFY_MIN_SUPPORT／QUALIFY_MAX_AGAINST`（actionScoring.ts）、`VETO_FACETS`、`RISK_NOTE_ONLY_GUARDS`、`NEAR_ZONE_PCT` | stockRating.ts（正式站）、5 支回測（stability.ts 帶 chipsWindow＋confirmPrev） |
 | 融資融券組合判讀（追高風險／可能軋空／籌碼沉澱／空方佔優／中性） | `computeMarginSignal()`＋`marginSignalLine()`（marginSignal.ts；資料與文字在 marginSignalData.ts） | `MARGIN_SIGNAL_PRICE_MOVE_PCT`＝1、`MARGIN_BIG_CHANGE_PCT`＝3（且≥`MARGIN_MIN_CHANGE_LOTS`＝100張）、`SHORT_BIG_CHANGE_PCT`＝10（且≥`SHORT_MIN_CHANGE_LOTS`＝30張）、區塊標題 `MARGIN_SIGNAL_TITLE` | 個股資料（grounding/stock.ts，askSystemCompose 依標題帶 `RULE_MARGIN_SIGNAL`）、今日建議體檢表（actionGrounding.describeCandidate）、今日快報（brief.ts）。**只列資訊、不計分**（回測結果見 docs/backtest/2026-10-margin-signal.md）；融資融券交易日跟報價對不上時（收盤後～21 點）改用日K算那天漲跌，沒日K就不判讀；只有非中性才附 |
 | 籌碼面近 N 日累計（研究用，正式站未啟用） | `sumChipsWindow()`（chipsWindow.ts） | `CHIPS_WINDOW_DAYS`＝5 | 只有 stability.ts 回測；回測沒有比單日＋2日確認好 |
@@ -235,4 +242,5 @@ flowchart TD
 1. 改評等規則／門檻／價位框架：改 siteRating.ts／priceLevels.ts／ratingCore.ts → `stock-rating` key 升版 → 跑 `npm test`（整合測試）→ 用 scripts/backtest 擴大樣本＋樣本外比較 → 更新 CLAUDE.md 評等基準。
 2. 改評等物件欄位：同步 RatingLogEntry（buildRatingLogEntry）、ratingLogToEval、check-rating-log.py、/scoreboard、整合測試的「舊紀錄相容」案例。
 3. 改時段：只改 marketStatus.ts／pollingSchedule.ts／tradingStance.ts，整合測試的一週掃描會抓不一致。
-4. 新增 AI 入口：用 `callAiProviders`（自動繁中正規化＋模型標示＋Gemini 配額）；回答有價位就套 `guardAnswerNumbers`；有個股結論就讀 `getStockRating`＋`describeSiteRating`，不可自己判斷買賣；把入口加進第 4、5 節矩陣與 consistency.ts。
+4. 新增題型或改路由：只改 questionType.ts `classifyQuestion()`（加測試 questionType.test.ts），ask.ts 只讀它的結果，不要再在 ask.ts 加零散的意圖正則；改完跑 `npx tsx scripts/eval/run.ts --tag open` 與既有整套比較。
+5. 新增 AI 入口：用 `callAiProviders`（自動繁中正規化＋模型標示＋Gemini 配額）；回答有價位就套 `guardAnswerNumbers`；有個股結論就讀 `getStockRating`＋`describeSiteRating`，不可自己判斷買賣；把入口加進第 4、5 節矩陣與 consistency.ts。
