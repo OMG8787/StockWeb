@@ -112,7 +112,8 @@ interface CookieWriter {
 
 export function writeSessionCookies(res: CookieWriter, payload: SessionPayload): void {
   res.cookies.set(SESSION_COOKIE, encodeSession(payload), cookieOptions(true));
-  res.cookies.set(PROFILE_COOKIE, encodeURIComponent(JSON.stringify(profileOf(payload))), cookieOptions(false));
+  // 不要自己 encodeURIComponent：cookies.set 會再編碼一次，前端只解一次就會解析失敗
+  res.cookies.set(PROFILE_COOKIE, JSON.stringify(profileOf(payload)), cookieOptions(false));
 }
 
 export function clearSessionCookies(res: CookieWriter): void {

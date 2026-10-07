@@ -16,7 +16,8 @@ import {
 } from "@/lib/auth/accounts";
 import { MemoryStore, setStoreForTests } from "@/lib/auth/store";
 import { PERM, canSeePath, hasPerm, parsePerms, routeAccess } from "@/lib/auth/permissions";
-import { decodeSession, encodeSession } from "@/lib/auth/sessionCookie";
+import { NextResponse } from "next/server";
+import { decodeSession, encodeSession, writeSessionCookies } from "@/lib/auth/sessionCookie";
 
 const info = { device: "Windows・Chrome", userAgent: "test", ip: "127.0.0.1" };
 
@@ -138,5 +139,12 @@ describe("權限與網址", () => {
     const forged = Buffer.from(JSON.stringify({ ...JSON.parse(Buffer.from(body, "base64url").toString()), perms: [13] })).toString("base64url");
     expect(decodeSession(`${forged}.${mac}`)).toBeNull();
     expect(decodeSession("granted")).toBeNull();
+  });
+
+  it("畫面用的 sw_profile cookie 只編碼一次（前端 decodeURIComponent 一次就能解析）", () => {
+    const res = NextResponse.json({});
+    writeSessionCookies(res, { t: "tok", sid: "S1", uid: "U1", acc: "boss", name: "老闆", perms: [13], strategy: "default", mcp: false, chk: 1 });
+    const raw = res.headers.getSetCookie().find((c) => c.startsWith("sw_profile="))!.split(";")[0].slice("sw_profile=".length);
+    expect(JSON.parse(decodeURIComponent(raw)).name).toBe("老闆");
   });
 });
