@@ -13,6 +13,7 @@ import {
   searchStocks,
 } from "@/lib/data";
 import { getMarketHistory } from "@/lib/data/marketHistory";
+import { getConceptScreen } from "@/lib/data/conceptScreen";
 import { getDailyBrief } from "@/lib/ai/brief";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
@@ -111,6 +112,8 @@ export async function GET(req: NextRequest) {
       // 其他預熱項目。
       warm("technical screen TW", getTechnicalScreen("TW")),
       warm("technical screen US", getTechnicalScreen("US")),
+      // 概念篩選（抗壓性、上漲趨勢…，2026-10-07）：沿用技術篩選同一份母體與 K 線快取（同 key 單飛，不會重抓）。
+      warm("concept screen TW", getConceptScreen()),
       warm("indices", getIndices()),
       // 2026-10-04 補上：首頁大盤區塊的台指期夜盤、AI 快報／建議／問答共用的市場
       // 歷史包、列表籌碼比例欄位用的三份全市場整包（融資融券／外資持股／集保大戶，

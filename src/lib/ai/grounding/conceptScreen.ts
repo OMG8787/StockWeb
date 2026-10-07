@@ -13,7 +13,7 @@ export const CONCEPT_SCREEN_TITLE = "【概念篩選（程式依真實日K算好
 /** 名單最多幾檔（每檔要算評等）。 */
 export const CONCEPT_SCREEN_MAX = 6;
 const RATING_WAIT_MS = 12_000;
-const SCREEN_WAIT_MS = 15_000;
+const SCREEN_WAIT_MS = 20_000;
 
 /** 每個概念的程式條件（文字給 AI 照實轉述用；判斷式在 passes）。 */
 export const CONCEPT_RULE_TEXT: Record<ScreenConcept, string> = {

@@ -188,6 +188,10 @@ const PRICE_UNIT_AFTER = /^\s*(?:美元|元|點)/;
 const NON_PRICE_UNIT_AFTER = /^\s*(?:%|％|張|倍|日|天|個|年|月|季|檔|筆|週|周|次|成|億|萬|千|股|分|項|名|家|檔|兆|位|歲|小時|分鐘|秒|bp|基點)/;
 const STOCK_REF = /([一-鿿A-Za-z0-9&.\-*＊]{1,20}?)[（(]\s*([0-9]{4,6}[A-Z]?|[A-Z]{1,5})\s*[)）]/g;
 const SENTENCE_SPLIT = /[。！？!?\n；;]/;
+/** 括號裡是常見縮寫、不是股票代號（「每股盈餘（EPS）」）。 */
+const NOT_TICKER = new Set(["EPS", "RSI", "KD", "MACD", "ETF", "PE", "PB", "VIX", "AI", "YOY", "MOM", "ROE", "GDP", "CPI", "PMI", "FED", "DIF", "MA", "USD", "TWD", "ADR", "OK", "K", "D", "PER", "PBR"]);
+/** 明講是假設／舉例的句子（名詞題用假設數字舉例是允許的，見 RULE_GENERAL_KNOWLEDGE）。 */
+const HYPOTHETICAL = /假設|舉例|舉個例|例如某|比如某|若某|如果某|某公司|某檔|某支/;
 
 /** 參考資料裡「不帶非價格單位」的數字（張、%、億…之類的數量不算價格出處）。 */
 function groundingPriceNumbers(grounding: string): number[] {
@@ -222,6 +226,7 @@ export function findUngroundedPrices(answer: string, grounding: string): Ungroun
   const refs: Array<{ key: string; symbol: string }> = [];
   for (const m of answer.matchAll(STOCK_REF)) {
     const symbol = m[2].toUpperCase();
+    if (NOT_TICKER.has(symbol)) continue;
     refs.push({ key: symbol, symbol });
     const name = m[1].replace(/^[*＊\s、，,：:]+/, "").trim();
     if (name.length >= 2) refs.push({ key: name, symbol });
@@ -254,6 +259,9 @@ export function findUngroundedPrices(answer: string, grounding: string): Ungroun
       }
     }
     const sentence = answer.slice(sent.start, sent.end);
+    if (!symbol && HYPOTHETICAL.test(sentence)) continue;
+    // 沒歸屬到任何個股、只有「X 元」（「每 1 元盈餘付 50 元」這種一般說明）不算報價；要有價格字眼或是指數點數。
+    if (!symbol && !PRICE_CUE_BEFORE.test(before) && !/^\s*點/.test(after)) continue;
     if (symbol && !grounding.includes(`(${symbol})`) && !grounding.includes(`（${symbol}）`) && !grounding.includes(symbol)) {
       out.push({ raw, sentence, symbol, reason: "stock-not-in-grounding" });
       continue;
