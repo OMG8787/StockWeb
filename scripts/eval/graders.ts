@@ -271,6 +271,51 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
       const n = mentionedSymbols(g.finalAnswer).length;
       return { rule: `至少點名 ${spec.min} 檔股票`, pass: n >= spec.min, detail: `${n} 檔` };
     }
+    case "conditionListOnly": {
+      const head = g.grounding.match(/【符合「[^」]*」且本站綜合評等為「建議買進」的股票[^】]*】\n/);
+      const body = head ? g.grounding.slice((head.index ?? 0) + head[0].length).split(/\n\n【/)[0] : null;
+      if (body == null) return { rule: "只列程式名單裡的股票", pass: true, detail: "沒有產生條件名單，不適用" };
+      const allowed = new Set(mentionedSymbols(body));
+      const listed = mentionedSymbols(g.finalAnswer).filter((c) => c !== "0050");
+      if (body.startsWith("（目前一檔都沒有")) {
+        const claimsNone = /沒有|無|0\s*檔|零/.test(plain(g.finalAnswer));
+        return { rule: "只列程式名單裡的股票", pass: claimsNone && listed.length === 0, detail: listed.length > 0 ? `名單為空卻列了 ${listed.join("、")}` : claimsNone ? undefined : "名單為空，回答沒說目前沒有" };
+      }
+      const extra = listed.filter((c) => !allowed.has(c));
+      return { rule: "只列程式名單裡的股票", pass: extra.length === 0, detail: extra.join("、") || undefined };
+    }
+    case "rsiConsistent": {
+      const ans = plain(g.finalAnswer);
+      const bad: string[] = [];
+      for (const m of ans.matchAll(/[（(]\s*([0-9]{4,6}[A-Z]?)\s*[)）][^。\n]{0,40}?RSI\s*(?:\(14\))?\s*(?:為|約|是|[:：=])?\s*(\d+(?:\.\d+)?)/g)) {
+        const code = m[1];
+        const said = Number(m[2]);
+        const truth: number[] = [];
+        for (const line of g.grounding.split("\n")) {
+          if (!line.includes(`(${code})`) && !line.includes(`（${code}）`)) continue;
+          for (const r of line.matchAll(/RSI\s*(?:\(14\))?\s*[:：]?\s*(\d+(?:\.\d+)?)/g)) truth.push(Number(r[1]));
+        }
+        if (truth.length === 0) bad.push(`${code} RSI ${said}（參考資料沒有這檔的 RSI）`);
+        else if (!truth.some((t) => Math.abs(t - said) <= 1)) bad.push(`${code} RSI ${said}（資料 ${truth.join("/")}）`);
+      }
+      return { rule: "RSI 數字與參考資料一致", pass: bad.length === 0, detail: bad.join("；") || undefined };
+    }
+    case "deathCrossExplained": {
+      const note = g.grounding.match(/死亡交叉說明（程式）：[^\n]*/);
+      if (!note) return { rule: "死亡交叉有交代", pass: true, detail: "資料沒有死亡交叉說明，不適用" };
+      const ans = plain(g.finalAnswer);
+      const mentions = /死亡交叉|死叉/.test(ans);
+      const misdated = note[0].includes("已收盤確認") && /今天盤中.{0,8}(死亡交叉|死叉)|(死亡交叉|死叉).{0,8}今天盤中|盤中出現.{0,6}(死亡交叉|死叉)/.test(ans);
+      return { rule: "死亡交叉有交代", pass: mentions && !misdated, detail: !mentions ? "回答沒提死亡交叉" : misdated ? "把已收盤確認的死叉說成今天盤中出現" : undefined };
+    }
+    case "chipsDateMentioned": {
+      const title = g.grounding.match(/籌碼面（(\d{2})\/(\d{2})的資料/);
+      const ans = plain(g.finalAnswer);
+      if (!title || !/(三大法人|外資|投信|自營商|法人)[^。\n]{0,30}?(買超|賣超|買賣超)/.test(ans)) return { rule: "法人資料有講日期", pass: true, detail: "資料是今天的或回答沒提法人買賣超，不適用" };
+      const m = String(Number(title[1])), d = String(Number(title[2]));
+      const ok = [`${title[1]}/${title[2]}`, `${m}/${d}`, `${m}月${d}日`].some((f) => ans.includes(f)) || /前一(個)?交易日|昨(天|日)|尚未公布|15[:：]00/.test(ans);
+      return { rule: "法人資料有講日期", pass: ok, detail: ok ? undefined : `沒講是 ${title[1]}/${title[2]} 的資料` };
+    }
     case "noUngroundedPrice": {
       const found = findUngroundedPrices(g.finalAnswer, g.grounding);
       return { rule: "股價／指數不編造（出自參考資料）", pass: found.length === 0, detail: found.map((f) => `${f.symbol ?? ""}${f.raw}`).join("、") || undefined };

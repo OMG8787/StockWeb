@@ -62,3 +62,38 @@ describe("eval graders", () => {
     expect(gradeCheck({ kind: "marginSignalMention" }, { ...base, grounding: "沒有該區塊", finalAnswer: "籌碼面偏多。" }).pass).toBe(true);
   });
 });
+
+describe("2026-10-07 回報題組的檢查", () => {
+  const listGrounding =
+    "【依使用者問的條件「RSI ≤ 70 且 本站評等為建議買進」由程式逐檔比對的名單】\n台股符合共 2 檔\n\n【符合「RSI ≤ 70」且本站綜合評等為「建議買進」的股票（程式逐檔算好）】\n" +
+    "【本站綜合評等】寶成(9904)：未持有：「建議買進」／已持有：「續抱」。理由：x。\n\n【別的區塊】\n- 寶成(9904)，現價 24.85(+1%)：RSI 55";
+  it("conditionListOnly：只列名單裡的股票", () => {
+    expect(gradeCheck({ kind: "conditionListOnly" }, input("寶成(9904)建議買進。", { grounding: listGrounding })).pass).toBe(true);
+    const bad = gradeCheck({ kind: "conditionListOnly" }, input("台表科(6278)目前符合。", { grounding: listGrounding }));
+    expect(bad.pass).toBe(false);
+    expect(bad.detail).toContain("6278");
+  });
+  it("conditionListOnly：名單為空要說沒有，不可湊數", () => {
+    const g = "【符合「RSI < 30」且本站綜合評等為「建議買進」的股票（程式逐檔算好）】\n（目前一檔都沒有：…）\n";
+    expect(gradeCheck({ kind: "conditionListOnly" }, input("目前沒有符合的股票。", { grounding: g })).pass).toBe(true);
+    expect(gradeCheck({ kind: "conditionListOnly" }, input("台表科(6278)目前符合。", { grounding: g })).pass).toBe(false);
+  });
+  it("rsiConsistent：RSI 與資料不一致或資料沒有就判失敗", () => {
+    expect(gradeCheck({ kind: "rsiConsistent" }, input("寶成(9904)的 RSI 為 55。", { grounding: listGrounding })).pass).toBe(true);
+    expect(gradeCheck({ kind: "rsiConsistent" }, input("寶成(9904)的 RSI 為 65。", { grounding: listGrounding })).pass).toBe(false);
+    expect(gradeCheck({ kind: "rsiConsistent" }, input("台表科(6278)目前 RSI 為 65。", { grounding: listGrounding })).pass).toBe(false);
+  });
+  it("deathCrossExplained：已收盤確認的死叉不可說成今天盤中", () => {
+    const g = "- 死亡交叉說明（程式）：KD死亡交叉出現在 10/06（已收盤確認）；…";
+    expect(gradeCheck({ kind: "deathCrossExplained" }, input("10/06 收盤出現 KD 死亡交叉，本站技術面中性。", { grounding: g })).pass).toBe(true);
+    expect(gradeCheck({ kind: "deathCrossExplained" }, input("今天盤中出現 KD 死亡交叉。", { grounding: g })).pass).toBe(false);
+    expect(gradeCheck({ kind: "deathCrossExplained" }, input("建議買進。", { grounding: g })).pass).toBe(false);
+    expect(gradeCheck({ kind: "deathCrossExplained" }, input("建議買進。", { grounding: "x" })).pass).toBe(true);
+  });
+  it("chipsDateMentioned", () => {
+    const g = "籌碼面（10/06的資料；今天10/07的…）：三大法人合計賣超22張";
+    expect(gradeCheck({ kind: "chipsDateMentioned" }, input("三大法人合計賣超22張。", { grounding: g })).pass).toBe(false);
+    expect(gradeCheck({ kind: "chipsDateMentioned" }, input("10/06 三大法人合計賣超22張。", { grounding: g })).pass).toBe(true);
+    expect(gradeCheck({ kind: "chipsDateMentioned" }, input("技術面偏多。", { grounding: g })).pass).toBe(true);
+  });
+});

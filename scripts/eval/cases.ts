@@ -2,6 +2,7 @@
 // 題目大多取材自正式站使用者回報（scripts/check-feedback.py）與 PROGRESS.md「AI 回饋檢查紀錄」。
 import type { EvalCase } from "./types";
 import { OPEN_QUESTION_CASES } from "./casesOpen";
+import { REPORT_1007_CASES } from "./casesReports1007";
 
 const HOLDINGS = [
   { symbol: "2330", market: "TW" as const, name: "台積電", costBasis: 1800, shares: 1000 },
@@ -444,4 +445,6 @@ export const EVAL_CASES: EvalCase[] = [
   },
   // 開放／一般題（2026-10-07，見 casesOpen.ts）
   ...OPEN_QUESTION_CASES,
+  // 2026-10-07 使用者 4 則回報（RSI 組合篩選、兩種線快交叉、死叉仍建議買、法人資料日期；見 casesReports1007.ts）
+  ...REPORT_1007_CASES,
 ];
