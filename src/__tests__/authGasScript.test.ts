@@ -145,7 +145,7 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
   });
 
   it("setup 建立三張表、刪掉空白預設工作表、產生 API_SECRET", () => {
-    expect(env.sheets.map((s) => s.name).sort()).toEqual(["Feedback", "Holdings", "LoginLog", "Sessions", "Users"]);
+    expect(env.sheets.map((s) => s.name).sort()).toEqual(["Feedback", "Holdings", "Indicators", "LoginLog", "Sessions", "SimNav", "SimTrades", "Sims", "Strategies", "Users"].sort());
     expect(env.secret).toMatch(/^[0-9a-f-]{60,}$/);
     expect(env.sheets.find((s) => s.name === "Users")!.rows[0]).toContain("PasswordHash");
   });
@@ -153,8 +153,11 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
   it("金鑰錯誤一律拒絕", () => {
     const out = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: "wrong", ops: [{ op: "read", table: "Users" }] }) } }));
     expect(out).toMatchObject({ success: false, code: "AUTH" });
-    const bad = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "Hack" }] }) } }));
+    const bad = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "hack;drop" }] }) } }));
     expect(bad.success).toBe(false);
+    // 符合命名規則的新表名稱會自動建立（之後加功能不必改 Apps Script）
+    const ok = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "FutureTable" }] }) } }));
+    expect(ok).toEqual({ success: true, data: [[]] });
   });
 
   it("透過試算表跑完整流程：建管理員、開帳號、登入、改權限、停用、強制登出", async () => {
