@@ -47,6 +47,7 @@ import { stripNameMarkersInText } from "./fuzzyName";
 import { MARKET_JUDGMENT_PATTERN } from "./askSystemCompose";
 import { isTaipeiWeekend } from "@/lib/marketStatus";
 import { buildTechScreenGrounding } from "./grounding/techScreen";
+import { conditionsForQuestion } from "./techScreenConditions";
 import { buildConceptScreenGrounding } from "./grounding/conceptScreen";
 import { classifyQuestion } from "./questionType";
 import { buildHoldingsAnalysisGrounding, buildHoldingsGrounding } from "./grounding/holdings";
@@ -187,9 +188,14 @@ export async function answerQuestion(
     !wantsHoldingsAnalysis &&
     genericRouting &&
     (wantsMarketWideBuyIdea(question) || asksHighConfidenceList);
+  // 有數值指標條件（「RSI70以下建議買進」「K值低於30且建議買進」）：名單由技術篩選逐檔比對＋算評等（techScreen.ts buildConditionGrounding），
+  // 不再另外等今日建議名單（它不看指標條件，冷快取逾時還會讓模型答「名單暫時讀不到」；2026-10-07 評測 gemini 就這樣答）。
+  const conditionScreen =
+    wantsTechScreen &&
+    conditionsForQuestion(question, [...history].reverse().find((t) => t.role === "user")?.content).conds.length > 0;
   // 今日建議頁已經算好的全市場多面向買進候選（30分鐘快取，跟 /action 頁同一份，兩邊答案才會一致）；
   // 冷快取時最多等8秒，逾時就不附，不拖慢聊天回應。
-  const actionBriefPromise: Promise<ActionBrief | null> = wantsMarketWide
+  const actionBriefPromise: Promise<ActionBrief | null> = wantsMarketWide && !conditionScreen
     ? Promise.race([
         getActionBrief().catch(() => null),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
@@ -352,7 +358,7 @@ export async function answerQuestion(
     ? listLines.length > 0
       ? `【建議買進（現價可分批買）】\n${listLines.join("\n")}`
       : "（本站綜合評等目前沒有任何一檔是「建議買進」）"
-    : wantsMarketWide
+    : wantsMarketWide && !conditionScreen
       ? "（今日建議名單這次讀取逾時，不是沒有建議買進的股票：照實告訴使用者「名單暫時讀不到，請稍後再問一次或看今日建議頁」，不可說今天沒有推薦）"
       : "";
 
