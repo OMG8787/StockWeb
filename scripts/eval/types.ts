@@ -29,7 +29,11 @@ export type CheckSpec =
   /** 參考資料有「融資融券組合判讀」【訊號】時，回答要講出訊號名稱；沒有訊號（中性）就不適用、視為通過。 */
   | { kind: "marginSignalMention" }
   /** 未持有不可用「停損」二字。 */
-  | { kind: "noStopLossUnheld" };
+  | { kind: "noStopLossUnheld" }
+  /** 回答至少點名幾檔不同股票（名稱(代號) 格式；篩選／名單題）。 */
+  | { kind: "minSymbols"; min: number }
+  /** 回答裡的股價／指數點數都要出自參考資料（numberGuard.findUngroundedPrices，看使用者實際看到的回答）。 */
+  | { kind: "noUngroundedPrice" };
 
 export interface EvalCase {
   id: string;

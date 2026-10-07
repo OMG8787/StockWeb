@@ -23,6 +23,8 @@ export interface CaseCapture {
   userChars?: number;
   /** 這題附給 AI 的參考資料（重新評分用；只存在 JSON，不進報告） */
   grounding?: string;
+  /** 這題附了哪些資料區塊、組了哪些規則（run.ts describeRoute） */
+  route?: { blocks: string[]; rules: string[] };
   error?: string;
 }
 

@@ -1,6 +1,7 @@
 // 跨模型 AI 品質評測題庫（純資料；新增題目照 README.md「怎麼新增題目」）。
 // 題目大多取材自正式站使用者回報（scripts/check-feedback.py）與 PROGRESS.md「AI 回饋檢查紀錄」。
 import type { EvalCase } from "./types";
+import { OPEN_QUESTION_CASES } from "./casesOpen";
 
 const HOLDINGS = [
   { symbol: "2330", market: "TW" as const, name: "台積電", costBasis: 1800, shares: 1000 },
@@ -441,4 +442,6 @@ export const EVAL_CASES: EvalCase[] = [
     source: "使用者待辦 2026-10-04（融資融券組合判讀，marginSignal.ts）",
     tags: ["個股", "籌碼", "融資融券"],
   },
+  // 開放／一般題（2026-10-07，見 casesOpen.ts）
+  ...OPEN_QUESTION_CASES,
 ];

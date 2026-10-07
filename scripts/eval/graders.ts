@@ -1,6 +1,6 @@
 // 跨模型 AI 品質評測的自動評分器（純函式、無 I/O；測試見 src/__tests__/evalGraders.test.ts）。
 // 主分數一律以這裡的程式規則為準；LLM 評審（run.ts --judge）只是輔助參考。
-import { extractKeyLevels, guardAnswerNumbers } from "@/lib/ai/numberGuard";
+import { extractKeyLevels, findUngroundedPrices, guardAnswerNumbers } from "@/lib/ai/numberGuard";
 import { MARGIN_SIGNAL_TITLE } from "@/lib/ai/marginSignalData";
 import type { CheckResult, CheckSpec, EvalCase } from "./types";
 
@@ -266,6 +266,14 @@ export function gradeCheck(spec: CheckSpec, g: GradeInput): CheckResult {
     case "noStopLossUnheld": {
       const m = ans.match(/.{0,10}停損.{0,10}/);
       return { rule: "未持有不說停損", pass: !m, detail: m?.[0] };
+    }
+    case "minSymbols": {
+      const n = mentionedSymbols(g.finalAnswer).length;
+      return { rule: `至少點名 ${spec.min} 檔股票`, pass: n >= spec.min, detail: `${n} 檔` };
+    }
+    case "noUngroundedPrice": {
+      const found = findUngroundedPrices(g.finalAnswer, g.grounding);
+      return { rule: "股價／指數不編造（出自參考資料）", pass: found.length === 0, detail: found.map((f) => `${f.symbol ?? ""}${f.raw}`).join("、") || undefined };
     }
   }
 }

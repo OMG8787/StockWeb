@@ -156,3 +156,129 @@ export function guardAnswerNumbers(answer: string, grounding: string): { text: s
   for (const [at, e] of sorted) text = text.slice(0, at) + e.to + text.slice(e.end);
   return { text, fixes: sorted.reverse().map(([, e]) => e.fix) };
 }
+
+// ---------------------------------------------------------------- 編造股價／指數防線（2026-10-07 開放題）
+//
+// 2026-10-07 02:15 使用者📝（NVIDIA）：問「有看起來抗壓性強且有上漲趨勢的股票嗎？」，回答寫「台積電參考價約600元」
+// 「台光電120元」——實際約 2,570 與 5,900，參考資料裡根本沒有這兩個價格。guardAnswerNumbers 只更正「程式價位」
+// （評等行／價位參考裡有的），參考資料沒有個股價位時完全不檢查，模型用記憶補的價格就直接送到使用者面前。
+// 這裡補一條「回答裡的股價／指數點數必須出自參考資料」的檢查（唯一入口；ask.ts finalizeAiAnswer 用它決定重生或刪句，
+// 評測 graders 用同一個函式評分）：
+// - 「價格」＝後面接「元／點／美元」，或前面緊接價格字眼（現價、股價、收盤、參考價、停損、跌破、站上…）的數字；
+//   前面是漲跌／差距字眼（漲、跌、差、多、少…）的是變動量，不算價格。
+// - 這個價格寫在某檔名稱／代號之後（同一句），而那一檔根本不在參考資料裡 → 一定是編的。
+// - 否則跟參考資料裡任一個「不帶單位」的數字差距在 UNGROUNDED_PRICE_TOLERANCE 內就算有出處（容許「約 2,570」這種四捨五入）。
+
+export interface UngroundedPrice {
+  /** 回答裡的原字串（數字本身） */
+  raw: string;
+  /** 所在句子（刪句用） */
+  sentence: string;
+  /** 歸屬的個股代號（同一句有提到時） */
+  symbol: string | null;
+  reason: "stock-not-in-grounding" | "number-not-in-grounding";
+}
+
+/** 跟參考資料數字的相對差距容許值（四捨五入、「約」）。 */
+export const UNGROUNDED_PRICE_TOLERANCE = 0.012;
+const PRICE_CUE_BEFORE =
+  /(現價|股價|收盤價?|收在|參考價|價格|報價|成交價|目標價|停損價?|停利價?|出場價?|買進價|進場價|加碼價?|支撐|壓力|跌破|站上|突破|跌到|漲到|來到|回到|回測|拉回到?|下探|上看|最新價|指數|夜盤|點位)\s*(?:約|大約|約為|為|在|是|於|到|至|：|:)?\s*(?:約)?\s*$/;
+const CHANGE_CUE_BEFORE = /(漲|跌|差|增加|減少|多|少|上升|下降|價差|獲利|虧損|賺|賠|高出|低了|相差|距離|落後|領先|共|合計|買超|賣超)\s*(?:了|約|近|逾|超過|達|約為)?\s*$/;
+const PRICE_UNIT_AFTER = /^\s*(?:美元|元|點)/;
+const NON_PRICE_UNIT_AFTER = /^\s*(?:%|％|張|倍|日|天|個|年|月|季|檔|筆|週|周|次|成|億|萬|千|股|分|項|名|家|檔|兆|位|歲|小時|分鐘|秒|bp|基點)/;
+const STOCK_REF = /([一-鿿A-Za-z0-9&.\-*＊]{1,20}?)[（(]\s*([0-9]{4,6}[A-Z]?|[A-Z]{1,5})\s*[)）]/g;
+const SENTENCE_SPLIT = /[。！？!?\n；;]/;
+
+/** 參考資料裡「不帶非價格單位」的數字（張、%、億…之類的數量不算價格出處）。 */
+function groundingPriceNumbers(grounding: string): number[] {
+  const out: number[] = [];
+  for (const m of grounding.matchAll(new RegExp(NUM_SRC, "g"))) {
+    const at = m.index ?? 0;
+    const before = grounding[at - 1] ?? "";
+    if (/[\d.,]/.test(before)) continue;
+    const after = grounding.slice(at + m[0].length, at + m[0].length + 4);
+    if (/^\s*(?:%|％|張|億|萬|兆|倍|天|日|個|檔)/.test(after)) continue;
+    out.push(parseNum(m[0]));
+  }
+  return out;
+}
+
+function sentenceAround(text: string, at: number): { start: number; end: number } {
+  let start = at;
+  while (start > 0 && !SENTENCE_SPLIT.test(text[start - 1])) start--;
+  let end = at;
+  while (end < text.length && !SENTENCE_SPLIT.test(text[end])) end++;
+  return { start, end: Math.min(text.length, end + 1) };
+}
+
+/**
+ * 找出回答裡「參考資料沒有出處」的股價／指數點數。參考資料是空的（沒有任何數字）時不檢查（交給誠實規則）。
+ */
+export function findUngroundedPrices(answer: string, grounding: string): UngroundedPrice[] {
+  if (!answer || !grounding) return [];
+  const known = groundingPriceNumbers(grounding);
+  if (known.length === 0) return [];
+  // 回答裡「名稱(代號)」對照，名稱也能拿來歸屬（「台積電參考價約600元」那句沒寫代號）。
+  const refs: Array<{ key: string; symbol: string }> = [];
+  for (const m of answer.matchAll(STOCK_REF)) {
+    const symbol = m[2].toUpperCase();
+    refs.push({ key: symbol, symbol });
+    const name = m[1].replace(/^[*＊\s、，,：:]+/, "").trim();
+    if (name.length >= 2) refs.push({ key: name, symbol });
+  }
+  const out: UngroundedPrice[] = [];
+  for (const m of answer.matchAll(new RegExp(NUM_SRC, "g"))) {
+    const raw = m[0];
+    const at = m.index ?? 0;
+    const before = answer.slice(Math.max(0, at - 12), at);
+    const after = answer.slice(at + raw.length, at + raw.length + 6);
+    const prevChar = answer[at - 1] ?? "";
+    if (/[A-Za-z/\d.(（:：]/.test(prevChar) && !/[：:]/.test(prevChar)) continue;
+    if (/^[/\d]/.test(after) || /^\s*[)）]/.test(after)) continue;
+    if (NON_PRICE_UNIT_AFTER.test(after)) continue;
+    const priceLike = PRICE_UNIT_AFTER.test(after) || PRICE_CUE_BEFORE.test(before);
+    if (!priceLike) continue;
+    if (CHANGE_CUE_BEFORE.test(before)) continue;
+    const n = parseNum(raw);
+    if (!(n >= 1)) continue;
+    // 年份、日期（2026 年、10 月）已由單位排除；四位數代號在括號裡也已排除。
+    const sent = sentenceAround(answer, at);
+    const head = answer.slice(sent.start, at);
+    let symbol: string | null = null;
+    let bestIdx = -1;
+    for (const r of refs) {
+      const i = head.lastIndexOf(r.key);
+      if (i > bestIdx) {
+        bestIdx = i;
+        symbol = r.symbol;
+      }
+    }
+    const sentence = answer.slice(sent.start, sent.end);
+    if (symbol && !grounding.includes(`(${symbol})`) && !grounding.includes(`（${symbol}）`) && !grounding.includes(symbol)) {
+      out.push({ raw, sentence, symbol, reason: "stock-not-in-grounding" });
+      continue;
+    }
+    const ok = known.some((k) => Math.abs(k - n) <= Math.max(0.05, Math.abs(k) * UNGROUNDED_PRICE_TOLERANCE));
+    if (!ok) out.push({ raw, sentence, symbol, reason: "number-not-in-grounding" });
+  }
+  return out;
+}
+
+/** 重生後仍有沒出處的價格：刪掉含這些價格的句子（整句刪，不留半句）；刪完不到原文一半就不刪（交給呼叫端決定）。 */
+export function stripUngroundedPriceSentences(answer: string, found: UngroundedPrice[]): string {
+  if (found.length === 0) return answer;
+  let text = answer;
+  for (const s of [...new Set(found.map((f) => f.sentence))]) {
+    if (s.trim()) text = text.replace(s, "");
+  }
+  text = text.replace(/\n{3,}/g, "\n\n").trim();
+  return text.length >= answer.length * 0.5 ? text : answer;
+}
+
+/** 回答後檢查的問題說明（重生時附給模型）。 */
+export function ungroundedPriceIssues(found: UngroundedPrice[]): string[] {
+  if (found.length === 0) return [];
+  const list = found.slice(0, 5).map((f) => (f.symbol ? `${f.symbol} 的 ${f.raw}` : f.raw));
+  return [`${UNGROUNDED_PRICE_ISSUE_PREFIX}：${list.join("、")}；只能寫參考資料裡真實出現的股價／指數點數，資料沒有的價格就不要寫，不可用自己的記憶補`];
+}
+export const UNGROUNDED_PRICE_ISSUE_PREFIX = "回答裡有參考資料沒有的價格";

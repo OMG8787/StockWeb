@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EVAL_CASES } from "./cases";
+import * as PROMPT_RULES from "@/lib/ai/askSystemPrompt";
 import { gradeAnswer, type Phase } from "./graders";
 import { renderComparison, renderReport, type CaseCapture, type EvalRecord } from "./report";
 import {
@@ -47,6 +48,16 @@ async function regrade(jsonPath: string) {
   log(`重新評分完成：${jsonPath.replace(/\.json$/, ".md")}`);
 }
 
+// ---------------------------------------------------------------- 路由紀錄（這題組了哪些資料區塊與規則）
+/** 參考資料的區塊標題（行首【…】）＋系統提示詞實際組入的具名規則（askSystemPrompt.ts 的 RULE_*）。 */
+function describeRoute(system: string, grounding: string): { blocks: string[]; rules: string[] } {
+  const blocks = [...new Set([...grounding.matchAll(/^(?:台股|美股)?【([^】]{1,24})】/gm)].map((m) => m[1]))];
+  const rules = Object.entries(PROMPT_RULES)
+    .filter(([k, v]) => k.startsWith("RULE_") && typeof v === "string" && v.length > 20 && system.includes(v))
+    .map(([k]) => k.replace(/^RULE_/, ""));
+  return { blocks, rules };
+}
+
 // ---------------------------------------------------------------- 主程式
 async function main() {
   const regradePath = arg("regrade");
@@ -73,7 +84,12 @@ async function main() {
   const only = arg("only")?.split(",");
   const variants = arg("variants")?.split(",") ?? DEFAULT_VARIANTS;
   const withJudge = process.argv.includes("--judge");
-  const cases = EVAL_CASES.filter((c) => !only || only.includes(c.id));
+  // --tag 開放題：只跑帶這個標籤的題目；--exclude-tag 開放題：排除（跑「既有整套」用）。
+  const tag = arg("tag");
+  const excludeTag = arg("exclude-tag");
+  const cases = EVAL_CASES.filter(
+    (c) => (!only || only.includes(c.id)) && (!tag || c.tags.includes(tag)) && (!excludeTag || !c.tags.includes(excludeTag))
+  );
   const date = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Taipei" }).format(new Date());
   const outBase = path.join("docs", "eval", arg("out") ?? date);
   fs.mkdirSync(path.dirname(outBase), { recursive: true });
@@ -103,6 +119,7 @@ async function main() {
       systemChars: cap.system.length,
       userChars: cap.messages.reduce((n, m) => n + m.content.length, 0),
       grounding: cap.grounding,
+      route: describeRoute(cap.system, cap.grounding),
     });
     const results = await Promise.all(
       variants.map(async (v) => {
