@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { useBriefStance } from "./ActionBriefHeading";
 import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
+import { startNavigating } from "./NavigationOverlay";
 import { canSeePath } from "@/lib/auth/permissions";
 import { useProfile } from "@/lib/auth/useProfile";
 
@@ -145,6 +146,7 @@ export default function SiteHeader() {
     setOpen(false);
     setSuggestions([]);
     setActiveIndex(-1);
+    startNavigating();
     router.push(`/stock/${encodeURIComponent(symbol)}`);
   }
 
