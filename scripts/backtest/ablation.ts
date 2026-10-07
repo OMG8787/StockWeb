@@ -20,13 +20,32 @@ import { IS, OOS } from "./regimeConfig";
 import { revenueYoyAsOf, weeklySignalDates } from "./wideData";
 
 // ───────────── 切分（事先寫死） ─────────────
-export const SPLITS = {
-  train: { period: "is", from: "2024-10-01", to: "2025-06-30" },
-  val: { period: "is", from: "2025-08-01", to: "2026-01-31" },
-  test: { period: "is", from: "2026-03-09", to: "2026-08-31" },
-  oos: { period: "oos", from: "2022-01-01", to: "2024-09-30" },
-} as const;
-type SplitKey = keyof typeof SPLITS;
+export type Range = { period: "is" | "oos"; from: string; to: string };
+interface Scheme { desc: string; train: Range; halves: Range[]; val: Range[]; test: Range[] }
+/**
+ * A：樣本內切三段（訓練 9 個月；樣本外 2022～2024 當第二個最終測試）。
+ * B：全時間序（訓練＝最早的 2022～2023 兩年，含空頭與多頭；驗證＝2024；測試＝2025-08 之後）。
+ * 段與段之間至少空 20 個交易日（20 日報酬不跨段）。
+ */
+export const SCHEMES: Record<"A" | "B", Scheme> = {
+  A: {
+    desc: "樣本內三段＋樣本外",
+    train: { period: "is", from: "2024-10-01", to: "2025-06-30" },
+    halves: [{ period: "is", from: "2024-10-01", to: "2025-02-14" }, { period: "is", from: "2025-02-15", to: "2025-06-30" }],
+    val: [{ period: "is", from: "2025-08-01", to: "2026-01-31" }],
+    test: [{ period: "is", from: "2026-03-09", to: "2026-08-31" }, { period: "oos", from: "2022-01-01", to: "2024-09-30" }],
+  },
+  B: {
+    desc: "全時間序",
+    train: { period: "oos", from: "2022-01-01", to: "2023-12-31" },
+    halves: [{ period: "oos", from: "2022-01-01", to: "2022-12-31" }, { period: "oos", from: "2023-01-01", to: "2023-12-31" }],
+    val: [{ period: "oos", from: "2024-02-01", to: "2024-09-30" }, { period: "is", from: "2024-10-01", to: "2025-06-30" }],
+    test: [{ period: "is", from: "2025-08-01", to: "2026-08-31" }],
+  },
+};
+export const SCHEME_KEY = (process.env.SCHEME === "B" ? "B" : "A") as "A" | "B";
+const SC = SCHEMES[SCHEME_KEY];
+const rl = (r: Range) => `${r.period === "oos" ? "樣本外池" : "樣本內池"} ${r.from}～${r.to}`;
 
 // ───────────── 規則設定 ─────────────
 export interface Cfg {
@@ -233,20 +252,15 @@ function nwT(series: number[], h: number): number {
   return v > 0 ? mu / Math.sqrt(v / T) : NaN;
 }
 export interface Stat { b10: number; t10: number; b20: number; t20: number; nB: number; a20: number; flips: number; share: number; d20: number; d10: number }
-type Range = { period: "is" | "oos"; from: string; to: string };
 /** 訓練集前後兩半（最佳化用「兩半都要變好」防過擬合） */
-const TRAIN_HALVES: Range[] = [
-  { period: "is", from: "2024-10-01", to: "2025-02-14" },
-  { period: "is", from: "2025-02-15", to: "2025-06-30" },
-];
+const TRAIN_HALVES: Range[] = SC.halves;
 const rateCache = new Map<string, Map<Row, { code: RatingCode; streak: number }>>();
 function rateCached(c: Cfg, period: "is" | "oos") {
   const k = `${period}|${JSON.stringify(c)}`;
   if (!rateCache.has(k)) { if (rateCache.size > 40) rateCache.clear(); rateCache.set(k, rate(c, period)); }
   return rateCache.get(k)!;
 }
-function stats(c: Cfg, split: SplitKey | Range, pre?: Map<Row, { code: RatingCode; streak: number }>): Stat {
-  const sp = typeof split === "string" ? SPLITS[split] : split;
+function stats(c: Cfg, sp: Range, pre?: Map<Row, { code: RatingCode; streak: number }>): Stat {
   const period = sp.period;
   const { rows, tierAvg, weekly, bySym } = load(period);
   const rated = pre ?? rateCached(c, period);
@@ -340,9 +354,9 @@ export const ABLATIONS: Array<[string, (b: Cfg) => Cfg]> = [
   ["只買 非弱市＋連續≥5", mod((c) => { c.confOnly = 5; })],
 ];
 
-function ablate(base: Cfg, label: string, split: SplitKey = "train") {
+function ablate(base: Cfg, label: string, split: Range = SC.train) {
   const head = HEADER.split("\n");
-  console.log(`\n### 消融（${label}；${split} ${SPLITS[split].from}～${SPLITS[split].to}）\n\n${head[0]} 前半／後半 日頻20日 | 判定 |\n${head[1]}---|---|`);
+  console.log(`\n### 消融（${label}；訓練 ${rl(split)}）\n\n${head[0]} 前半／後半 日頻20日 | 判定 |\n${head[1]}---|---|`);
   const b = stats(base, split);
   const hs = (c: Cfg) => TRAIN_HALVES.map((h) => stats(c, h).d20);
   const bh = hs(base);
@@ -358,7 +372,7 @@ function ablate(base: Cfg, label: string, split: SplitKey = "train") {
     res.push([name, s, h, verdict]);
     console.log(`| ${name} ${fmtStat(s)} ${h.map(f2).join("／")} | ${verdict} |`);
   }
-  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `ablate-${label}-${split}.json`), JSON.stringify({ base: b, res }));
+  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `ablate-${label}-${SCHEME_KEY}.json`), JSON.stringify({ base: b, res }));
 }
 
 // ───────────── 最佳化：在訓練集做座標下降，驗證集挑選 ─────────────
@@ -372,10 +386,16 @@ function knobs(withExt: boolean): Knob[] {
     ...FAMILIES.map((f): Knob => ({ name: `dn.${f}`, values: [0, 1, 2], get: (c) => c.dn[f], set: (c, v) => (c.dn[f] = v as number) })),
     { name: "chipsN", values: [1, 3, 5, 10], get: (c) => c.chipsN, set: (c, v) => (c.chipsN = v as Cfg["chipsN"]) },
     { name: "chipsPct", values: [0, 5, 10], get: (c) => c.chipsPct, set: (c, v) => (c.chipsPct = v as number) },
-    { name: "vetoGuards", values: [[], ["rsi"], ["bias"], ["foreignSell"]], get: (c) => JSON.stringify(c.vetoGuards), set: (c, v) => (c.vetoGuards = v as string[]) },
+    { name: "vetoGuards", values: [[], ["rsi"], ["bias"], ["surge"], ["foreignSell"], ["bias", "surge"]], get: (c) => JSON.stringify(c.vetoGuards), set: (c, v) => (c.vetoGuards = v as string[]) },
+    { name: "weakVeto", values: [null, 0], get: (c) => c.weakVeto, set: (c, v) => (c.weakVeto = v as number | null) },
+    { name: "brokeVeto", values: [true, false], get: (c) => c.brokeVeto, set: (c, v) => (c.brokeVeto = v as boolean) },
   ];
   if (withExt)
     k.push(
+      { name: "weights.tech", values: [0.5, 1, 1.5, 2], get: (c) => c.weights!.tech, set: (c, v) => (c.weights!.tech = v as number) },
+      { name: "weights.chips", values: [0.5, 1, 1.5, 2], get: (c) => c.weights!.chips, set: (c, v) => (c.weights!.chips = v as number) },
+      { name: "techVeto", values: [true, false], get: (c) => c.techVeto, set: (c, v) => (c.techVeto = v as boolean) },
+      { name: "chipsVeto", values: [true, false], get: (c) => c.chipsVeto, set: (c, v) => (c.chipsVeto = v as boolean) },
       { name: "weights.rev", values: [0, 0.5, 1], get: (c) => c.weights!.rev, set: (c, v) => (c.weights!.rev = v as number) },
       { name: "weights.val", values: [0, 0.5, 1], get: (c) => c.weights!.val, set: (c, v) => (c.weights!.val = v as number) },
       { name: "weights.theta", values: [1, 1.5, 2, 2.5], get: (c) => c.weights!.theta, set: (c, v) => (c.weights!.theta = v as number) }
@@ -389,13 +409,13 @@ function knobs(withExt: boolean): Knob[] {
  */
 const MIN_GAIN = 0.05;
 function halves(c: Cfg): number[] | null {
-  const full = stats(c, "train");
+  const full = stats(c, SC.train);
   if (!(full.share >= 0.08) || full.flips > baseFlips * 1.15) return null;
   return TRAIN_HALVES.map((h) => { const s = stats(c, h); return s.d20 + 0.5 * s.d10; });
 }
 let baseFlips = Infinity;
 function optimize(start: Cfg, withExt: boolean, tag: string) {
-  baseFlips = stats(BASE, "train").flips;
+  baseFlips = stats(BASE, SC.train).flips;
   let cur = clone(start);
   let curH = halves(cur) ?? [-Infinity, -Infinity];
   const trail: Array<{ cfg: Cfg; obj: number[]; step: string }> = [{ cfg: clone(cur), obj: curH, step: "起點" }];
@@ -424,46 +444,93 @@ function optimize(start: Cfg, withExt: boolean, tag: string) {
     }
     if (!improved) break;
   }
-  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `opt-${tag}.json`), JSON.stringify(trail));
+  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `opt-${tag}-${SCHEME_KEY}.json`), JSON.stringify(trail));
   return trail;
 }
 
-function runOptimize() {
-  const withExtStart: Cfg = { ...clone(BASE), useRevenue: true, useValuation: true, weights: { tech: 1, chips: 1, rev: 1, val: 1, theta: 2 } };
-  const tracks = [
-    { tag: "門檻版", trail: optimize(BASE, false, "門檻版") },
-    { tag: "加權版", trail: optimize(withExtStart, true, "加權版") },
-  ];
-  // 驗證集挑選：每條軌跡的每個中間點都是候選（含起點＝現行），取驗證集 20 日週取樣超額最高者；
-  // 但 t 必須 ≥ 現行驗證 t − 0.3、翻轉 ≤ 現行 ×1.15。
-  const baseVal = stats(BASE, "val");
-  console.log(`\n### 驗證集挑選（${SPLITS.val.from}～${SPLITS.val.to}）\n\n${HEADER}`);
-  console.log(`| 現行 ${fmtStat(baseVal)}`);
-  let pick: { name: string; cfg: Cfg; s: Stat } = { name: "現行", cfg: BASE, s: baseVal };
-  for (const tr of tracks)
-    for (const p of tr.trail) {
-      const s = stats(p.cfg, "val");
-      console.log(`| ${tr.tag}：${p.step} ${fmtStat(s)}`);
-      if (s.b20 > pick.s.b20 && s.t20 >= baseVal.t20 - 0.3 && s.flips <= baseVal.flips * 1.15) pick = { name: `${tr.tag}：${p.step}`, cfg: p.cfg, s };
+export const WEIGHTED_START: Cfg = { ...JSON.parse(JSON.stringify(BASE)), useRevenue: true, useValuation: true, weights: { tech: 1, chips: 1, rev: 1, val: 1, theta: 2 } };
+function runOptimize(which: string) {
+  if (which === "門檻版" || which === "both") optimize(BASE, false, "門檻版");
+  if (which === "加權版" || which === "both") optimize(WEIGHTED_START, true, "加權版");
+}
+/**
+ * 驗證集挑選：兩條軌跡的每個中間點（含起點＝現行）都是候選，取驗證集「日頻 20 日＋0.5×日頻 10 日」最高者；
+ * 且週取樣 20 日 t ≥ 現行驗證 t − 0.3、翻轉 ≤ 現行 ×1.15、買進占比 ≥8%。
+ */
+function pickOnVal() {
+  const vs = (c: Cfg) => SC.val.map((r) => stats(c, r));
+  const baseVals = vs(BASE);
+  const sc = (ss: Stat[]) => mean(ss.map((s) => s.d20 + 0.5 * s.d10));
+  const okVal = (ss: Stat[]) => ss.every((s, i) => s.t20 >= baseVals[i].t20 - 0.3 && s.flips <= baseVals[i].flips * 1.15 && s.share >= 0.08);
+  console.log(`
+### 驗證集挑選（${SC.val.map(rl).join("、")}）
+
+${HEADER}`);
+  baseVals.forEach((s, i) => console.log(`| 現行［驗證${i + 1}］ ${fmtStat(s)}`));
+  let pick: { name: string; cfg: Cfg; s: Stat[] } = { name: "現行", cfg: BASE, s: baseVals };
+  for (const tag of ["門檻版", "加權版"]) {
+    const fn = path.join(ABLATION_OUT_DIR, `opt-${tag}-${SCHEME_KEY}.json`);
+    if (!fs.existsSync(fn)) continue;
+    for (const p of JSON.parse(fs.readFileSync(fn, "utf8")) as Array<{ cfg: Cfg; step: string }>) {
+      const s = vs(p.cfg);
+      s.forEach((x, i) => console.log(`| ${tag}：${p.step}［驗證${i + 1}］ ${fmtStat(x)}`));
+      if (sc(s) > sc(pick.s) + 0.05 && okVal(s)) pick = { name: `${tag}：${p.step}`, cfg: p.cfg, s };
     }
-  console.log(`\n驗證集選中：${pick.name}`);
-  fs.writeFileSync(path.join(ABLATION_OUT_DIR, "picked.json"), JSON.stringify(pick));
+  }
+  console.log(`
+驗證集選中：${pick.name}`);
+  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `picked-${SCHEME_KEY}.json`), JSON.stringify(pick));
 }
 
-/** 最終測試（只跑一次）：測試集＋樣本外，現行 vs 選中規則。 */
+/** 最終測試（每個方案只跑一次）：現行 vs 驗證集選中規則，列出訓練／驗證／測試各段。 */
 function final() {
-  const pick = JSON.parse(fs.readFileSync(path.join(ABLATION_OUT_DIR, "picked.json"), "utf8")) as { name: string; cfg: Cfg };
-  console.log(`\n### 最終測試：現行 vs 「${pick.name}」\n\n${HEADER.replace("| 變體 |", "| 段／規則 |")}`);
-  const out: Record<string, { cur: Stat; new: Stat }> = {};
-  for (const sp of ["train", "val", "test", "oos"] as const) {
-    const a = stats(BASE, sp), b = stats(pick.cfg, sp);
-    out[sp] = { cur: a, new: b };
-    console.log(`| ${sp} 現行 ${fmtStat(a)}`);
-    console.log(`| ${sp} 新規則 ${fmtStat(b)}`);
+  const pick = JSON.parse(fs.readFileSync(path.join(ABLATION_OUT_DIR, `picked-${SCHEME_KEY}.json`), "utf8")) as { name: string; cfg: Cfg };
+  console.log(`
+### 最終測試（方案 ${SCHEME_KEY}：${SC.desc}）：現行 vs 「${pick.name}」
+
+${HEADER.replace("| 變體 |", "| 段／規則 |")}`);
+  const segs: Array<[string, Range]> = [["訓練", SC.train], ...SC.val.map((r, i): [string, Range] => [`驗證${i + 1}`, r]), ...SC.test.map((r, i): [string, Range] => [`測試${i + 1}`, r])];
+  const out: Array<{ seg: string; range: Range; cur: Stat; new: Stat }> = [];
+  for (const [seg, r] of segs) {
+    const a = stats(BASE, r), b = stats(pick.cfg, r);
+    out.push({ seg, range: r, cur: a, new: b });
+    console.log(`| ${seg}（${rl(r)}）現行 ${fmtStat(a)}`);
+    console.log(`| ${seg} 新規則 ${fmtStat(b)}`);
   }
-  const ok = (sp: "test" | "oos") => out[sp].new.b20 >= out[sp].cur.b20 && out[sp].new.t20 >= out[sp].cur.t20 && out[sp].new.flips <= out[sp].cur.flips * 1.15;
-  console.log(`\n上線條件：測試 ${ok("test") ? "通過" : "不通過"}、樣本外 ${ok("oos") ? "通過" : "不通過"} → ${ok("test") && ok("oos") ? "可上線" : "不上線"}`);
-  fs.writeFileSync(path.join(ABLATION_OUT_DIR, "final.json"), JSON.stringify({ pick, out }));
+  const tests = out.filter((o) => o.seg.startsWith("測試"));
+  const ok = tests.map((o) => o.new.b20 >= o.cur.b20 && o.new.t20 >= o.cur.t20 && o.new.flips <= o.cur.flips * 1.15);
+  console.log(`
+上線條件（測試段 20 日超額 ≥ 現行、t 不降、翻轉 ≤ ×1.15）：${tests.map((o, i) => `${o.seg} ${ok[i] ? "通過" : "不通過"}`).join("、")} → ${pick.name === "現行" ? "驗證集選中現行，不需上線" : ok.every(Boolean) ? "可上線" : "不上線"}`);
+  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `final-${SCHEME_KEY}.json`), JSON.stringify({ pick, out }));
+}
+
+/** 事先登錄的假設（見報告「事先登錄」）：[名稱, 對照規則, 候選規則] */
+const PROD_LIKE: Cfg = { ...JSON.parse(JSON.stringify(BASE)), useRevenue: true, useValuation: true };
+export const HYPOTHESES: Array<[string, Cfg, Cfg]> = [
+  ["H1 大盤60日報酬<0%不買", BASE, { ...JSON.parse(JSON.stringify(BASE)), weakVeto: 0 }],
+  ["H1' H1（正式站版：含財報基本面）", PROD_LIKE, { ...JSON.parse(JSON.stringify(PROD_LIKE)), weakVeto: 0 }],
+  ["H2 財報／基本面不計入支持數", PROD_LIKE, BASE],
+];
+/** 假設檢定（測試段只跑一次）：各段 對照 vs 候選。 */
+function hyp() {
+  console.log(`
+### 事先登錄假設（方案 ${SCHEME_KEY}：${SC.desc}）
+
+${HEADER.replace("| 變體 |", "| 假設／段／規則 |")}`);
+  const segs: Array<[string, Range]> = [["訓練", SC.train], ...SC.val.map((r, i): [string, Range] => [`驗證${i + 1}`, r]), ...SC.test.map((r, i): [string, Range] => [`測試${i + 1}`, r])];
+  const res: unknown[] = [];
+  for (const [name, ctl, cand] of HYPOTHESES) {
+    const oks: string[] = [];
+    for (const [seg, r] of segs) {
+      const a = stats(ctl, r), b = stats(cand, r);
+      console.log(`| ${name}｜${seg}（${rl(r)}）對照 ${fmtStat(a)}`);
+      console.log(`| ${name}｜${seg} 候選 ${fmtStat(b)}`);
+      if (seg.startsWith("測試")) oks.push(`${seg}${b.b20 >= a.b20 && b.t20 >= a.t20 && b.flips <= a.flips * 1.15 ? "通過" : "不通過"}`);
+      res.push({ name, seg, r, a, b });
+    }
+    console.log(`| **${name} 上線條件：${oks.join("、")}** |||||||||`);
+  }
+  fs.writeFileSync(path.join(ABLATION_OUT_DIR, `hyp-${SCHEME_KEY}.json`), JSON.stringify(res));
 }
 
 const cmd = process.argv[2];
@@ -472,6 +539,8 @@ if (cmd === "ablate") {
   ablate(BASE, "現行");
   ablate({ ...clone(BASE), useRevenue: true, useValuation: true }, "現行＋財報基本面");
 }
-if (cmd === "optimize") runOptimize();
+if (cmd === "optimize") runOptimize(process.argv[3] ?? "both");
+if (cmd === "pick") pickOnVal();
 if (cmd === "final") final();
-if (cmd === "stat") for (const sp of ["train", "val", "test", "oos"] as const) console.log(sp, fmtStat(stats(BASE, sp)));
+if (cmd === "hyp") hyp();
+if (cmd === "stat") for (const r of [SC.train, ...SC.val]) console.log(rl(r), fmtStat(stats(BASE, r)));
