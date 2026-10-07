@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getStore, type Row } from "@/lib/auth/store";
 import { taipeiNow } from "@/lib/auth/accounts";
+import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { INDICATOR_TYPE_MAP, normalizeParams } from "./indicatorCatalog";
 import { normalizeStrategyConfig, type SimPosition, type StrategyConfig, type UserIndicator } from "./engine";
 
@@ -256,6 +257,13 @@ function cleanSymbols(v: unknown): SimView["symbols"] {
   return out;
 }
 
+/** 使用者只打代號也行：台股從股票清單補上名稱（補不到就維持代號） */
+async function withNames(list: SimView["symbols"]): Promise<SimView["symbols"]> {
+  if (!list.some((x) => x.market === "TW" && x.name === x.symbol)) return list;
+  await ensureTwUniverseWarm().catch(() => {});
+  return list.map((x) => (x.market === "TW" && x.name === x.symbol ? { ...x, name: findInUniverse(x.symbol, "TW")?.name ?? x.symbol } : x));
+}
+
 export async function saveSim(
   owner: Owner,
   input: { id?: string; name?: unknown; strategyId?: unknown; universe?: unknown; symbols?: unknown; marketTopN?: unknown; initialCash?: unknown; autoTrade?: unknown },
@@ -266,7 +274,7 @@ export async function saveSim(
   const strategyId = String(input.strategyId ?? "");
   if (strategyId && !strategies.some((s) => s.ID === strategyId)) throw new StrategyError("找不到選擇的策略");
   const universe = input.universe === "market" ? "market" : "list";
-  const symbols = cleanSymbols(input.symbols);
+  const symbols = await withNames(cleanSymbols(input.symbols));
   const topN = Math.round(Math.min(MAX_MARKET_TOP_N, Math.max(10, Number(input.marketTopN) || 50)));
   const autoTrade = input.autoTrade !== false && input.autoTrade !== "false";
   if (autoTrade && !strategyId) throw new StrategyError("開啟自動交易要先選擇策略");
