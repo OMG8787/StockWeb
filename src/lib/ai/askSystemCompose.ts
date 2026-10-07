@@ -58,7 +58,12 @@ import {
   RULE_HIGH_CONFIDENCE,
   RULE_DECISION_CARD,
   RULE_MARKET_PULSE,
+  RULE_MARKET_OUTLOOK,
+  RULE_SCREEN_CONCEPT,
+  RULE_GENERAL_KNOWLEDGE,
 } from "./askSystemPrompt";
+import type { QuestionType } from "./questionType";
+import { CONCEPT_SCREEN_TITLE } from "./grounding/conceptScreen";
 import { DECISION_CARD_TITLE } from "./decisionCard";
 import { MARKET_PULSE_TITLE } from "./grounding/movers";
 import { SITE_RATING_TITLE } from "./siteRating";
@@ -133,15 +138,20 @@ export interface AskPromptContext {
   topicNewsText?: string;
   /** 大盤題的精簡漲跌榜（grounding/movers.ts buildMarketPulseGrounding） */
   marketPulseText?: string;
+  /** 題型（questionType.ts classifyQuestion；唯一來源） */
+  questionType?: QuestionType;
+  /** 概念篩選區塊文字（grounding/conceptScreen.ts） */
+  conceptText?: string;
 }
 
 export function composeAskSystemPrompt(c: AskPromptContext): string {
-  const dataText = [c.stockText, c.holdingsText, c.moversText, c.techScreenText, c.ratingListText ?? ""].join("\n");
+  const dataText = [c.stockText, c.holdingsText, c.moversText, c.techScreenText, c.ratingListText ?? "", c.conceptText ?? ""].join("\n");
+  const outlook = c.questionType === "market-outlook";
   const asked = `${c.question}\n${c.lastUserTurn}`;
   const hasStockLike = c.stockCount > 0 || c.holdingsMode !== "none";
   const hasStockHistory = dataText.includes(HISTORY_SECTION_TITLE);
   const marketHistoryRelevant =
-    c.indexText.includes(MARKET_HISTORY_TITLE) && (hasStockLike || c.marketWide || MARKET_JUDGMENT_PATTERN.test(asked));
+    c.indexText.includes(MARKET_HISTORY_TITLE) && (hasStockLike || c.marketWide || outlook || MARKET_JUDGMENT_PATTERN.test(asked));
 
   const holdingsRule =
     c.holdingsMode === "deep"
@@ -180,7 +190,7 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     c.indexText.includes(BLOCK_MARKERS.macro) ? RULE_MACRO : "",
     (c.topicNewsText ?? "").includes(BLOCK_MARKERS.topicNews) ? RULE_TOPIC_NEWS : "",
     RATE_TOPIC_PATTERN.test(asked) ? RULE_RATE_HIKE_NUANCE : "",
-    c.indexText.includes(BLOCK_MARKERS.nightFutures) && MARKET_JUDGMENT_PATTERN.test(asked) ? RULE_NIGHT_FUTURES : "",
+    c.indexText.includes(BLOCK_MARKERS.nightFutures) && (outlook || MARKET_JUDGMENT_PATTERN.test(asked)) ? RULE_NIGHT_FUTURES : "",
     // 全市場篩選
     c.moversText ? RULE_MOVERS : "",
     c.techScreenText ? RULE_TECH_SCREEN_USAGE : "",
@@ -199,9 +209,14 @@ export function composeAskSystemPrompt(c: AskPromptContext): string {
     dataText.includes(BLOCK_MARKERS.similarCases) || dataText.includes(BLOCK_MARKERS.lessons) ? RULE_EXPERIENCE : "",
     dataText.includes(BLOCK_MARKERS.aiView) ? RULE_AI_VIEW : "",
     dataText.includes(BLOCK_MARKERS.ratingChange) ? RULE_RATING_CHANGE : "",
-    c.hasTradingStance ? RULE_TRADING_STANCE : "",
+    // 只有會談到「現在買不買」的題目才帶（2026-10-07 評測：問 ETF 跟個股差在哪，Lite 結尾補「明天開盤或盤中可分批」）。
+    c.hasTradingStance && (hasStockLike || c.marketWide || c.moversText || c.techScreenText || c.conceptText || c.hasTheme) ? RULE_TRADING_STANCE : "",
     c.stockText.includes(DECISION_CARD_TITLE) ? RULE_DECISION_CARD : "",
     (c.marketPulseText ?? "").includes(MARKET_PULSE_TITLE) ? RULE_MARKET_PULSE : "",
+    // 題型規則（questionType.ts）
+    outlook ? RULE_MARKET_OUTLOOK : "",
+    (c.conceptText ?? "").includes(CONCEPT_SCREEN_TITLE) ? RULE_SCREEN_CONCEPT : "",
+    c.questionType === "general-knowledge" ? RULE_GENERAL_KNOWLEDGE : "",
     RULE_YES_NO_DIRECT,
     weekendNoteForAi(),
     // 放最後：長度與格式規則聲明優先於前面要求多解釋的規則

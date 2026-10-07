@@ -143,6 +143,11 @@ async function loadYahooCloses(symbol: string): Promise<DailyClose[]> {
   });
 }
 
+/** 加權指數近一年日K收盤（跟【市場歷史與情緒走勢】同一份快取；概念篩選算「大盤下跌日抗跌」用）。 */
+export function getTaiexDailyCloses(): Promise<DailyClose[]> {
+  return loadYahooCloses("^TWII");
+}
+
 interface TpexIndexResponse {
   stat?: string;
   tables?: Array<{ fields?: string[]; data?: string[][] }>;

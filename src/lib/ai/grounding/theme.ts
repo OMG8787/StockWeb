@@ -128,3 +128,34 @@ export async function buildThemeGrounding(theme: ThemeMatch): Promise<string> {
     return "";
   }
 }
+
+/** 問句提到的所有官方產業類股（類股比較題用；detectTheme 只回第一個）。 */
+export function detectSectorThemes(question: string): ThemeMatch[] {
+  return SECTOR_THEMES.filter((t) => t.pattern.test(question)).map(({ sector, label }) => ({ label, sector }));
+}
+
+/**
+ * 類股比較（2026-10-07 開放題評測：問「半導體跟航運類股最近哪個比較強」，只附了半導體一個類股，模型只能答「查不到航運」）。
+ * 每個類股用官方產業分類的全部個股算今天的漲跌家數、成交金額加權漲跌幅（程式算好，AI 照數字比較），再附各自的代表股。
+ */
+export async function buildSectorCompareGrounding(themes: ThemeMatch[]): Promise<string> {
+  const rows = await Promise.all(
+    themes.map(async (t) => {
+      if (!t.sector) return "";
+      const all = await searchStocks({ market: "TW", sectors: [t.sector], sortBy: "turnover", sortDir: "desc" }).catch(() => []);
+      if (all.length === 0) return `${t.label}（${t.sector}）：這次讀不到資料`;
+      const up = all.filter((s) => s.changePercent > 0).length;
+      const down = all.filter((s) => s.changePercent < 0).length;
+      const turnover = all.reduce((a, s) => a + (s.turnover ?? 0), 0);
+      const weighted = turnover > 0 ? all.reduce((a, s) => a + s.changePercent * (s.turnover ?? 0), 0) / turnover : 0;
+      const top = all
+        .slice(0, 3)
+        .map((s) => `${s.name}(${s.symbol}) ${s.changePercent >= 0 ? "+" : ""}${s.changePercent}%`)
+        .join("、");
+      return `${t.label}（官方產業分類「${t.sector}」共 ${all.length} 檔）：今天上漲 ${up} 檔、下跌 ${down} 檔，成交金額加權平均漲跌 ${weighted >= 0 ? "+" : ""}${weighted.toFixed(2)}%，成交金額約 ${Math.round(turnover / 1e8)} 億元；成交最大的代表股：${top}`;
+    })
+  );
+  const body = rows.filter(Boolean);
+  if (body.length < 2) return "";
+  return `【類股比較（程式依官方產業分類全部個股算好，只有今天的漲跌；更長期間的類股表現本站沒有，回答時照實說）】\n${body.join("\n")}`;
+}
