@@ -1,4 +1,4 @@
-import { getChart } from "@/lib/data";
+import { getChartLive } from "@/lib/data";
 import type { Market, TechScreenItem } from "@/lib/data";
 import type { Candle } from "@/lib/data/types";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
@@ -144,7 +144,7 @@ export function describeIndicatorState(state: ReturnType<typeof computeIndicator
  *  同一檔股票時說法不會前後矛盾。 */
 export async function describeHoldingTechnical(quote: { symbol: string; market: Market; price: number }): Promise<string> {
   try {
-    const chart = await getChart(quote.symbol, "3m", quote.market);
+    const chart = await getChartLive(quote.symbol, "3m", quote.market);
     if (!chart) return "；技術面：目前抓不到K線資料，無法計算指標";
     const state = computeIndicatorState(chart.candles, quote.price);
     if (!state) return "；技術面：K線資料不足，無法計算指標";

@@ -45,6 +45,7 @@ export { detectMarket, normalizeSymbol } from "./symbols";
 export { getQuote, getMarketDepth } from "./quote";
 export { getQuotesBatch } from "./quoteBatch";
 export { getChart, getChartWithWarmup, getLastChartFailure } from "./chart";
+export { getChartLive, getChartLiveWithWarmup } from "./chartLive";
 export { getIndices, getTaifexNightFutures } from "./marketIndices";
 export { getFundamentals, getEarnings, getChips, getMaterialAnnouncements } from "./companyData";
 export { backfillVolumeHistory } from "./volumeBackfill";

@@ -116,6 +116,7 @@ flowchart TD
 | 概念篩選名單（抗壓性＝大盤下跌日少跌＋回撤≤中位數；上漲趨勢＝站上20日線、20日線＞季線且上升；低波動＝近20日日波動最低三成；高殖利率≥4%） | `computeConceptStats()`（data/conceptScreen.ts，母體＝技術篩選同一份前120檔、K線同一份 3m 快取、加權指數用 marketHistory `getTaiexDailyCloses()`）＋`pickConceptStocks()`（grounding/conceptScreen.ts）；每檔評等讀 `getStockRatings`＋`describeSiteRating` | `concept-screen:TW:v1`、`CONCEPT_SCREEN_MAX`＝6 | ask.ts（screen-concept 題型） |
 | 技術指標數值條件名單（「RSI70以下」「K值低於30」＋可加「建議買進」） | `parseIndicatorConditions()`／`conditionsForQuestion()`（techScreenConditions.ts，純函式）解析條件；`buildConditionGrounding()`（grounding/techScreen.ts）對技術篩選掃描範圍逐檔比對，要求建議買進時再對符合者（成交金額前 `CONDITION_RATING_LIMIT`＝24 檔）算 `getStockRating`（22 秒期限，逾時照實寫只檢查幾檔）；有條件時 ask.ts 不再另等今日建議名單（`conditionScreen`） | `CONDITION_LIST_SHOW_LIMIT`＝40、`CONDITION_RATING_LIMIT`＝24 | AI 問答（技術篩選題型）；回答只能列這份名單，評測 `conditionListOnly`／`rsiConsistent` 檢查 |
 | MACD 與 KD 同時即將交叉（「兩種線快線都快超過慢線」）＋最接近名單 | `rankDualNearCross()`（techScreenConditions.ts）：兩者都符合 nearCross.ts 門檻＝符合；否則兩條都在交叉前、差距都縮小且推估 ≤10 天的取最近 8 檔；MACD 門檻 `MACD_NEAR_CROSS_*`（nearCross.ts，2026-10-07 回測校準：命中 72.2→75.2%）；意圖 `TECH_FAST_SLOW_LINE_PATTERN`（intent.ts） | `DUAL_CLOSEST_MAX_EST_DAYS`＝10、`DUAL_CLOSEST_LIMIT`＝8 | AI 問答（技術篩選） |
+| 算指標用的日K（盤中補今天這根；跟券商 App 一致） | `getChartLive()`／`getChartLiveWithWarmup()`（data/chartLive.ts）＝官方日K（getChart 快取 5 分）＋`overlayLiveCandle()`（data/liveCandle.ts，純函式）：報價是今天的成交（tradeTime＝交易所今天、量>0、開高低有值、非興櫃）時，盤中補／覆蓋今天這根（開高低＝今日、收＝現價、量＝累計量、`live:true`）；收盤後官方已有今天就不動，官方還沒公布前用最後成交價補 | 補的那根每次依報價快取（單檔 30 秒級；批次用全市場報價表 `getMarketQuoteMap`）重算；`completedCandles()` 排除 live（量能比、價位框架、追高防護、翻轉確認日、歷史脈絡用已收盤日K，結論保護不變） | 評等（stockRating.ts）、個股資料與指標說明（grounding/stock.ts、indicators.ts）、技術篩選／即將交叉（data/techScreen.ts，TTL 盤中改 10 分）、動能（momentum.ts）、/api/chart（圖表）；回測與歷史脈絡不經過；AI／圖表提到指標要註明「盤中訊號，收盤才確定」（`LIVE_BAR_INDICATOR_NOTE`、圖表下方小字） |
 | RSI(14) 數值與算法（Wilder 平滑＝券商慣用；盤中日K只到前一個已收盤交易日） | `rsiSeries()`／`latestRsi()`（rsiFormula.ts；`signals.computeRSI`、`indicators.computeRsiSeries`、評等、技術篩選、圖表、學習特徵全吃它） | `RSI_DEFAULT_METHOD`＝"wilder"；`RatingFeatures.rsm`＝"w" 隔離舊簡單平均紀錄 | 同一檔 RSI 在個股資料／技術篩選／圖表同一個數字；AI 只能引用資料裡的 RSI（評測 `rsiConsistent`） |
 | 死亡交叉說明（哪個死叉、哪一天已收盤確認或盤中、技術面判定、回測依據） | `describeDeathCrossNote()`（decisionCard.ts，結論卡一行；`tech.lastIsToday` 由 stock.ts 以日K最後一根日期對照交易所今天判定）；`describeRecentCrosses(candles, marketOpen, todayKey)` 同一個日期判斷 | `DEATH_CROSS_BACKTEST_NOTE`（回測 docs/backtest/2026-10-macd-near-cross.md：死叉後超額不顯著，評分不改） | 買賣判斷題（結論卡）；評測 `deathCrossExplained` |
 | 三大法人資料日期（盤中沒有當天官方資料；公布後 10 分鐘內換成當天） | `chipsSectionTitle()`（資料標題標日期）＋`ensureChipsDateMentioned()`（chipsDateMention.ts，回答提到法人買賣超卻沒講日期就補一句註）；快取 `institutionalCacheSpec()`（data/chipsPublishWindow.ts：key 帶台北日期＋時段 a/p/z，15:00～17:30 TTL 10 分鐘） | `CHIPS_PUBLISH_WINDOW_*` | AI 問答後處理（postProcessAiAnswer）、個股資料、籌碼排行共用 `getTwInstitutionalMap()`；評測 `chipsDateMentioned` |
@@ -159,11 +160,11 @@ flowchart TD
 
 | 快取 | key | TTL | 版本史／備註 |
 |---|---|---|---|
-| 個股評等 | `stock-rating:v7:{代號}:{台北日期}` | 10 分（失敗 60 秒） | 不含市場（避免同一檔有無市場各算一份）；改評等規則或 StockRatingResult 欄位要升版 |
-| 技術篩選（成交金額前 120 檔台股＋60 檔美股的指標狀態） | `tech-screen:{TW｜US}:v5` | 盤中 30 分、收盤後 3 小時（SWR 1 小時） | v5：RSI 改 Wilder；v4：MACD 即將交叉門檻回測重校＋IndicatorState.macdReading；v3：KD 券商遞迴版 |
-| 動能多訊號 | `momentum:{市場}:{minSignals}:v3` | 同上 | v3：RSI Wilder |
+| 個股評等 | `stock-rating:v8:{代號}:{台北日期}` | 10 分（失敗 60 秒） | 不含市場（避免同一檔有無市場各算一份）；改評等規則或 StockRatingResult 欄位要升版 |
+| 技術篩選（成交金額前 120 檔台股＋60 檔美股的指標狀態） | `tech-screen:{TW｜US}:v6` | 盤中 10 分、收盤後 3 小時（SWR 1 小時） | v6：盤中用即時價補今天這根日K；v5：RSI 改 Wilder；v4：MACD 即將交叉門檻回測重校＋IndicatorState.macdReading；v3：KD 券商遞迴版 |
+| 動能多訊號 | `momentum:{市場}:{minSignals}:v4` | 同上 | v4：盤中補今天這根日K；v3：RSI Wilder |
 | 三大法人全市場表 | `chips:TW:institutional:v3:{台北日期}:{a｜p｜z}` | 一般 1 小時；15:00～17:30 公布窗口（p）10 分鐘 | 公布前（a）、窗口（p）、之後（z）各自一份，跨過 15:00 不沿用公布前的表（chipsPublishWindow.ts）；回答裡法人資料日期由 `ensureChipsDateMentioned` 保證 |
-| 今日建議程式名單層 | `action-list:v6:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫、每檔程式風險原句 riskNote（v4：卡片「風險」優先用評等的具體短線風險，不用 AI 的泛用句；v5：KD 改券商遞迴算法）；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
+| 今日建議程式名單層 | `action-list:v7:{台北日期}:{today｜next-open}` | 10 分 | 名單、結論、價位、操作計畫、每檔程式風險原句 riskNote（v4：卡片「風險」優先用評等的具體短線風險，不用 AI 的泛用句；v5：KD 改券商遞迴算法）；跟評等各自 10 分鐘，最壞相差一個 TTL（見第 6 節 P-2） |
 | 今日建議上一份名單存檔 | `action-list-last:v1:{資料已定時段代號}` | 62 小時 | 平日 22:00～隔天 08:30、週末同一代號（上一個交易日）；只存輸入完整那次的名單評等；重算時上一份名單的股票只有被重新評等為不建議買進才換掉（`actionStability.ts`）。輸入不完整（`degradedReasons`）的名單只快取 1 分鐘、不存檔 |
 | 今日建議 AI 解說層 | `action-brief-ai:v3:{台北日期}:{模式}:{時點}`＋`…:latest` | 時點值 36 小時、latest 7 天 | 名單或評等字樣變動的股票不沿用舊解說；不跨日 |
 | 今日快報 | `daily-brief:v10:{時點}`＋latest | 同上 | 存檔 `brief-archive:v1:{日期}` 400 天 |

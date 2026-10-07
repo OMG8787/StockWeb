@@ -11,6 +11,7 @@ import {
 } from "@/lib/nearCross";
 import { currentKdMethod, kdFromRsv, type KdMethod } from "@/lib/kdFormula";
 import { latestRsi } from "@/lib/rsiFormula";
+import { completedCandles } from "@/lib/data/liveCandle";
 
 export interface Signal {
   label: string;
@@ -85,8 +86,10 @@ export function computeSignals(candles: Candle[], currentPrice: number, range: C
   const rangeLabel = RANGE_LABEL[range];
 
   // Volume vs its own trailing average (excludes the latest bar).
-  const latest = candles[candles.length - 1];
-  const priorVolumes = candles.slice(Math.max(0, candles.length - 21), candles.length - 1).map((c) => c.volume);
+  // 盤中補上的今天這根（live）只有累計量、跟完整日量不可比，量能比一律用已收盤的最後一根（liveCandle.ts）。
+  const volCandles = completedCandles(candles);
+  const latest = volCandles[volCandles.length - 1];
+  const priorVolumes = volCandles.slice(Math.max(0, volCandles.length - 21), volCandles.length - 1).map((c) => c.volume);
   if (priorVolumes.length >= 5) {
     const avgVolume = priorVolumes.reduce((a, b) => a + b, 0) / priorVolumes.length;
     if (avgVolume > 0) {
@@ -403,8 +406,9 @@ export function computeIndicatorState(candles: Candle[], currentPrice: number): 
   const kd = computeKd(candles);
   const streak = computeStreak(candles);
 
-  const latest = candles[candles.length - 1];
-  const priorVolumes = candles.slice(Math.max(0, candles.length - 21), candles.length - 1).map((c) => c.volume);
+  const volCandles = completedCandles(candles); // 量能比排除盤中補上的今天這根（liveCandle.ts）
+  const latest = volCandles[volCandles.length - 1];
+  const priorVolumes = volCandles.slice(Math.max(0, volCandles.length - 21), volCandles.length - 1).map((c) => c.volume);
   const avgVolume =
     priorVolumes.length >= 5 ? priorVolumes.reduce((a, b) => a + b, 0) / priorVolumes.length : 0;
 

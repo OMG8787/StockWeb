@@ -2,7 +2,8 @@ import { mapWithConcurrency } from "./cache";
 import type { Market } from "./types";
 import { computeIndicatorState, computeSignals, type IndicatorState, type Signal } from "@/lib/signals";
 import { searchStocks } from "./search";
-import { getChart } from "./chart";
+import { getChartLive } from "./chartLive";
+import { getMarketQuoteMap } from "./marketQuoteMap";
 import { cachedListWithDegradedEmptyTtl } from "./degradedCache";
 import { HEAVY_SWR_MS, sessionAwareTtl } from "./swrPolicy";
 
@@ -23,7 +24,8 @@ export interface TechScreenItem {
 // 前120檔台股+60檔美股各抓一次K線），5分鐘的 warm-cache 排程若每次都重算這個，
 // 是 Vercel 免費方案用量吃緊後盤點出來的最大浪費源頭，30分鐘仍然遠比技術指標
 // 交叉訊號實際變化的速度新鮮很多。
-const TECH_SCREEN_TTL_MS = 30 * 60_000;
+// 2026-10-07：盤中指標含即時價（liveCandle.ts），30 分鐘太久會跟個股資料（評等 10 分鐘）的 RSI／KD 對不上，改 10 分鐘。
+const TECH_SCREEN_TTL_MS = 10 * 60_000;
 // 空結果（一檔都沒算出來）專用的短 TTL——見
 // cachedListWithDegradedEmptyTtl() 的完整說明。
 const TECH_SCREEN_DEGRADED_TTL_MS = 60_000;
@@ -80,17 +82,19 @@ export function getLastTechScreenRun(): Record<string, string> {
  */
 export async function getTechnicalScreen(market: Market): Promise<TechScreenItem[]> {
   return cachedListWithDegradedEmptyTtl(
+    // v6（2026-10-07）：盤中用即時價補今天這根日K（liveCandle.ts），指標含盤中最新價，舊快取是前一根為止的數字。
     // v5（2026-10-07）：RSI 改 Wilder 版（rsiFormula.ts），RSI 數值與超買／超賣不同，舊快取不可沿用。
     // v4（2026-10-07）：MACD 即將交叉門檻回測重校、IndicatorState 新增 macdReading，舊快取沒有也不可沿用。
     // v3（2026-10-07）：KD 預設改券商遞迴版、即將交叉門檻重新校準，舊快取的 KD 數值與名單不可沿用。
     // v2（2026-10-05）：IndicatorState 新增 kdNearCross／macdNearCross（即將交叉），舊快取沒有這兩欄。
-    `tech-screen:${market}:v5`,
+    `tech-screen:${market}:v6`,
     // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
     sessionAwareTtl(market, TECH_SCREEN_TTL_MS),
     TECH_SCREEN_DEGRADED_TTL_MS,
     async () => {
       const pool = await searchStocks({ market, sortBy: "turnover", sortDir: "desc" });
       const candidates = pool.slice(0, TECH_SCREEN_CANDIDATE_LIMIT[market]);
+      const quoteMap = await getMarketQuoteMap(market);
 
       const results = await mapWithConcurrency(
         candidates,
@@ -104,7 +108,8 @@ export async function getTechnicalScreen(market: Market): Promise<TechScreenItem
           // 單一檔抓不到就跳過那一檔（照 getChart 回傳 null 時本來就有的處理），
           // 才是正確的降級方式。
           try {
-            const chart = await getChart(item.symbol, "3m", item.market);
+            // 盤中用全市場報價表的即時價補今天這根日K（liveCandle.ts），指標跟券商 App 盤中一致；批次不另打單檔報價。
+            const chart = await getChartLive(item.symbol, "3m", item.market, { quote: quoteMap.get(item.symbol) ?? null });
             if (!chart) return null;
             const state = computeIndicatorState(chart.candles, item.price);
             if (!state) return null;

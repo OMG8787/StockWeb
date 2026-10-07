@@ -720,6 +720,11 @@ export default function StockChart({
       {signals.length > 0 && (
         <div className="mb-3">
           <SignalTags signals={signals} />
+          {!isIntraday && candles?.at(-1)?.live && (
+            <p className="mt-1 text-xs text-(--text-secondary)">
+              圖上最後一根是今天盤中用最新成交價補上的（跟券商 App 盤中算法一致），指標與訊號是盤中訊號，收盤才確定。
+            </p>
+          )}
         </div>
       )}
       <div className="relative w-full" style={{ height: chartHeight }}>

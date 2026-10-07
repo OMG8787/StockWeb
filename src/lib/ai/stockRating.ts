@@ -1,6 +1,7 @@
-import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
+import { getChartLive, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
 import type { Market } from "@/lib/data";
 import { cachedWithDegradedNullTtl } from "@/lib/data/degradedCache";
+import { completedCandles } from "@/lib/data/liveCandle";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { getMarketStatus } from "@/lib/marketStatus";
 import type { Facet } from "./actionScoring";
@@ -71,7 +72,8 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
   // （2026-10-06 四入口評測抓到：日K／法人抓不到時台表科從建議買進變成先不要買，疑為「早上買、傍晚不買」成因之一）。
   const retry = <T,>(f: () => Promise<T>) => f().catch(() => f()).catch(() => null);
   const [chart, chips, chipsRatios, fundamentals, earnings, announcements] = await Promise.all([
-    retry(() => getChart(quote.symbol, "3m", quote.market)),
+    // 盤中用即時價補今天這根（跟券商一致；liveCandle.ts）：帶同一份 quote，不另打報價。
+    retry(() => getChartLive(quote.symbol, "3m", quote.market, { quote })),
     retry(() => getChips(quote.symbol, quote.market)),
     getChipsRatios(quote.symbol, quote.market).catch(() => null),
     getFundamentals(quote.symbol, quote.market).catch(() => null),
@@ -88,7 +90,9 @@ async function loadStockRating(symbol: string, market: Market | undefined): Prom
   // 回測（docs/backtest/2026-10-stability.md）：籌碼面維持單日＋2日確認最好；改看 N 日累計沒有更好，所以不用。
   // 翻轉確認的「交易日」用最新一根日K的日期（週末、盤前不會被當成新的一天而提早確認）。
   const candles = chart?.candles ?? null;
-  const confirmDay = candles?.length ? candles[candles.length - 1].time.slice(0, 10) : taipeiDayKey();
+  // 翻轉確認的「交易日」只看已收盤的日K（盤中補上的今天這根 live 不算，否則盤中就被當成新的一天、確認機制失效）。
+  const completed = candles ? completedCandles(candles) : null;
+  const confirmDay = completed?.length ? completed[completed.length - 1].time.slice(0, 10) : taipeiDayKey();
   const confirmPrev = await readConfirmBase(quote.symbol, confirmDay);
   // 「資料 → 結論」由 ratingCore.ts 唯一組裝（回測工具也呼叫同一個，見該檔說明）。
   const { scored, framework, chase, rating } = computeRatingCore({
@@ -153,13 +157,14 @@ function getStockRatingCached(symbol: string, market?: Market): Promise<StockRat
   // key 刻意不含 market：同一檔從不同入口進來時有的知道市場、有的不知道（問AI關於只帶代號），
   // key 不同就會各算各的、結論可能不一致；台股代號是數字、美股是英文，不會撞。帶台北日期：跨日不沿用。
   return cachedWithDegradedNullTtl<StockRatingResult>(
+    // v8：2026-10-07 盤中用即時價補今天這根日K（liveCandle.ts），評等的技術訊號含盤中最新價；舊快取是前一根為止。
     // v7：2026-10-07 RSI 預設改券商 Wilder 平滑版（rsiFormula.ts），超買／超賣訊號與學習特徵的 RSI 數值都變，舊快取不可沿用。
     // v6：2026-10-07 KD 預設改券商遞迴版（kdFormula.ts），技術面的 KD 訊號與「即將交叉」門檻都變，舊快取不可沿用。
     // v5：2026-10-06 評等穩定化：翻轉需連續 2 個交易日確認（ratingStability.ts），理由多了 pendingChange。
     // v4：2026-10-05 果斷二分（不再有等回檔，偏高時附單一拉回加碼價）、弱市況提示、先不要買給改判條件。
     // v3：2026-10-05 擴大回測後：技術面不支持一票否決、急漲改為風險提示不改結論（siteRating.ts）。
     // v2：2026-10-05 加追高防護（chaseGuards.ts）、等回檔字樣改「現價不買，等回到 A～B」。
-    `stock-rating:v7:${sym}:${taipeiDayKey()}`,
+    `stock-rating:v8:${sym}:${taipeiDayKey()}`,
     STOCK_RATING_TTL_MS,
     STOCK_RATING_DEGRADED_TTL_MS,
     () => loadStockRating(sym, market)

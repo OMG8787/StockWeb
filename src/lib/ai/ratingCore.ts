@@ -1,4 +1,5 @@
 import type { Candle, Chips, ChipsRatios, Earnings, Fundamentals, MaterialAnnouncement } from "@/lib/data/types";
+import { completedCandles } from "@/lib/data/liveCandle";
 import { computeSignals, type Signal } from "@/lib/signals";
 import { score, type ScoredCandidate } from "./actionScoring";
 import { computeChaseMetrics, type ChaseGuardId, type ChaseMetrics } from "./chaseGuards";
@@ -94,7 +95,9 @@ export function computeRatingCore(input: RatingCoreInput): RatingCoreResult {
     announcements: input.announcements ?? [],
     headlines: [],
   });
-  const framework = ratingPriceFramework(candles, input.price, input.market, input.board);
+  // 價位框架（支撐／壓力／出場價）只用已收盤的日K：盤中補上的今天這根（live）的低點就是現價附近，拿來當支撐會讓「盤中跌破支撐」失效
+  // （結論保護不變：盤中跌破先警示、收盤確認才改判，見 siteRating INTRADAY_HARD_DROP_PCT）。
+  const framework = ratingPriceFramework(candles ? completedCandles(candles) : candles, input.price, input.market, input.board);
   const chaseSource = input.chaseCandles ?? candles;
   const chase = chaseSource ? computeChaseMetrics(chaseSource, input.price, input.asOfDay, input.chips?.foreignNetShares) : null;
   const rating = computeSiteRating({

@@ -1,4 +1,4 @@
-import { getChart, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
+import { getChart, getChartLive, getChips, getChipsRatios, getEarnings, getFundamentals, getMaterialAnnouncements, getQuote } from "@/lib/data";
 import type { Market } from "@/lib/data";
 import { dedupeNews, fetchNews, fetchNewsMulti, type NewsItem } from "@/lib/data/news";
 import { fetchFinnhubCompanyNews } from "@/lib/data/finnhub";
@@ -20,6 +20,7 @@ async function fetchStockNews(quote: { symbol: string; market: Market }, newsQue
 }
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { resolveMarketCap } from "@/lib/data/marketCap";
+import { completedCandles, LIVE_BAR_INDICATOR_NOTE } from "@/lib/data/liveCandle";
 import { formatTwReportDeadline } from "@/lib/data/twReportDeadline";
 import { formatRevenueMom } from "@/lib/data/monthlyRevenue";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
@@ -63,7 +64,9 @@ export async function buildStockGrounding(
   // 1年日K只給【歷史脈絡】用（區間報酬、52週高低、回檔、量能）；技術訊號維持用3個月日K，行為不變。
   const [quote, chart, chartYear, stockRating] = await Promise.all([
     getQuote(target.symbol, target.market),
-    getChart(target.symbol, "3m", target.market),
+    // 盤中用即時價補今天這根日K（liveCandle.ts；跟評等同一份指標輸入，跟券商一致）。
+    getChartLive(target.symbol, "3m", target.market),
+    // 1年日K只給【歷史脈絡】（區間報酬、52週高低、量能）用，維持官方已收盤日K。
     getChart(target.symbol, "1y", target.market).catch(() => null),
     // 本站綜合評等（跟今日建議／全市場推薦同一份快取，見 stockRating.ts）。
     getStockRating(target.symbol, target.market, opts.source ?? "ai-ask").catch(() => null),
@@ -134,7 +137,7 @@ export async function buildStockGrounding(
     const holdingRated = describeRatingForHolding(
       stockRating,
       opts.costBasis != null ? { costBasis: opts.costBasis, buyDate: opts.buyDate, market: quote.market, emerging: quote.board === "emerging" } : null,
-      chart?.candles
+      chart ? completedCandles(chart.candles) : undefined
     );
     // 買賣判斷題：程式組好的結論卡放最前面，AI 只解說（decisionCard.ts）。
     if (opts.decisionCard) {
@@ -176,7 +179,7 @@ export async function buildStockGrounding(
   }
   if (chart) {
     const recent = chart.candles.slice(-10);
-    lines.push(`近 10 個交易日收盤價：${recent.map((c) => `${c.time}=${c.close}`).join(", ")}`);
+    lines.push(`近 10 個交易日收盤價：${recent.map((c) => `${c.time}=${c.close}${c.live ? "（今天盤中即時價，不是收盤價，收盤才確定）" : ""}`).join(", ")}`);
     // Individual stock questions previously got no technical-signal read at
     // all — only stocks that happened to surface in the momentum/movers
     // screen (getMultiSignalStocks, which pre-filters for 2+ signals) ever
@@ -194,7 +197,9 @@ export async function buildStockGrounding(
     // 當下的實際狀態值」（有沒有交叉、K/D/RSI 實際數值、均線排列、MACD 在 0 軸
     // 哪一側），讓任何被指名問到的指標都有真實數字可以回答，不必靠猜或改答別的。
     const indicatorLine = describeIndicatorState(computeIndicatorState(chart.candles, quote.price));
-    if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「${dayWord === "今日" ? "今天" : "最近一個交易日"}沒有交叉」，不要改用別的指標代答）：${indicatorLine}`);
+    // 最後一根是盤中（或官方未公布前）用即時價補的今天這根：指標跟券商 App 盤中算法一致，但是盤中訊號、收盤才確定（liveCandle.ts）。
+    const liveBarNote = chart.candles.at(-1)?.live ? LIVE_BAR_INDICATOR_NOTE : "";
+    if (indicatorLine) lines.push(`技術指標現況（不論今天有沒有觸發訊號，一律照實列出；使用者指名問哪個指標就答哪個，沒有交叉就照實說「${dayWord === "今日" ? "今天" : "最近一個交易日"}沒有交叉」，不要改用別的指標代答）${liveBarNote}：${indicatorLine}`);
     // 近幾天逐日的交叉紀錄：使用者會追問「昨天有沒有」「這幾天交叉過嗎」，沒有這行 AI 只能
     // 回「無法回溯」（2026-10-04 實測）。見 describeRecentCrosses 的說明。
     const marketOpen = getMarketStatus(quote.market) === "open";
@@ -217,7 +222,7 @@ export async function buildStockGrounding(
   } else {
     // 評等暫時算不出來時的備援：跟評等同一個規則與同一份 3 個月日K（ratingCore.ts ratingPriceFramework）。
     // 2026-10-06 整合稽核：以前這裡用 1 年日K，評等恢復後價位會跟備援時不同。
-    const levelsText = describePriceFramework(ratingPriceFramework(chart?.candles, quote.price, quote.market, quote.board));
+    const levelsText = describePriceFramework(ratingPriceFramework(chart ? completedCandles(chart.candles) : undefined, quote.price, quote.market, quote.board));
     if (levelsText) lines.push(levelsText);
   }
   lines.push("（來源：即時/近即時公開資料）");

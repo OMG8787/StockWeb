@@ -57,6 +57,7 @@ vi.mock("@/lib/data", async (importOriginal) => {
     ...orig,
     getQuote: async (s: string) => fx.quote(s.toUpperCase()),
     getChart: async (s: string) => (fx.series[s.toUpperCase()] ? { candles: fx.series[s.toUpperCase()] } : null),
+    getChartLive: async (s: string) => (fx.series[s.toUpperCase()] ? { candles: fx.series[s.toUpperCase()] } : null),
     getChips: async (s: string) => fx.chips(s.toUpperCase()),
     getChipsRatios: async () => null,
     getChipsRatiosBatch: async () => new Map(),

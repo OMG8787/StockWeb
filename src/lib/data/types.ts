@@ -94,6 +94,11 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  /**
+   * 盤中（或官方日K尚未公布前）用即時價補上的「今天這根」（liveCandle.ts）：收盤價＝最新成交價、量＝當日累計量，會隨報價跳動、收盤才確定。
+   * 沒有這個欄位＝官方日K。量能比、評等價位框架、追高防護、翻轉確認日一律排除 live 那根。
+   */
+  live?: true;
 }
 
 export interface ChartResponse {

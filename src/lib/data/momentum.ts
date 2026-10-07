@@ -4,7 +4,7 @@ import type { Market, SearchItem } from "./types";
 import { computeSignals, type Signal } from "@/lib/signals";
 import { universeFor } from "./symbols";
 import { getMarketQuoteMap } from "./marketQuoteMap";
-import { getChart } from "./chart";
+import { getChartLive } from "./chartLive";
 import { computeVolumeMetrics, getTrailingAverageVolumeMap } from "./volumeHistory";
 
 export interface MomentumItem extends SearchItem {
@@ -46,7 +46,7 @@ const MOMENTUM_CHART_CONCURRENCY = 20;
  */
 export async function getMultiSignalStocks(market: Market, minSignals = 2): Promise<MomentumItem[]> {
   // 收盤後／週末 TTL 拉長到 3 小時（sessionAwareTtl，Active CPU 吃緊）。
-  return cached(`momentum:${market}:${minSignals}:v3`, sessionAwareTtl(market, MOMENTUM_TTL_MS), async () => {
+  return cached(`momentum:${market}:${minSignals}:v4`, sessionAwareTtl(market, MOMENTUM_TTL_MS), async () => {
     const pool = await universeFor(market);
     const quoteMap = await getMarketQuoteMap(market);
     const avgVolumeMap = await getTrailingAverageVolumeMap(market);
@@ -68,7 +68,8 @@ export async function getMultiSignalStocks(market: Market, minSignals = 2): Prom
       MOMENTUM_CHART_CONCURRENCY,
       async (entry): Promise<MomentumItem | null> => {
         const quote = quoteMap.get(entry.symbol)!;
-        const chart = await getChart(entry.symbol, "3m", entry.market);
+        // 盤中用全市場報價表的即時價補今天這根日K（liveCandle.ts；批次不另打單檔報價）。
+        const chart = await getChartLive(entry.symbol, "3m", entry.market, { quote });
         if (!chart) return null;
         const signals = computeSignals(chart.candles, quote.price, "3m");
         if (signals.length < minSignals) return null;

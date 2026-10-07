@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Candle } from "@/lib/data/types";
 
 // grounding/indicators.ts 也 import 了資料層（getChart），測試只用純函式，換成空殼避免載入網路／快取模組。
-vi.mock("@/lib/data", () => ({ getChart: vi.fn() }));
+vi.mock("@/lib/data", () => ({ getChart: vi.fn(), getChartLive: vi.fn() }));
 
 import { describeRecentCrosses } from "@/lib/ai/grounding/indicators";
 import { computeIndicatorState } from "@/lib/signals";
