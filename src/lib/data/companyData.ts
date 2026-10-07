@@ -119,7 +119,7 @@ export async function getEarnings(symbolInput: string, marketHint?: Market): Pro
     if (market === "TW") {
       const [revenueMap, epsMap, profile] = await Promise.all([
         cachedMap(
-          "earnings:TW:revenue:v2",
+          "earnings:TW:revenue:v3", // v3：加月增率（monthlyRevenueMomPercent），舊快取沒有這欄要失效
           EARNINGS_TTL_MS,
           () => mergeTwMaps(fetchTwseMonthlyRevenueAll, fetchTpexMonthlyRevenueAll, fetchEmergingMonthlyRevenueAll),
           { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }

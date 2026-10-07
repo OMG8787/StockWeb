@@ -1,4 +1,5 @@
 import { twQuarterlyEpsPeriodLabel } from "./earningsLabel";
+import { parseMonthlyRevenueRow, type MonthlyRevenueRow } from "./monthlyRevenue";
 import https from "node:https";
 import tls from "node:tls";
 import type { Candle, ChartRange, Earnings, Quote } from "./types";
@@ -387,28 +388,16 @@ export async function fetchEmergingCandles(stockNo: string, range: ChartRange): 
 // Monthly revenue
 // ---------------------------------------------------------------------------
 
-interface EmergingRevenueRow {
-  公司代號: string;
-  資料年月: string;
-  "營業收入-去年同月增減(%)": string;
-}
-
 /** 興櫃公司每月營業收入彙總表. Note the endpoint name has NO `mopsfin_`
  *  prefix (it is `t187ap05_R`, not `mopsfin_t187ap05_R`) unlike its 上櫃
  *  counterpart — confirmed live; the prefixed spelling 404s. Field names are
  *  the same Chinese keys TWSE and TPEx both use. */
 export async function fetchEmergingMonthlyRevenueAll(): Promise<Map<string, Earnings>> {
-  const rows = await fetchTpexJson<EmergingRevenueRow[]>("https://www.tpex.org.tw/openapi/v1/t187ap05_R");
+  const rows = await fetchTpexJson<MonthlyRevenueRow[]>("https://www.tpex.org.tw/openapi/v1/t187ap05_R");
   const map = new Map<string, Earnings>();
   for (const row of rows) {
-    const yoy = parseFloat(row["營業收入-去年同月增減(%)"]);
-    if (!row.公司代號 || !Number.isFinite(yoy)) continue;
-    const yearMonth = row.資料年月;
-    const period =
-      yearMonth?.length >= 5
-        ? `${parseInt(yearMonth.slice(0, -2), 10) + 1911}年${parseInt(yearMonth.slice(-2), 10)}月`
-        : undefined;
-    map.set(row.公司代號.trim(), { monthlyRevenueYoyPercent: round2(yoy), monthlyRevenuePeriod: period });
+    const parsed = parseMonthlyRevenueRow(row);
+    if (parsed && row.公司代號) map.set(row.公司代號.trim(), parsed);
   }
   return map;
 }

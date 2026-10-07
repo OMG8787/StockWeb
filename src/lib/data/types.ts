@@ -306,6 +306,8 @@ export interface MaterialAnnouncement {
 export interface Earnings {
   /** TW：最新月營收年增率(%)，台股投資人最常看的財報先行指標 */
   monthlyRevenueYoyPercent?: number;
+  /** TW：最新月營收月增率(%)＝本月比上月（資料來源的「上月比較增減」，與 monthlyRevenuePeriod 同一個月） */
+  monthlyRevenueMomPercent?: number;
   /** e.g. "2026年7月" */
   monthlyRevenuePeriod?: string;
   /** 最新一季每股盈餘（TW：元；US：美元） */

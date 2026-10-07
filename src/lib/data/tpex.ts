@@ -3,6 +3,7 @@ import https from "node:https";
 import tls from "node:tls";
 import { chunk, mapWithConcurrency } from "./cache";
 import { sanitizeCandles } from "./candleSanity";
+import { parseMonthlyRevenueRow, type MonthlyRevenueRow } from "./monthlyRevenue";
 import { NO_TRADE_MID_ESTIMATE_NOTE } from "./types";
 import type { Candle, ChartRange, Chips, Earnings, Fundamentals, MaterialAnnouncement, Quote, TwDailyBar } from "./types";
 import { findInUniverse, type UniverseEntry } from "./universe";
@@ -756,27 +757,15 @@ export async function fetchTpexMaterialAnnouncementsAll(): Promise<Map<string, M
 // Monthly revenue
 // ---------------------------------------------------------------------------
 
-interface TpexRevenueRow {
-  公司代號: string;
-  資料年月: string;
-  "營業收入-去年同月增減(%)": string;
-}
-
 /** Confirmed live: TPEx's field names here are identical to TWSE's
  *  (including the exact "營業收入-去年同月增減(%)" key) — no divergence to
  *  work around, unlike several of the other endpoints. */
 export async function fetchTpexMonthlyRevenueAll(): Promise<Map<string, Earnings>> {
-  const rows = await fetchTpexJson<TpexRevenueRow[]>("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O");
+  const rows = await fetchTpexJson<MonthlyRevenueRow[]>("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O");
   const map = new Map<string, Earnings>();
   for (const row of rows) {
-    const yoy = parseFloat(row["營業收入-去年同月增減(%)"]);
-    if (!row.公司代號 || !Number.isFinite(yoy)) continue;
-    const yearMonth = row.資料年月;
-    const period =
-      yearMonth?.length >= 5
-        ? `${parseInt(yearMonth.slice(0, -2), 10) + 1911}年${parseInt(yearMonth.slice(-2), 10)}月`
-        : undefined;
-    map.set(row.公司代號, { monthlyRevenueYoyPercent: round2(yoy), monthlyRevenuePeriod: period });
+    const parsed = parseMonthlyRevenueRow(row);
+    if (parsed && row.公司代號) map.set(row.公司代號, parsed);
   }
   return map;
 }

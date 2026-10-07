@@ -255,6 +255,7 @@ function earningsFacet(c: Candidate): Facet {
   }
   const detail = [
     yoy != null ? `${c.earnings?.monthlyRevenuePeriod ?? "最新月"}營收年增率${pct(yoy)}` : "",
+    c.earnings?.monthlyRevenueMomPercent != null ? `月增率${pct(c.earnings.monthlyRevenueMomPercent)}` : "",
     eps != null ? `${c.earnings?.quarterlyEpsPeriod ?? "最新一季"}每股盈餘${eps}元` : "",
   ]
     .filter(Boolean)

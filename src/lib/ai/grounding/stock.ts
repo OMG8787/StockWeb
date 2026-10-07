@@ -21,6 +21,7 @@ async function fetchStockNews(quote: { symbol: string; market: Market }, newsQue
 import { formatMarketCap, formatSharesWithLots } from "@/lib/format";
 import { resolveMarketCap } from "@/lib/data/marketCap";
 import { formatTwReportDeadline } from "@/lib/data/twReportDeadline";
+import { formatRevenueMom } from "@/lib/data/monthlyRevenue";
 import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState, describeRecentCrosses, RECENT_CROSSES_TITLE } from "./indicators";
 import { getMarketStatus, isTaipeiWeekend } from "@/lib/marketStatus";
@@ -222,6 +223,10 @@ export async function buildStockGrounding(
     const parts: string[] = [];
     if (earnings.monthlyRevenueYoyPercent != null) {
       parts.push(`${earnings.monthlyRevenuePeriod ?? "最新月"}營收年增率 ${earnings.monthlyRevenueYoyPercent >= 0 ? "+" : ""}${earnings.monthlyRevenueYoyPercent}%`);
+    }
+    const revMom = formatRevenueMom(earnings);
+    if (revMom) {
+      parts.push(`${earnings.monthlyRevenuePeriod ?? "最新月"}營收月增率（比上月） ${revMom}`);
     }
     if (earnings.quarterlyEps != null) {
       // 台股的累計標籤已在資料層統一處理（見 data/earningsLabel.ts），這裡直接用，免得 AI 當成單季跟【歷史脈絡】的單季EPS比。

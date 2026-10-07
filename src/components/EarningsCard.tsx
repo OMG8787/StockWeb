@@ -6,6 +6,7 @@ export default function EarningsCard({ earnings, currency, market }: { earnings:
   const hasAny =
     earnings &&
     (earnings.monthlyRevenueYoyPercent != null ||
+      earnings.monthlyRevenueMomPercent != null ||
       earnings.quarterlyEps != null ||
       earnings.epsSurprisePercent != null ||
       earnings.nextEarningsDate ||
@@ -17,7 +18,7 @@ export default function EarningsCard({ earnings, currency, market }: { earnings:
       {!hasAny ? (
         <p className="text-sm text-(--text-muted)">目前無法取得這檔股票的財報資料</p>
       ) : (
-        <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+        <dl className={`grid grid-cols-2 gap-4 text-sm ${isTw ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-4"}`}>
           <div>
             <dt className="text-(--text-muted)">{earnings?.monthlyRevenuePeriod ?? "月營收"}年增率</dt>
             <dd className={`mt-0.5 font-medium tabular-nums ${revenueColorClass(earnings?.monthlyRevenueYoyPercent)}`}>
@@ -26,6 +27,17 @@ export default function EarningsCard({ earnings, currency, market }: { earnings:
                 : "資料暫缺"}
             </dd>
           </div>
+          {isTw && (
+            <div>
+              {/* 月增率＝本月比上月（資料來源的「上月比較增減」），與年增率是同一個月；季節性行業月增常大起大落，要搭配年增率看。 */}
+              <dt className="text-(--text-muted)">{earnings?.monthlyRevenuePeriod ?? "月營收"}月增率</dt>
+              <dd className={`mt-0.5 font-medium tabular-nums ${revenueColorClass(earnings?.monthlyRevenueMomPercent)}`}>
+                {earnings?.monthlyRevenueMomPercent != null
+                  ? `${earnings.monthlyRevenueMomPercent >= 0 ? "+" : ""}${earnings.monthlyRevenueMomPercent.toFixed(2)}%`
+                  : "資料暫缺"}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="text-(--text-muted)">{earnings?.quarterlyEpsPeriod ?? "最新一季"} EPS</dt>
             <dd className="mt-0.5 font-medium tabular-nums">
