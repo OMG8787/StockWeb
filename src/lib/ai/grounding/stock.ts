@@ -26,6 +26,11 @@ import { computeIndicatorState, computeSignals } from "@/lib/signals";
 import { describeIndicatorState, describeRecentCrosses, RECENT_CROSSES_TITLE } from "./indicators";
 import { getMarketStatus, isTaipeiWeekend } from "@/lib/marketStatus";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
+
+/** 該市場交易所所在地的今天（yyyy-mm-dd）：台股台北、美股紐約；用來判斷日K最後一根是不是「今天」。 */
+function exchangeDayKey(market: "TW" | "US"): string {
+  return market === "TW" ? taipeiDayKey() : new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
 import { chipsSectionTitle, formatStockNewsLines } from "./stockNewsAndChips";
 import { describePriceFramework } from "./priceLevels";
 import { ratingPriceFramework } from "../ratingCore";
@@ -140,6 +145,13 @@ export async function buildStockGrounding(
           rating: holdingRated.rating,
           facets: stockRating.facets,
           held: holdingRated.held,
+          tech: chart
+            ? {
+                signals: computeSignals(chart.candles, quote.price, "3m"),
+                lastCandleDate: chart.candles.at(-1)?.time,
+                lastIsToday: chart.candles.at(-1)?.time?.slice(0, 10) === exchangeDayKey(quote.market),
+              }
+            : undefined,
         })
       );
     }
@@ -186,11 +198,13 @@ export async function buildStockGrounding(
     // 近幾天逐日的交叉紀錄：使用者會追問「昨天有沒有」「這幾天交叉過嗎」，沒有這行 AI 只能
     // 回「無法回溯」（2026-10-04 實測）。見 describeRecentCrosses 的說明。
     const marketOpen = getMarketStatus(quote.market) === "open";
-    const recentCrosses = describeRecentCrosses(chart.candles, marketOpen);
+    const todayKey = exchangeDayKey(quote.market);
+    const lastCandleIsToday = chart.candles.at(-1)?.time?.slice(0, 10) === todayKey;
+    const recentCrosses = describeRecentCrosses(chart.candles, marketOpen, todayKey);
     // 盤中才附「這根K線會變」的但書：週末／收盤後也寫「今天若在盤中」，模型會講成「今天盤中」（2026-10-06 評測）。
     if (recentCrosses)
       lines.push(
-        `${RECENT_CROSSES_TITLE}（用當天為止的日K現算，可直接回答「昨天有沒有交叉」${marketOpen ? "；現在盤中，今天這根K線會隨最新價變動，盤中出現的交叉到收盤可能消失" : ""}）：${recentCrosses}`
+        `${RECENT_CROSSES_TITLE}（用當天為止的日K現算，可直接回答「昨天有沒有交叉」${marketOpen ? (lastCandleIsToday ? "；現在盤中，今天這根K線會隨最新價變動，盤中出現的交叉到收盤可能消失" : "；現在盤中，日K最後一根是前一個交易日（今天這根尚未納入），所以上面標「已收盤」的交叉是昨天收盤就確認的，不可說成今天盤中出現") : ""}）：${recentCrosses}`
       );
   } else {
     lines.push("（歷史走勢資料目前無法取得）");

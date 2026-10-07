@@ -19,6 +19,7 @@ import { describeFuzzyGuess } from "./fuzzyName";
 import { describeRatingChanges, ensureRatingChangeExplained } from "./ratingChange";
 import { ensureMarginSignalMentioned } from "./marginSignal";
 import { ensureStockFactsMentioned } from "./stockFactsMention";
+import { ensureChipsDateMentioned } from "./chipsDateMention";
 import { getStockRating } from "./stockRating";
 import {
   conversationWantsMovers,
@@ -733,7 +734,10 @@ export function postProcessAiAnswer(answer: string, grounding: string): string {
   // 每檔現價（即時報價）與本站把握程度（程式判定）：買賣判斷題／關注清單深度分析回答提到某檔卻沒講的，補程式寫好的字樣（stockFactsMention.ts）。
   const facts = ensureStockFactsMentioned(margin.text, grounding);
   if (facts.appended.length > 0) console.warn("[ask] 補現價／把握程度：", JSON.stringify(facts.appended));
-  return facts.text;
+  // 提到三大法人買賣超、資料卻不是今天的（盤中沒有官方當天資料），回答沒交代日期的補一句（chipsDateMention.ts）。
+  const chipsDated = ensureChipsDateMentioned(facts.text, grounding);
+  if (chipsDated.appended.length > 0) console.warn("[ask] 補法人資料日期說明：", JSON.stringify(chipsDated.appended));
+  return chipsDated.text;
 }
 
 /**

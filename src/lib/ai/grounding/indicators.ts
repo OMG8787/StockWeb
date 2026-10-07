@@ -75,7 +75,7 @@ export const RECENT_CROSSES_TITLE = `近${RECENT_CROSS_DAYS}個交易日逐日�
  * 最後一根K線若是今天盤中尚未收盤的那根，它的指標會隨最新價跳動（盤中有交叉、收盤
  * 後消失是正常現象），所以最後一天另外標「今天（盤中仍會變動）」或「今天」。
  */
-export function describeRecentCrosses(candles: Candle[], marketOpen: boolean): string {
+export function describeRecentCrosses(candles: Candle[], marketOpen: boolean, todayKey?: string): string {
   const lines: string[] = [];
   for (let back = RECENT_CROSS_DAYS - 1; back >= 0; back--) {
     const upTo = candles.slice(0, candles.length - back);
@@ -88,7 +88,17 @@ export function describeRecentCrosses(candles: Candle[], marketOpen: boolean): s
     if (state.macdCross === "death") events.push("MACD死亡交叉");
     if (state.kd?.cross === "golden") events.push("KD黃金交叉");
     if (state.kd?.cross === "death") events.push("KD死亡交叉");
-    const label = back === 0 ? (marketOpen ? `${last.time}（今天，盤中仍會變動）` : `${last.time}（最新一個交易日；若今天是休市日，使用者說的「昨天」就是這一天）`) : last.time;
+    // 2026-10-07 使用者回報宏璟：日K（TWSE）盤中不含今天這根，最後一根其實是昨天（10/06）收盤；以前盤中一律標「今天，盤中仍會變動」，
+    // AI 就把昨天已收盤確認的 KD 死叉說成「今天盤中出現」。有給 todayKey 時以最後一根的日期為準。
+    const lastIsToday = todayKey == null || last.time.slice(0, 10) === todayKey;
+    const label =
+      back === 0
+        ? marketOpen && lastIsToday
+          ? `${last.time}（今天，盤中仍會變動）`
+          : marketOpen
+            ? `${last.time}（最近一個已收盤的交易日，這天的交叉已經確認；今天盤中的K線尚未納入計算，今天有沒有交叉要等收盤才算數）`
+            : `${last.time}（最新一個交易日；若今天是休市日，使用者說的「昨天」就是這一天）`
+        : last.time;
     lines.push(`${label}：${events.length > 0 ? events.join("＋") : "沒有交叉"}`);
   }
   return lines.join("；");

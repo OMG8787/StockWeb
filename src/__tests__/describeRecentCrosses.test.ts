@@ -62,3 +62,16 @@ describe("describeRecentCrosses", () => {
     expect(describeRecentCrosses(makeCandles(3, () => 100), false)).toBe("");
   });
 });
+
+describe("describeRecentCrosses：最後一根不是今天（盤中日K不含今天，2026-10-07 宏璟）", () => {
+  it("盤中但最後一根是昨天 → 標「最近一個已收盤的交易日」、不說今天盤中", () => {
+    const candles = makeCandles(80, (i) => 100 + i);
+    const out = describeRecentCrosses(candles, true, "2099-01-01");
+    expect(out).toContain("最近一個已收盤的交易日");
+    expect(out).not.toContain("（今天，盤中仍會變動）");
+  });
+  it("盤中且最後一根就是今天 → 維持原標示", () => {
+    const candles = makeCandles(80, (i) => 100 + i);
+    expect(describeRecentCrosses(candles, true, candles[79].time)).toContain("（今天，盤中仍會變動）");
+  });
+});

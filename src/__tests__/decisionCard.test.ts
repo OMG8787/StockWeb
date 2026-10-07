@@ -177,3 +177,28 @@ describe("提示詞組裝與時段立場", () => {
     expect(line).not.toContain("收盤價不在買進區間");
   });
 });
+
+describe("死亡交叉說明（2026-10-07 宏璟：出現死亡交叉真的還可以買嗎）", () => {
+  const sig = (label: string, tone: "up" | "down") => ({ label, tone });
+  const tech = (isToday: boolean) => ({
+    signals: [sig("KD死亡交叉（K值下穿D值，發生在高檔）", "down"), sig("站上20日均線", "up"), sig("均線多頭排列（5日線在10日線）", "up")],
+    lastCandleDate: "2026-10-06",
+    lastIsToday: isToday,
+  });
+  const base = { name: "宏璟", symbol: "2527", rating: rating({}), facets: [{ name: "技術面", verdict: "中性", detail: "x" }] as Facet[], held: false };
+  it("有死叉：卡片寫出哪個死叉、哪一天已收盤確認、技術面判定與回測依據", () => {
+    const card = describeDecisionCard({ ...base, tech: tech(false) });
+    expect(card).toContain("死亡交叉說明（程式）");
+    expect(card).toContain("KD死亡交叉");
+    expect(card).toContain("10/06（已收盤確認）");
+    expect(card).toContain("技術面判定「中性」");
+    expect(card).toContain("沒有統計上顯著較差");
+  });
+  it("最後一根是今天（盤中）：標盤中、收盤前可能消失", () => {
+    expect(describeDecisionCard({ ...base, tech: tech(true) })).toContain("今天，盤中看到");
+  });
+  it("沒有死叉或結論是先不要買：不寫", () => {
+    expect(describeDecisionCard({ ...base, tech: { signals: [sig("站上20日均線", "up")], lastCandleDate: "2026-10-06", lastIsToday: false } })).not.toContain("死亡交叉說明");
+    expect(describeDecisionCard({ ...base, rating: rating({ code: "avoid" }), tech: tech(false) })).not.toContain("死亡交叉說明");
+  });
+});

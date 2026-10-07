@@ -1,5 +1,6 @@
 import { cached, cachedMap } from "./cache";
 import { DAILY_DATA_SWR_MS, HEAVY_SWR_MS } from "./swrPolicy";
+import { institutionalCacheSpec } from "./chipsPublishWindow";
 import type { Chips, Earnings, Fundamentals, Market, MaterialAnnouncement } from "./types";
 import {
   fetchTwseFundamentalsAll,
@@ -176,14 +177,17 @@ export function getTwMarginMap(): Promise<Map<string, Chips>> {
  * 寬限期）才不會因為兩個呼叫端各寫各的而不一致。
  */
 export function getTwInstitutionalMap(): Promise<Map<string, Chips>> {
+  // key 帶台北日期＋時段、公布窗口（15:00～17:30）TTL 10 分鐘：法人當天資料公布後最久 10 分鐘就換（chipsPublishWindow.ts）。
+  const spec = institutionalCacheSpec("chips:TW:institutional:v3", CHIPS_TTL_MS); // v3：key 分時段；v2：改抓不含權證版本，同時作廢可能缺上市半邊的舊快取
   return cachedMap(
-    "chips:TW:institutional:v2", // v2：改抓不含權證版本，同時作廢可能缺上市半邊的舊快取
-    CHIPS_TTL_MS,
+    spec.key,
+    spec.ttlMs,
     // 2026-10-05：原本用 selectType=ALL（含權證，約 2.4MB），實測下載要 ~7 秒、常撞 8 秒逾時，
     // 上市那半邊就變成空表（mergeTwMaps 單邊失敗吞掉）被快取 1 小時——台積電等上市股的個股法人整段消失，
     // AI 只好拿新聞標題的全市場合計頂替。改用 ALLBUT0999（不含權證，約 190KB、~1.7 秒），股票／ETF 都在。
     () => mergeTwMaps(() => fetchTwseInstitutionalTradingAll(undefined, "ALLBUT0999"), fetchTpexInstitutionalTradingAll),
-    { staleWhileRevalidateMs: DAILY_DATA_SWR_MS }
+    // revalidateWaitMs：公布窗口剛過期時先等新表（最多 4 秒），不要先回前一交易日的舊表。
+    { staleWhileRevalidateMs: DAILY_DATA_SWR_MS, revalidateWaitMs: 4000 }
   );
 }
 

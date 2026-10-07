@@ -1,6 +1,7 @@
 import type { Facet } from "./actionScoring";
 import { stripNameMarker } from "./fuzzyName";
 import { confidenceText, type SiteRating } from "./siteRating";
+import type { Signal } from "@/lib/signals";
 
 /**
  * 個股「結論卡」（2026-10-06「提高 Lite 下限」）：買賣判斷題由程式先把結論、價位、支持／不支持面向、主要風險
@@ -41,6 +42,31 @@ export interface DecisionCardInput {
   facets: Facet[];
   /** 關注清單顯示已持有（有成本）：第一句用已持有結論 */
   held: boolean;
+  /** 技術訊號（computeSignals 同一份）＋最後一根日K的日期與是否為今天：用來寫「死亡交叉說明」 */
+  tech?: { signals: Signal[]; lastCandleDate: string | undefined; lastIsToday: boolean };
+}
+
+/** 死叉說明引用的回測（scripts/backtest/deathCross.ts，docs/backtest/2026-10-macd-near-cross.md「死亡交叉」節）。 */
+export const DEATH_CROSS_BACKTEST_NOTE =
+  "回測（近 4 年約 390 檔、死叉後 5／10／20 日）：死叉股票的超額報酬與沒死叉的相比沒有統計上顯著較差，多頭結構（均線多頭排列＋站上20日線）中的死叉也一樣，所以本站不因單一死叉改判";
+export const CARD_DEATH_CROSS_PREFIX = "- 死亡交叉說明（程式）：";
+
+/**
+ * 技術訊號裡有「死亡交叉」時的程式說明（2026-10-07 使用者回報宏璟：「出現死亡交叉真的還可以買嗎」）。
+ * 回答買賣判斷時必須讓使用者知道：哪個死叉、哪一天（已收盤確認或盤中）、本站怎麼看它、為什麼結論沒變。
+ * 沒有死叉、或結論已是先不要買時不寫。
+ */
+export function describeDeathCrossNote(c: Pick<DecisionCardInput, "rating" | "facets" | "tech">): string {
+  const t = c.tech;
+  if (!t || c.rating.code === "avoid") return "";
+  const deaths = t.signals.filter((s) => s.tone === "down" && s.label.includes("死亡交叉"));
+  if (deaths.length === 0) return "";
+  const kinds = deaths.map((s) => s.label.replace(/（.*$/, "")).join("、");
+  const date = t.lastCandleDate ? `${t.lastCandleDate.slice(5).replace("-", "/")}` : "最近一個交易日";
+  const when = t.lastIsToday ? `${date}（今天，盤中看到、收盤前可能消失）` : `${date}（已收盤確認）`;
+  const bull = t.signals.filter((s) => s.tone === "up").length;
+  const verdict = c.facets.find((f) => f.name.startsWith("技術面"))?.verdict ?? "中性";
+  return `${CARD_DEATH_CROSS_PREFIX}${kinds}出現在 ${when}；本站把它算一個空方訊號，跟另外 ${bull} 個偏多訊號並列，技術面判定「${verdict}」，結論沒有因此改變。${DEATH_CROSS_BACKTEST_NOTE}；只當短線風險提醒。使用者問「死叉還能買嗎」或回答提到死叉時，照這段講清楚（哪個死叉、哪一天、為什麼結論仍是${c.rating.label}），不可把已收盤的死叉說成「今天盤中出現」。`;
 }
 
 /** 第一句要照抄的結論字樣（已持有用 holdingLabel、未持有用 label）。 */
@@ -81,6 +107,7 @@ export function describeDecisionCard(c: DecisionCardInput): string {
     `${CARD_SUPPORT}${support.length ? support.join("；") : "（無）"}`,
     `${CARD_AGAINST}${against.length ? against.join("；") : "（無）"}`,
     `${CARD_RISK}${mainRisk(c)}`,
+    ...(describeDeathCrossNote(c) ? [describeDeathCrossNote(c)] : []),
     "- 回答骨架（四入口最優做法：今日建議卡）：第一句照抄上面的結論；卡片有「把握程度」行時緊接一句照抄它→怎麼做一句（依【目前時段與回答立場】，價位照卡片）→2～3 點理由（每點帶一個卡片或個股資料裡的具體數字，從支持／不支持面向挑真正決定結論的）→主要風險一句。精簡，不要逐項轉述資料。",
   ].join("\n");
 }
