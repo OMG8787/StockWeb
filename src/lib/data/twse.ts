@@ -95,6 +95,17 @@ function inContinuousTrading(ms: number): boolean {
   const minutes = taipei.getUTCHours() * 60 + taipei.getUTCMinutes();
   return minutes >= 9 * 60 + 1 && minutes <= 13 * 60 + 25;
 }
+/**
+ * 2026-10-07 盤中實驗（正式站 Vercel 函式內 12 種請求變體 × 多輪）的根因：MIS 後端**依 ex_ch 字串各自快取一份快照**，
+ * 同一字串重打回同一份舊快照（快照年齡中位 46 秒、最大 100+ 秒）；`_` 時間戳、UA、Referer、session cookie、
+ * delay、no-cache header、http 皆無影響。在 ex_ch 末端加一個隨機的不存在代號（rows 不會回傳該代號）＝
+ * 唯一快取鍵，每次都拿到剛產生的快照（快照年齡≈0，成交資料年齡中位 46→約 14 秒）。
+ * 只用在「指定幾檔」的請求（useGuard）；全市場表維持穩定字串，避免 40 塊全部繞過後端快取。
+ */
+export function withUniqueMisKey(exCh: string): string {
+  return `${exCh}|tse_9${Math.floor(1000 + Math.random() * 9000)}.tw`;
+}
+
 /** 這個 instance 看過最新的 MIS 快照時間（跨請求共用）。 */
 let freshestMisSnapshotMs = 0;
 
@@ -116,7 +127,7 @@ export async function fetchMisRows<T = MisRow>(
   const useGuard = opts.retryStale === true && isTwQuoteWindow(new Date(startedAt));
   let best: { rows: T[]; snapshot: number } | undefined;
   for (let attempt = 0; ; attempt++) {
-    const res = await fetchWithTimeout(misQuoteUrl(exCh), timeoutMs, {
+    const res = await fetchWithTimeout(misQuoteUrl(useGuard ? withUniqueMisKey(exCh) : exCh), timeoutMs, {
       headers: { Referer: "https://mis.twse.com.tw/stock/index.jsp" },
     });
     const data = (await res.json()) as { msgArray?: T[]; queryTime?: { sysDate?: string; sysTime?: string } };

@@ -111,3 +111,14 @@ describe("fetchMisRows 落後節點防護", () => {
     expect(await caught).toBe("HTTP 503");
   });
 });
+
+describe("唯一快取鍵（MIS 依 ex_ch 字串各自快取快照）", () => {
+  it("指定幾檔的請求（retryStale）盤中在 ex_ch 末端加隨機不存在代號；全市場表不加", async () => {
+    fetchMock.mockResolvedValue(resp("10:00:00"));
+    await run(fetchMisRows("tse_2317.tw", 4000, { retryStale: true }));
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/ex_ch=tse_2317\.tw\|tse_9\d{4}\.tw&/);
+    fetchMock.mockClear();
+    await run(fetchMisRows("tse_2317.tw", 4000));
+    expect(String(fetchMock.mock.calls[0][0])).toContain("ex_ch=tse_2317.tw&");
+  });
+});
