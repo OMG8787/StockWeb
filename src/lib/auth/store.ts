@@ -70,7 +70,8 @@ class GasStore implements TableStore {
     } catch (err) {
       throw new StoreUnavailableError(`帳號資料庫連線失敗：${(err as Error).message}`, true);
     }
-    if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`);
+    // Google 偶爾在回傳結果時給 404（Apps Script 已執行，只是結果沒送回來；FonegleWeb 也遇過），讀取可重試
+    if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`, res.status === 404 || res.status >= 500);
     const data = (await res.json().catch(() => null)) as { success?: boolean; data?: unknown[]; message?: string } | null;
     if (!data?.success || !Array.isArray(data.data)) {
       throw new StoreUnavailableError(`帳號資料庫錯誤：${data?.message ?? "格式不正確"}`);
