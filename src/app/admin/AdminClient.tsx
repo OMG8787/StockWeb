@@ -116,7 +116,8 @@ export default function AdminClient() {
   const onlineCount = data?.users.filter((u) => u.online).length ?? 0;
 
   return (
-    <div className="space-y-4">
+    // pb-24：避免右下角 AI 問答按鈕蓋住表格最後一列的操作按鈕
+    <div className="space-y-4 pb-24">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-semibold">帳號與權限</h1>
         {data && (

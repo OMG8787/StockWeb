@@ -60,7 +60,7 @@ export default function HomePage() {
           用最快的方式看懂台股與美股
         </h1>
         <p className="mt-2 max-w-2xl text-(--text-secondary)">
-          即時查詢個股報價、互動走勢圖表，搭配 AI 問答與篩選排行，公開免費，人人都能研究股票。
+          即時查詢個股報價、互動走勢圖表，搭配 AI 問答與篩選排行（可用功能依帳號權限而定）。
         </p>
         <div className="mt-5 flex flex-wrap gap-3">
           <Link
@@ -113,7 +113,9 @@ export default function HomePage() {
       {/* 2026-10-06 使用者：大盤指數移到快報下面、關注名單移到 AI 模擬上面。 */}
       <WatchlistSection />
 
-      <SimPortfolioCard />
+      <RequirePerm need={[PERM.SIM_PORTFOLIO]}>
+        <SimPortfolioCard />
+      </RequirePerm>
 
       <section>
         <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
@@ -129,12 +131,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-6 text-center">
-        <h2 className="font-semibold">有問題想問？</h2>
-        <p className="mt-1 text-sm text-(--text-secondary)">
-          點右下角的 AI 問答，直接用中文問「2330 最近走勢如何？」或「AAPL 現在多少錢？」
-        </p>
-      </section>
+      <RequirePerm need={[PERM.AI_CHAT]}>
+        <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-6 text-center">
+          <h2 className="font-semibold">有問題想問？</h2>
+          <p className="mt-1 text-sm text-(--text-secondary)">
+            點右下角的 AI 問答，直接用中文問「2330 最近走勢如何？」或「AAPL 現在多少錢？」
+          </p>
+        </section>
+      </RequirePerm>
     </div>
   );
 }
