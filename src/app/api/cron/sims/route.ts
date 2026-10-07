@@ -17,7 +17,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const started = Date.now();
-  const sims = await listAllAutoSims();
+  let sims;
+  try {
+    sims = await listAllAutoSims();
+  } catch (err) {
+    // 例如試算表的 Apps Script 還是舊版、不認得 Sims 表
+    return NextResponse.json({ ok: false, error: (err as Error).message }, { status: 503 });
+  }
   const cache = new DataCache(new Set()); // 所有模擬倉共用：同一檔股票只抓一次
   const results: Array<RunResult | { simId: string; error: string }> = [];
   for (const sim of sims) {
