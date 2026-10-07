@@ -85,6 +85,7 @@ async function run(v: Variant) {
         .filter((r) => r.c && !String(r.c).startsWith("9"))
         .map((r) => ({ c: r.c, tlong: r.tlong, t: r.t, z: r.z, age: r.tlong ? (t0 - Number(r.tlong)) / 1000 : null })),
       hdr,
+      raw: rows.find((r) => !String(r.c).startsWith("9")),
       bodyHead: data ? undefined : text.slice(0, 120),
     };
   } catch (e) {
