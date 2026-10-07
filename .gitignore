@@ -45,3 +45,6 @@ next-env.d.ts
 
 # 評測完整原始回答（scripts/eval，只提交 .md 報告）
 /docs/eval/*.json
+
+# Python 快取
+__pycache__/
