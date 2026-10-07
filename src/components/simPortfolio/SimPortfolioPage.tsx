@@ -16,6 +16,8 @@ export default function SimPortfolioPage() {
   if (!data) return <div className="h-96 animate-pulse rounded-lg border border-(--gridline) bg-(--surface-1)" aria-hidden />;
   const perf = data.perf;
   const r = data.rules;
+  // 00631L 是 2026-10-07 才加的對照：舊資料沒有基準價，從第一次記到的那天起算；建倉當天就有的與其他對照同一天。
+  const levFrom = data.base?.levFromDay && data.base.levFromDay !== data.startDay ? `${data.base.levFromDay} 起，晚於其他對照` : "自建倉當下";
   const signedPts = (v: number | null) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`);
   return (
     <div className="space-y-5">
@@ -40,6 +42,8 @@ export default function SimPortfolioPage() {
               <Stat label="累計報酬" value={pct(perf.totalReturnPct)} cls={tone(perf.totalReturnPct)} />
               <Stat label="vs 0050（百分點）" value={signedPts(perf.vsEtfPct)} cls={tone(perf.vsEtfPct)} />
               <Stat label="同期 0050 買進持有（自建倉當下起算）" value={pct(perf.etfReturnPct)} cls={tone(perf.etfReturnPct)} />
+              <Stat label="vs 00631L（百分點）" value={signedPts(perf.vsLevPct)} cls={tone(perf.vsLevPct)} />
+              <Stat label={`同期 00631L 買進持有（2 倍槓桿，${levFrom}起算）`} value={pct(perf.levReturnPct)} cls={tone(perf.levReturnPct)} />
               <Stat label="同期加權指數（自建倉當下起算）" value={pct(perf.indexReturnPct)} cls={tone(perf.indexReturnPct)} />
               <Stat label="已實現損益" value={`${ntd(perf.realized)} 元`} cls={tone(perf.realized)} />
               <Stat label="未實現損益" value={`${ntd(perf.unrealized)} 元`} cls={tone(perf.unrealized)} />
@@ -57,9 +61,9 @@ export default function SimPortfolioPage() {
 
           <section className={card}>
             <h2 className="font-semibold">累計報酬走勢</h2>
-            <p className="mt-0.5 text-[12px] text-(--text-muted)">每個交易日一點（收盤後 13:35 那次為收盤淨值）；0050 只計價格、未含股利。</p>
+            <p className="mt-0.5 text-[12px] text-(--text-muted)">每個交易日一點（收盤後 13:35 那次為收盤淨值）；0050 與 00631L 只計價格、未含股利；00631L 是 2 倍槓桿 ETF，波動與損耗都比 0050 大，只當另一個對照。</p>
             <div className="mt-2">
-              <NavChart points={data.nav ?? []} initialCapital={data.initialCapital} base={data.base ?? { etf: null, index: null }} />
+              <NavChart points={data.nav ?? []} initialCapital={data.initialCapital} base={data.base ?? { etf: null, index: null, lev: null }} />
             </div>
           </section>
 
@@ -186,6 +190,10 @@ export default function SimPortfolioPage() {
             依這些數字寫檢討並存進學習紀錄。
           </li>
           <li>對照組：{r.benchmark} 與加權指數從第一次建倉當下的價格起算（不是當天開盤或昨收，所以第一天會跟當日漲跌幅不同；0050 只計價格、未含股利）。</li>
+          <li>
+            {r.leveragedBenchmark}（元大台灣50正2）是 2 倍槓桿 ETF、只計價格（未含股利），2026-10-07 起新增為第三個對照；基準價從第一次記到的那天起算（舊資料沒有更早的基準價，所以
+            {data.base?.levFromDay ?? "第一次記到的那天"}之前的走勢不畫、報酬不回推）。槓桿 ETF 每日重設槓桿，長期報酬不等於 0050 的 2 倍，比較時請留意。
+          </li>
         </ul>
       </section>
     </div>

@@ -2,7 +2,7 @@ import type { SiteRating } from "@/lib/ai/siteRating";
 import { tradeReward } from "@/lib/ai/learning/reward";
 import { taipeiDayKey, taipeiWeekday } from "@/lib/pollingSchedule";
 import { TW_BUY_COMMISSION_RATE, TW_SELL_COMMISSION_RATE, TW_SELL_TAX_RATE } from "@/lib/tradingCosts";
-import type { SimHolding, SimNavPoint, SimPendingOrder, SimSlotId, SimState, SimTrade } from "./types";
+import type { SimBase, SimHolding, SimNavPoint, SimPendingOrder, SimSlotId, SimState, SimTrade } from "./types";
 
 /**
  * AI 模擬投資組合：規則常數＋純邏輯（無 I/O，有測試 src/__tests__/simPortfolio.test.ts）。
@@ -52,6 +52,8 @@ export const SIM_MAX_REVIEWS = 20;
 const SIM_DONE_SLOTS_KEEP = 12;
 /** 對照組：同期買進持有的 ETF。 */
 export const SIM_BENCHMARK_ETF = "0050";
+/** 第二個對照組：元大台灣50正2（2 倍槓桿 ETF，只計價格）買進持有。 */
+export const SIM_LEVERAGED_ETF = "00631L";
 
 export type SimSlotKind = "continuous" | "fixed-decide" | "fixed-settle";
 
@@ -110,7 +112,7 @@ export function markSlotDone(state: SimState, day: string, slot: SimSlotId): voi
   state.doneSlots = [...state.doneSlots.filter((d) => d !== k), k].slice(-SIM_DONE_SLOTS_KEEP);
 }
 
-export function newSimState(now: Date, base: { etf: number | null; index: number | null }): SimState {
+export function newSimState(now: Date, base: SimBase): SimState {
   return {
     version: 1,
     startDay: taipeiDayKey(now),
@@ -404,6 +406,16 @@ function pushTrade(state: SimState, t: SimTrade): void {
 }
 
 /** 記今天的淨值點（同一天覆寫）。 */
+/**
+ * 00631L 對照的基準價：還沒記過、而且這次抓得到價格，就以這次價格當起點（新建倉時 newSimState 已帶入；
+ * 舊資料第一次執行時補上，並記 levFromDay）。已記過不覆蓋。回傳有沒有改動。
+ */
+export function ensureLevBase(state: SimState, levPrice: number | null | undefined, day: string): boolean {
+  if (state.base.lev != null || levPrice == null || !(levPrice > 0)) return false;
+  state.base = { ...state.base, lev: levPrice, levFromDay: day };
+  return true;
+}
+
 export function upsertNavPoint(state: SimState, p: SimNavPoint): void {
   const i = state.nav.findIndex((x) => x.day === p.day);
   if (i >= 0) state.nav[i] = p;
@@ -607,6 +619,10 @@ export interface SimPerformance {
   dayReturnPct: number;
   /** 同期 0050 買進持有報酬（只算價格，未計股利與費用） */
   etfReturnPct: number | null;
+  /** 同期 00631L（2 倍槓桿）買進持有報酬（只算價格）；基準價還沒記到時是 null */
+  levReturnPct: number | null;
+  /** 超越 00631L 幾個百分點 */
+  vsLevPct: number | null;
   /** 同期加權指數報酬 */
   indexReturnPct: number | null;
   /** 超越 0050 幾個百分點 */
@@ -626,7 +642,7 @@ export interface SimPerformance {
  */
 export function computePerformance(
   state: SimState,
-  live: { prices: Map<string, number>; etf: number | null; index: number | null },
+  live: { prices: Map<string, number>; etf: number | null; index: number | null; lev?: number | null },
   today: string
 ): SimPerformance {
   const nav = navOf(state, live.prices);
@@ -636,6 +652,7 @@ export function computePerformance(
     return s + Math.round(p * h.shares) - sellFee(p, h.shares) - h.invested;
   }, 0);
   const etfReturnPct = pctChange(live.etf, state.base.etf);
+  const levReturnPct = pctChange(live.lev, state.base.lev);
   const totalReturnPct = r2((nav / state.initialCapital - 1) * 100);
   const series = [...state.nav.filter((p) => p.day < today).map((p) => p.nav), nav];
   return {
@@ -645,6 +662,8 @@ export function computePerformance(
     etfReturnPct,
     indexReturnPct: pctChange(live.index, state.base.index),
     vsEtfPct: etfReturnPct == null ? null : r2(totalReturnPct - etfReturnPct),
+    levReturnPct,
+    vsLevPct: levReturnPct == null ? null : r2(totalReturnPct - levReturnPct),
     maxDrawdownPct: maxDrawdownPct([state.initialCapital, ...series]),
     unrealized: Math.round(unrealized),
     realized: state.stats.realized,

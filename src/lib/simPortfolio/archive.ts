@@ -111,6 +111,8 @@ export interface SimDailySnapshot {
   nav: number;
   cash: number;
   etf: number | null;
+  /** 00631L 價格（2026-10-07 起才有） */
+  lev?: number | null;
   index: number | null;
   holdings: Array<{ symbol: string; name: string; shares: number; avgCost: number; price: number; marketValue: number; pnl: number; stopPrice: number | null; label: string | null }>;
 }

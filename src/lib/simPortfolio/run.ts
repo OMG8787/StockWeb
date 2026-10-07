@@ -19,6 +19,8 @@ import {
   recordRejected,
   sellFee,
   SIM_BENCHMARK_ETF,
+  SIM_LEVERAGED_ETF,
+  ensureLevBase,
   SIM_FIXED_FILL_TIME,
   SIM_MAX_REVIEWS,
   slotDoneKey,
@@ -123,7 +125,12 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
       doneMemo.add(doneKey);
       return { status: "skipped", reason: "這個時點已執行過", slot: slot.id };
     }
-    const [etfQuote, indices] = await Promise.all([getQuote(SIM_BENCHMARK_ETF, "TW").catch(() => null), getIndices().catch(() => [])]);
+    const [etfQuote, levQuote, indices] = await Promise.all([
+      getQuote(SIM_BENCHMARK_ETF, "TW").catch(() => null),
+      getQuote(SIM_LEVERAGED_ETF, "TW").catch(() => null), // 00631L 只是第二個對照，抓不到不影響交易（那一點 lev 記 null）
+      getIndices().catch(() => []),
+    ]);
+    const levPrice = levQuote && levQuote.price > 0 ? levQuote.price : null;
     if (!etfQuote) return { status: "failed", reason: "抓不到 0050 報價（下一次預熱再試）", slot: slot.id };
     const index = indices.find((i) => i.symbol === TAIEX_SYMBOL)?.price ?? null;
     // 國定假日：報價的交易日不是今天就不交易（只記為已執行）。
@@ -136,7 +143,8 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
       doneMemo.add(doneKey);
       return { status: "skipped", reason: `今日非交易日（報價日期 ${etfQuote.tradeDate}）`, slot: slot.id };
     }
-    if (!state) state = newSimState(now, { etf: etfQuote.price, index });
+    if (!state) state = newSimState(now, { etf: etfQuote.price, index, lev: levPrice, ...(levPrice != null ? { levFromDay: day } : {}) });
+    else ensureLevBase(state, levPrice, day); // 舊資料沒有 00631L 基準價：從第一次抓得到那天起算
     const at = now.toISOString();
 
     // 這一輪要封存的交易（含未成交）、決策說明、評等快照、盤口。
@@ -283,8 +291,8 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
       await refreshStops(state, prices, new Map(held.map((r) => [r.symbol, r.newStop])), candidates);
     }
 
-    const perf = computePerformance(state, { prices, etf: etfQuote.price, index }, day);
-    upsertNavPoint(state, { day, nav: perf.nav, cash: state.cash, etf: etfQuote.price, index });
+    const perf = computePerformance(state, { prices, etf: etfQuote.price, index, lev: levPrice }, day);
+    upsertNavPoint(state, { day, nav: perf.nav, cash: state.cash, etf: etfQuote.price, lev: levPrice, index });
     markSlotDone(state, day, slot.id);
     state.lastRun = { at, slot: slot.id, day, note };
     if (writeReview) {
@@ -315,6 +323,7 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
         nav: perf.nav,
         cash: state.cash,
         etf: etfQuote.price,
+        lev: levPrice,
         index,
         holdings: state.holdings.map((h) => {
           const price = prices.get(h.symbol) ?? h.lastPrice ?? h.avgCost;

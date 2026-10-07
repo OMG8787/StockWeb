@@ -32,7 +32,7 @@ export default function SimPortfolioCard() {
         </p>
       ) : (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <Stat label="目前淨值" value={`${ntd(perf.nav)} 元`} />
             <Stat label="今日" value={pct(perf.dayReturnPct)} cls={tone(perf.dayReturnPct)} />
             <Stat label={`累計（${data.startDay} 起）`} value={pct(perf.totalReturnPct)} cls={tone(perf.totalReturnPct)} />
@@ -40,6 +40,11 @@ export default function SimPortfolioCard() {
               label={`vs 0050（同期 0050 ${pct(perf.etfReturnPct)}，自建倉當下價格起算、非今日漲跌）`}
               value={perf.vsEtfPct == null ? "—" : `${perf.vsEtfPct > 0 ? "+" : ""}${perf.vsEtfPct.toFixed(2)} 點`}
               cls={tone(perf.vsEtfPct)}
+            />
+            <Stat
+              label={`vs 00631L（2 倍槓桿，同期 ${pct(perf.levReturnPct)}${data.base?.levFromDay && data.base.levFromDay !== data.startDay ? `，${data.base.levFromDay} 起算` : ""}）`}
+              value={perf.vsLevPct == null ? "—" : `${perf.vsLevPct > 0 ? "+" : ""}${perf.vsLevPct.toFixed(2)} 點`}
+              cls={tone(perf.vsLevPct)}
             />
           </div>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">

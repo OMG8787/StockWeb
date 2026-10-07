@@ -31,7 +31,7 @@ export function buildReviewFacts(state: SimState, perf: SimPerformance, prices: 
   const today = state.trades.filter((t) => t.day === day);
   const lines: string[] = [];
   lines.push(
-    `【成效】淨值 ${fmtNt(perf.nav)}（初始 ${fmtNt(state.initialCapital)}），累計 ${fmtPct(perf.totalReturnPct)}、今日 ${fmtPct(perf.dayReturnPct)}；同期 0050 ${fmtPct(perf.etfReturnPct)}、加權指數 ${fmtPct(perf.indexReturnPct)}；最大回撤 ${perf.maxDrawdownPct}%；已平倉勝率 ${perf.winRatePct == null ? "—（尚無平倉）" : `${perf.winRatePct}%`}。`
+    `【成效】淨值 ${fmtNt(perf.nav)}（初始 ${fmtNt(state.initialCapital)}），累計 ${fmtPct(perf.totalReturnPct)}、今日 ${fmtPct(perf.dayReturnPct)}；同期 0050 ${fmtPct(perf.etfReturnPct)}、同期 00631L（2 倍槓桿 ETF）${fmtPct(perf.levReturnPct)}、加權指數 ${fmtPct(perf.indexReturnPct)}；最大回撤 ${perf.maxDrawdownPct}%；已平倉勝率 ${perf.winRatePct == null ? "—（尚無平倉）" : `${perf.winRatePct}%`}。`
   );
   lines.push(
     today.length === 0

@@ -52,7 +52,7 @@ show_decisions = "--decisions" in args
 view = get(f"{SITE}/api/sim-portfolio?trades=1")
 p = view.get("perf") or {}
 print(f"【目前成效】{view.get('startDay')} 起：淨值 {p.get('nav'):,} 元，累計 {pct(p.get('totalReturnPct'))}、今日 {pct(p.get('dayReturnPct'))}；"
-      f"0050 {pct(p.get('etfReturnPct'))}、加權 {pct(p.get('indexReturnPct'))}；最大回撤 {p.get('maxDrawdownPct')}%；"
+      f"0050 {pct(p.get('etfReturnPct'))}、00631L {pct(p.get('levReturnPct'))}、加權 {pct(p.get('indexReturnPct'))}；最大回撤 {p.get('maxDrawdownPct')}%；"
       f"勝率 {p.get('winRatePct') if p.get('winRatePct') is not None else '—'}；平均獎勵 {pct(p.get('avgRewardPct'))}" if p else "【目前成效】尚未開始")
 if view.get("pending"):
     print(f"盤後定價委託中 {len(view['pending'])} 筆")

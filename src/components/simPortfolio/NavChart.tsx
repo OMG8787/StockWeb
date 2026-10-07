@@ -1,9 +1,9 @@
 "use client";
 
-import type { SimNavPoint } from "@/lib/simPortfolio/types";
+import type { SimBase, SimNavPoint } from "@/lib/simPortfolio/types";
 
 /**
- * 淨值走勢（累計報酬 %）：AI 組合 vs 0050 vs 加權指數，起點都是 0%。輕量 SVG，不載入圖表套件。
+ * 淨值走勢（累計報酬 %）：AI 組合 vs 0050 vs 00631L（2 倍槓桿）vs 加權指數，起點都是 0%（00631L 舊資料沒有，從有基準價那天起畫）。輕量 SVG，不載入圖表套件。
  * 只有 1 個點時仍畫出點與數值。
  */
 const W = 640;
@@ -17,13 +17,14 @@ export default function NavChart({
 }: {
   points: SimNavPoint[];
   initialCapital: number;
-  base: { etf: number | null; index: number | null };
+  base: SimBase;
 }) {
   if (points.length === 0) return <p className="py-8 text-center text-sm text-(--text-muted)">還沒有淨值紀錄。</p>;
   const toPct = (v: number | null, b: number | null) => (v != null && b != null && b > 0 ? (v / b - 1) * 100 : null);
   const series = [
     { key: "AI 組合", color: "var(--accent)", values: points.map((p) => toPct(p.nav, initialCapital)) },
     { key: "0050", color: "var(--text-muted)", values: points.map((p) => toPct(p.etf, base.etf)) },
+    { key: "00631L", color: "#8a63d2", values: points.map((p) => toPct(p.lev ?? null, base.lev ?? null)) },
     { key: "加權指數", color: "#c98a1b", values: points.map((p) => toPct(p.index, base.index)) },
   ];
   const all = [0, ...series.flatMap((s) => s.values.filter((v): v is number => v != null))];
@@ -38,7 +39,7 @@ export default function NavChart({
   const ticks = [hi, (hi + lo) / 2, lo];
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="累計報酬走勢：AI 組合、0050、加權指數">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="累計報酬走勢：AI 組合、0050、00631L、加權指數">
         {ticks.map((t) => (
           <g key={t}>
             <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} stroke="var(--gridline)" />

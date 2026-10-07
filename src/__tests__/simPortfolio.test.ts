@@ -18,6 +18,7 @@ import {
   upsertNavPoint,
   type BuyCandidate,
   type HeldReview,
+  ensureLevBase,
 } from "@/lib/simPortfolio/rules";
 import { buildReviewFacts } from "@/lib/simPortfolio/review";
 import { misRowToDepth } from "@/lib/simPortfolio/depth";
@@ -173,6 +174,32 @@ describe("買賣決策（只依評等）", () => {
     expect(applySimOrder(s, { symbol: "A", name: "A", side: "buy", shares: 1000, price: 2000, ratingLabel: "", reason: "" }, ctx())).toBeNull();
     expect(applySimOrder(s, { symbol: "A", name: "A", side: "sell", shares: 1, price: 10, ratingLabel: "", reason: "" }, ctx())).toBeNull();
     expect(s.cash).toBe(SIM_INITIAL_CAPITAL);
+  });
+});
+
+describe("00631L（2 倍槓桿 ETF）對照", () => {
+  it("同期報酬與 vs 百分點；基準價沒記到時是 null、不影響其他成效", () => {
+    const s = newSimState(tpe("2026-10-07", "09:30"), { etf: 100, index: 20000, lev: 40, levFromDay: "2026-10-07" });
+    const p = computePerformance(s, { prices: new Map(), etf: 101, index: 20000, lev: 42 }, "2026-10-07");
+    expect(p.levReturnPct).toBe(5);
+    expect(p.vsLevPct).toBe(-5); // 組合 0%，00631L +5%
+    const noBase = newSimState(tpe("2026-10-07", "09:30"), { etf: 100, index: 20000 });
+    const q = computePerformance(noBase, { prices: new Map(), etf: 101, index: 20000, lev: 42 }, "2026-10-07");
+    expect(q.levReturnPct).toBeNull();
+    expect(q.vsLevPct).toBeNull();
+    expect(q.etfReturnPct).toBe(1);
+    expect(computePerformance(s, { prices: new Map(), etf: 101, index: 20000 }, "2026-10-07").levReturnPct).toBeNull();
+  });
+
+  it("ensureLevBase：舊資料沒有基準價就從第一次有價格那天起算、之後不覆蓋、價格無效不記", () => {
+    const s = newSimState(tpe("2026-10-05", "09:30"), { etf: 100, index: 20000 });
+    expect(ensureLevBase(s, null, "2026-10-07")).toBe(false);
+    expect(ensureLevBase(s, 0, "2026-10-07")).toBe(false);
+    expect(s.base.lev).toBeUndefined();
+    expect(ensureLevBase(s, 41.79, "2026-10-07")).toBe(true);
+    expect(s.base).toEqual({ etf: 100, index: 20000, lev: 41.79, levFromDay: "2026-10-07" });
+    expect(ensureLevBase(s, 50, "2026-10-08")).toBe(false);
+    expect(s.base.lev).toBe(41.79);
   });
 });
 

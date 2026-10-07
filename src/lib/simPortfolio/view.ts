@@ -4,6 +4,7 @@ import {
   computePerformance,
   SIM_ADD_POSITION_PCT,
   SIM_BENCHMARK_ETF,
+  SIM_LEVERAGED_ETF,
   SIM_INITIAL_CAPITAL,
   SIM_FIXED_FILL_TIME,
   SIM_LIMIT_LOCK_PCT,
@@ -17,7 +18,7 @@ import {
   type SimPerformance,
 } from "./rules";
 import { readSimStateCached, simStoreEnabled } from "./store";
-import type { SimNavPoint, SimPendingOrder, SimReview, SimTrade } from "./types";
+import type { SimBase, SimNavPoint, SimPendingOrder, SimReview, SimTrade } from "./types";
 import { TW_BUY_COMMISSION_RATE, TW_SELL_COMMISSION_RATE, TW_SELL_TAX_RATE } from "@/lib/tradingCosts";
 
 /** /api/sim-portfolio 的回應（首頁卡片與 /portfolio 頁共用）。 */
@@ -45,8 +46,8 @@ export interface SimPortfolioView {
   startDay?: string;
   initialCapital: number;
   cash?: number;
-  /** 對照組起點（0050 價格、加權指數） */
-  base?: { etf: number | null; index: number | null };
+  /** 對照組起點（0050 價格、加權指數、00631L 價格與起算日） */
+  base?: SimBase;
   perf?: SimPerformance;
   holdings?: SimHoldingView[];
   trades?: SimTrade[];
@@ -69,6 +70,8 @@ export interface SimPortfolioView {
     sellFeeRate: number;
     sellTaxRate: number;
     benchmark: string;
+    /** 第二個對照：00631L（2 倍槓桿 ETF） */
+    leveragedBenchmark: string;
     slots: Array<{ label: string; fill: string }>;
   };
   asOf: string;
@@ -90,6 +93,7 @@ const RULES: SimPortfolioView["rules"] = {
   sellFeeRate: asPct(TW_SELL_COMMISSION_RATE),
   sellTaxRate: asPct(TW_SELL_TAX_RATE),
   benchmark: SIM_BENCHMARK_ETF,
+  leveragedBenchmark: SIM_LEVERAGED_ETF,
   slots: SIM_SLOTS.map((s) => ({ label: s.label, fill: s.fill })),
 };
 
@@ -99,7 +103,7 @@ export async function getSimPortfolioView(opts: { tradeLimit?: number } = {}): P
   if (!simStoreEnabled) return { enabled: false, started: false, initialCapital: SIM_INITIAL_CAPITAL, rules: RULES, asOf };
   const state = await readSimStateCached();
   if (!state) return { enabled: true, started: false, initialCapital: SIM_INITIAL_CAPITAL, rules: RULES, asOf };
-  const symbols = [...state.holdings.map((h) => h.symbol), SIM_BENCHMARK_ETF];
+  const symbols = [...state.holdings.map((h) => h.symbol), SIM_BENCHMARK_ETF, SIM_LEVERAGED_ETF];
   const [quotes, indices] = await Promise.all([
     getQuotesBatch(symbols.map((symbol) => ({ market: "TW" as const, symbol }))).catch(() => symbols.map(() => null)),
     getIndices().catch(() => []),
@@ -122,8 +126,9 @@ export async function getSimPortfolioView(opts: { tradeLimit?: number } = {}): P
   });
   const lastNav = state.nav[state.nav.length - 1];
   const etf = prices.get(SIM_BENCHMARK_ETF) ?? lastNav?.etf ?? null;
+  const lev = prices.get(SIM_LEVERAGED_ETF) ?? lastNav?.lev ?? null;
   const index = indices.find((i) => i.symbol === "TAIEX")?.price ?? lastNav?.index ?? null;
-  const perf = computePerformance(state, { prices: prices, etf, index }, taipeiDayKey());
+  const perf = computePerformance(state, { prices: prices, etf, index, lev }, taipeiDayKey());
   const holdings: SimHoldingView[] = state.holdings.map((h) => {
     const price = prices.get(h.symbol) ?? h.avgCost;
     const marketValue = Math.round(price * h.shares);

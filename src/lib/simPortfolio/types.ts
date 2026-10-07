@@ -74,6 +74,8 @@ export interface SimNavPoint {
   cash: number;
   /** 0050 收盤／當時價（對照用） */
   etf: number | null;
+  /** 00631L（元大台灣50正2，2 倍槓桿）收盤／當時價（對照用；2026-10-07 起才有，舊點沒有這欄） */
+  lev?: number | null;
   /** 加權指數 */
   index: number | null;
 }
@@ -101,6 +103,17 @@ export interface SimStats {
   rewardCount: number;
 }
 
+/**
+ * 對照組起點。00631L 是 2026-10-07 才加的對照：舊資料沒有 lev，從「第一次抓得到 00631L 價格」那一次起算，
+ * 起算日記在 levFromDay（頁面會註明，跟加權指數／0050 不是同一天起算）。
+ */
+export interface SimBase {
+  etf: number | null;
+  index: number | null;
+  lev?: number | null;
+  levFromDay?: string;
+}
+
 export interface SimState {
   version: 1;
   startDay: string;
@@ -115,8 +128,8 @@ export interface SimState {
   /** 新到舊，最多 SIM_MAX_REVIEWS 筆 */
   reviews: SimReview[];
   stats: SimStats;
-  /** 對照組起點：開始那次的 0050 價格與加權指數 */
-  base: { etf: number | null; index: number | null };
+  /** 對照組起點：開始那次的 0050 價格與加權指數；00631L 見 SimBase */
+  base: SimBase;
   /** 已執行過的時點 `{日期}:{時點}`（只留最近幾筆，冪等用） */
   doneSlots: string[];
   /** 盤後定價委託中（13:35 那輪下單、14:30 收盤價成交，14:35 那輪結算）；沒有就是空陣列或沒有這欄 */
