@@ -29,15 +29,30 @@ export interface TableStore {
   batch(ops: StoreOp[]): Promise<unknown[]>;
 }
 
-export class StoreUnavailableError extends Error {}
+export class StoreUnavailableError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+  }
+}
 
-const GAS_TIMEOUT_MS = 20_000;
+// Apps Script 平常 2～5 秒，偶爾（例如剛建好的試算表第一次寫入）超過 20 秒，2026-10-07 實測；放寬到 45 秒
+const GAS_TIMEOUT_MS = 45_000;
 
 class GasStore implements TableStore {
   readonly kind = "gas" as const;
   constructor(private url: string, private secret: string) {}
 
   async batch(ops: StoreOp[]): Promise<unknown[]> {
+    try {
+      return await this.send(ops);
+    } catch (err) {
+      // 純讀取遇到網路錯誤重試一次（偶發 fetch failed）；有寫入的不重試，避免重複寫入
+      if (err instanceof StoreUnavailableError && err.retryable && ops.every((o) => o.op === "read")) return this.send(ops);
+      throw err;
+    }
+  }
+
+  private async send(ops: StoreOp[]): Promise<unknown[]> {
     let res: Response;
     try {
       res = await fetch(this.url, {
@@ -50,7 +65,7 @@ class GasStore implements TableStore {
         signal: AbortSignal.timeout(GAS_TIMEOUT_MS),
       });
     } catch (err) {
-      throw new StoreUnavailableError(`帳號資料庫連線失敗：${(err as Error).message}`);
+      throw new StoreUnavailableError(`帳號資料庫連線失敗：${(err as Error).message}`, true);
     }
     if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`);
     const data = (await res.json().catch(() => null)) as { success?: boolean; data?: unknown[]; message?: string } | null;

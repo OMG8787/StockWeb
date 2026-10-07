@@ -2,13 +2,15 @@ import { NextResponse } from "next/server";
 import type { NextFetchEvent, NextRequest } from "next/server";
 import { hasPerm, routeAccess } from "@/lib/auth/permissions";
 import {
-  REVALIDATE_MS,
   SESSION_COOKIE,
   clearSessionCookies,
   decodeSession,
   writeSessionCookies,
 } from "@/lib/auth/sessionCookie";
-import { revalidate } from "@/lib/auth/accounts";
+import { kvFromRedis, refreshSession } from "@/lib/auth/sessionRefresh";
+import { redis } from "@/lib/data/kv";
+
+const authKv = kvFromRedis(redis);
 
 // 帳號制門禁（2026-10-07 起取代原本的共用密碼）：每個人用自己的帳號登入，
 // 依帳號權限決定能用哪些功能。網址需要哪個權限只寫在 lib/auth/permissions.ts。
@@ -55,23 +57,15 @@ export async function proxy(request: NextRequest, event: NextFetchEvent) {
   let session = decodeSession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) return toLogin(request);
 
-  let refreshed = false;
-  if (Date.now() - session.chk > REVALIDATE_MS) {
-    try {
-      const result = await revalidate(session);
-      if (result.touch) event.waitUntil(result.touch().catch(() => {}));
-      if (!result.payload) {
-        const res = toLogin(request);
-        clearSessionCookies(res);
-        return res;
-      }
-      session = result.payload;
-      refreshed = true;
-    } catch (err) {
-      // 試算表暫時連不上：沿用 cookie 裡的資料放行，下一次請求再確認（不因 Google 短暫故障把所有人登出）
-      console.warn("[proxy] 登入確認失敗，暫時沿用舊資料", err);
-    }
+  // 每 5 分鐘回試算表確認一次登入（有 Redis 時在背景進行，不拖慢換頁；見 sessionRefresh.ts）
+  const outcome = await refreshSession(session, authKv, (p) => event.waitUntil(p));
+  if (outcome.kind === "revoked") {
+    const res = toLogin(request);
+    clearSessionCookies(res);
+    return res;
   }
+  const refreshed = outcome.kind === "refresh";
+  if (outcome.kind === "refresh") session = outcome.session;
 
   let res: NextResponse;
   if (session.mcp && pathname !== "/account" && !pathname.startsWith("/api/auth/")) {

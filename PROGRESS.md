@@ -388,7 +388,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 **新方向（2026-10-07 下午，使用者在新裝置／新 GitHub 帳號 OMG8787 接手）：重構整個框架**
 - 使用者原話：「我需要重構整個框架」「幫我先去讀取 D:\claude\FonegleWeb 框架，我要將網站改成這樣，可以自由選擇登入。管理員可以看到登入狀態，不同使用者有不同權限、策略、功能等。先幫我把網頁改成這種框架，之後會再開一個試算表」「發布的部分可以先暫緩，我要先改好程式碼」。
 - 使用者決定：混合式（股票功能留 Next.js＋Vercel，帳號／權限／登入紀錄改用 Google 試算表＋Apps Script）；**一定要登入才能用**；**只有管理員能開帳號**；先寫好 Apps Script，試算表之後使用者自己建。
-- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）。**待使用者**：①建 Google 試算表、貼 gas/Code.gs、部署，把 /exec 網址與 API_SECRET 給我（步驟 docs/auth-setup.md）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
+- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）～（深夜）。試算表已建好並驗證。**待使用者**：①在 Vercel 新專案補 AUTH_GAS_URL／AUTH_GAS_SECRET（值在 .env.local）與舊專案的 AI／Redis／資料 API 金鑰，Redeploy，用 ADMIN_SETUP_CODE 建第一個管理員；新正式站網址待使用者提供（CLAUDE.md 規則三的網址要跟著換）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
 - **安全待辦**：OMG8787/StockWeb 是 public repo（金鑰掃描全部歷史未發現外洩），建議改 Private；舊正式站的預設密碼與 `site_unlocked=granted` 偽造 cookie 漏洞會在新版部署後消失。
 - 本機開發：沒設 AUTH_GAS_URL 時用 .cache/auth-dev-store.json 當假資料庫；這台電腦沒有 .env.local（check-feedback.py 等腳本目前無法執行；新版腳本改用 SERVICE_API_KEY，舊正式站不認這把金鑰）。
 
@@ -470,6 +470,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-07（深夜）：接上真的 Google 試算表、Vercel 新專案、登入確認改背景進行
+- 使用者在 OMG8787 的 Vercel 建立新專案 stock-web（Hobby，分支 claude/relaxed-curie-c69kp0，已填 AUTH_SECRET／ADMIN_SETUP_CODE／SERVICE_API_KEY，尚未填試算表兩個變數與舊專案金鑰）；建好試算表並部署 Apps Script，網址與 API_SECRET 已存本機 .env.local（gitignore）。
+- 實測 Apps Script 每次呼叫 2～5 秒、偶發 20 秒以上：①proxy 每 5 分鐘的登入確認改成有 Redis 時背景進行（`lib/auth/sessionRefresh.ts`，結果暫存 Redis，下一次請求套用；停用／強制登出改為最慢 5 分鐘＋下一次操作生效），途中抓到「套用暫存結果後 chk 早於結果時間，會永遠重用舊結果」的 bug 並加回歸測試；②試算表逾時 20→45 秒；③純讀取遇網路錯誤重試一次（寫入不重試）。
+- 驗證：647 測試、build 通過；本機接真的試算表跑完整流程 13 項全過（建管理員、開帳號、臨時密碼、改密、回饋、總覽、退回重改、停用），測試資料已全部刪除，試算表四張表皆 0 筆，使用者可在正式站自行建立第一個管理員。
 
 ### 2026-10-07（晚，續）：使用者回饋改存試算表＋處理狀態流程
 - 使用者要求「回饋一樣存在試算表中」「要有日期、是否已經解決（程式改過就變已完成）、管理員確認，之後要改可以直接從這裡處理」：回饋從 Redis list 改存試算表 Feedback 分頁（`lib/feedbackStore.ts`，記錄回報帳號），欄位含日期、處理狀態（待處理／已完成／不處理）、管理員確認（未確認／已確認／需重改）、處理說明、管理員備註；/admin 新增「💬 使用者回饋」分頁（篩選、改狀態、確認／退回重改）；新增 `scripts/resolve-feedback.py`，check-feedback.py 加列全部待處理；GET／PATCH 只限管理員與服務金鑰，腳本不能代替管理員確認。CLAUDE.md 回饋規則同步。Redis 裡舊的 300 筆回饋未搬移。
