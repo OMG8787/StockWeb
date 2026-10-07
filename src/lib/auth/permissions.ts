@@ -15,7 +15,7 @@ export const PERM = {
   ACTION: 32,
   SIM_PORTFOLIO: 33,
   SCOREBOARD: 34,
-  WATCHLIST_SYNC: 35,
+  // 35（關注清單同步）2026-10-07 取消：關注清單與庫存一律綁定帳號，試算表裡殘留的 35 會被 parsePerms 忽略
 } as const;
 
 export type PermCode = (typeof PERM)[keyof typeof PERM];
@@ -28,13 +28,12 @@ export const PERMISSION_LIST: Array<{ code: PermCode; label: string; detail: str
   { code: PERM.ACTION, label: "今日建議", detail: "今日建議／明日操作、每日快報" },
   { code: PERM.SIM_PORTFOLIO, label: "AI 模擬組合", detail: "AI 模擬投資組合" },
   { code: PERM.SCOREBOARD, label: "評等看板", detail: "評等紀錄、勝率統計、學習紀錄" },
-  { code: PERM.WATCHLIST_SYNC, label: "關注清單同步", detail: "關注清單／持股跨裝置雲端同步" },
 ];
 
 export const ROLE_TEMPLATES: Array<{ id: string; label: string; perms: PermCode[] }> = [
-  { id: "admin", label: "管理員", perms: [PERM.ADMIN, PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD, PERM.WATCHLIST_SYNC] },
-  { id: "advanced", label: "進階使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD, PERM.WATCHLIST_SYNC] },
-  { id: "basic", label: "一般使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.WATCHLIST_SYNC] },
+  { id: "admin", label: "管理員", perms: [PERM.ADMIN, PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD] },
+  { id: "advanced", label: "進階使用者", perms: [PERM.MARKET, PERM.AI_CHAT, PERM.ACTION, PERM.SIM_PORTFOLIO, PERM.SCOREBOARD] },
+  { id: "basic", label: "一般使用者", perms: [PERM.MARKET, PERM.AI_CHAT] },
   { id: "viewer", label: "只看行情", perms: [PERM.MARKET] },
 ];
 
@@ -81,11 +80,11 @@ export function isAdmin(perms: readonly number[]): boolean {
   return hasPerm(perms, [PERM.ADMIN]);
 }
 
-/** 不需要登入的路徑（登入頁本身、登入 API、排程） */
-const PUBLIC_PREFIXES = ["/login", "/api/auth/login", "/api/auth/setup", "/api/cron/"];
+/** 不需要登入的路徑（登入頁、登入／申請帳號／忘記密碼 API、排程） */
+const PUBLIC_PREFIXES = ["/login", "/api/auth/login", "/api/auth/setup", "/api/auth/register", "/api/auth/forgot", "/api/cron/"];
 
-/** 登入後即可使用、不需要任何功能權限的路徑（帳號設定、登出、改密碼） */
-const ANY_USER_PREFIXES = ["/account", "/api/auth/"];
+/** 登入後即可使用、不需要任何功能權限的路徑（帳號設定、登出、改密碼、自己的關注清單與庫存） */
+const ANY_USER_PREFIXES = ["/account", "/api/auth/", "/api/watchlist"];
 
 /**
  * 網址 → 需要的權限。依序比對，第一個符合的生效；都不符合就需要「行情瀏覽」。
@@ -97,7 +96,6 @@ const ROUTE_RULES: Array<{ prefixes: string[]; need: PermCode[] }> = [
   { prefixes: ["/portfolio", "/api/sim-portfolio"], need: [PERM.SIM_PORTFOLIO] },
   { prefixes: ["/scoreboard", "/api/rating-log", "/api/learning"], need: [PERM.SCOREBOARD] },
   { prefixes: ["/api/ask"], need: [PERM.AI_CHAT] }, // 含 /api/ask-feedback（AI 回答回饋與網站回報）
-  { prefixes: ["/api/watchlist"], need: [PERM.WATCHLIST_SYNC] },
 ];
 
 function matches(pathname: string, prefix: string): boolean {

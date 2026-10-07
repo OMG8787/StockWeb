@@ -54,9 +54,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </RequirePerm>
       <PriceAlertWatcher />
       <PageAutoRefresh />
-      <RequirePerm need={[PERM.WATCHLIST_SYNC]}>
-        <WatchlistSync />
-      </RequirePerm>
+      {/* 關注清單與庫存一律綁定帳號（未登入時 WatchlistSync 不做事） */}
+      <WatchlistSync />
     </>
   );
 

@@ -7,7 +7,7 @@ import path from "node:path";
  * 「通用表格讀寫」，帳號規則全部在 accounts.ts，所以本機測到的行為就是正式行為。
  */
 
-export type TableName = "Users" | "Sessions" | "LoginLog" | "Feedback";
+export type TableName = "Users" | "Sessions" | "LoginLog" | "Feedback" | "Holdings";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
@@ -15,6 +15,7 @@ export const TABLE_KEYS: Record<TableName, string> = {
   Sessions: "SessionId",
   LoginLog: "ID",
   Feedback: "ID",
+  Holdings: "ID",
 };
 
 export type StoreOp =
@@ -22,7 +23,9 @@ export type StoreOp =
   | { op: "append"; table: TableName; row: Row }
   | { op: "update"; table: TableName; key: string; patch: Row }
   | { op: "delete"; table: TableName; key: string }
-  | { op: "trim"; table: TableName; keep: number };
+  | { op: "trim"; table: TableName; keep: number }
+  /** 把「col＝value」的所有列換成 rows（例如整份關注清單換新），一次完成 */
+  | { op: "replaceWhere"; table: TableName; col: string; value: string; rows: Row[] };
 
 export interface TableStore {
   readonly kind: "gas" | "file" | "memory";
@@ -86,7 +89,7 @@ export class MemoryStore implements TableStore {
   }
 
   private async load(): Promise<Record<TableName, Row[]>> {
-    const empty = { Users: [], Sessions: [], LoginLog: [], Feedback: [] };
+    const empty = { Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [] };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);
     try {
@@ -123,6 +126,12 @@ export class MemoryStore implements TableStore {
         case "trim": {
           const keep = Math.max(50, op.keep);
           if (rows.length > keep) rows.splice(0, rows.length - keep);
+          return true;
+        }
+        case "replaceWhere": {
+          const kept = rows.filter((x) => x[op.col] !== op.value);
+          rows.length = 0;
+          rows.push(...kept, ...op.rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v ?? "")]))));
           return true;
         }
       }

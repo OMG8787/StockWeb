@@ -12,7 +12,8 @@ import { parsePerms, type PermCode } from "./permissions";
  */
 export const SESSION_COOKIE = "sw_session";
 export const PROFILE_COOKIE = "sw_profile";
-export const SESSION_MAX_AGE_DAYS = 180;
+// 瀏覽器允許的上限（Chrome 最多 400 天）；每 5 分鐘確認登入時會重寫 cookie，等於有在用就一直延長
+export const SESSION_MAX_AGE_DAYS = 400;
 export const REVALIDATE_MS = 5 * 60 * 1000;
 
 export interface SessionPayload {

@@ -35,6 +35,12 @@ const TABLES = {
         key: 'ID',
         cols: ['ID', 'Date', 'At', 'Rating', 'Status', 'Confirm', 'Account', 'Name', 'Reason', 'Question', 'Answer',
             'ResolveNote', 'ResolvedAt', 'ConfirmedBy', 'ConfirmedAt', 'AdminNote', 'Symbol', 'Page', 'Model', 'UserId', 'AtUtc']
+    },
+    // 每個帳號的關注清單與庫存（一檔股票一列）
+    Holdings: {
+        key: 'ID',
+        cols: ['ID', 'Account', 'UserName', 'Market', 'Symbol', 'StockName', 'HoldStatus', 'Shares', 'CostBasis', 'BuyDate',
+            'SalesCount', 'UpdatedAt', 'BuyDateSrc', 'Order', 'Sales', 'UserId']
     }
 };
 
@@ -59,7 +65,14 @@ const COLUMN_NOTES = {
     Status: '處理狀態：待處理／已完成（程式已修改）／不處理',
     Confirm: '管理員確認：未確認／已確認／需重改（退回重改時狀態會回到待處理）',
     ResolveNote: '處理說明（改了什麼、commit）',
-    AdminNote: '管理員備註（退回重改的原因等）'
+    AdminNote: '管理員備註（退回重改的原因等）',
+    ApprovalStatus: '已核准／待審核（自行申請）／已拒絕；空白＝已核准',
+    Contact: '申請帳號時留的聯絡方式，忘記密碼時確認本人用',
+    ResetRequestedAt: '使用者申請重設密碼的時間；管理員重設後清空',
+    HoldStatus: '持有中／關注／已賣出',
+    Shares: '持有股數（股，不是張）',
+    CostBasis: '平均成本（每股）',
+    Sales: '賣出紀錄（JSON，網站自動維護，請勿手動修改）'
 };
 
 // ============================================================
@@ -119,6 +132,22 @@ function runOp_(op) {
             const found = findRow_(sheet, TABLES[name].key, op.key);
             if (!found) return false;
             sheet.deleteRow(found.row);
+            return true;
+        }
+        case 'replaceWhere': {
+            // 把 col＝value 的所有列換成 op.rows（例如某個帳號的整份關注清單），整張表一次寫回
+            const newRows = Array.isArray(op.rows) ? op.rows : [];
+            let headers = headers_(sheet);
+            newRows.forEach(r => { headers = ensureCols_(sheet, Object.keys(r)); });
+            const col = headers.indexOf(String(op.col));
+            if (col < 0) throw new Error('未知的欄位：' + op.col);
+            const last = sheet.getLastRow();
+            const old = last >= 2 ? sheet.getRange(2, 1, last - 1, headers.length).getValues() : [];
+            const kept = old.filter(r => String(r[col]) !== String(op.value));
+            const added = newRows.map(r => headers.map(h => (r[h] == null ? '' : String(r[h]))));
+            const all = kept.concat(added);
+            if (last >= 2) sheet.getRange(2, 1, last - 1, headers.length).clearContent();
+            if (all.length) sheet.getRange(2, 1, all.length, headers.length).setNumberFormat('@').setValues(all);
             return true;
         }
         case 'trim': {

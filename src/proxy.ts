@@ -48,7 +48,16 @@ function isServiceRequest(request: NextRequest): boolean {
 export async function proxy(request: NextRequest, event: NextFetchEvent) {
   const { pathname } = request.nextUrl;
   const access = routeAccess(pathname);
-  if (access.kind === "public") return NextResponse.next();
+  if (access.kind === "public") {
+    // 已登入（這台裝置記住了）的人打開登入頁，直接回首頁
+    if (pathname === "/login" && decodeSession(request.cookies.get(SESSION_COOKIE)?.value)) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
 
   if (isServiceRequest(request) && !pathname.startsWith("/admin") && !pathname.startsWith("/api/admin")) {
     return NextResponse.next();

@@ -388,7 +388,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 **新方向（2026-10-07 下午，使用者在新裝置／新 GitHub 帳號 OMG8787 接手）：重構整個框架**
 - 使用者原話：「我需要重構整個框架」「幫我先去讀取 D:\claude\FonegleWeb 框架，我要將網站改成這樣，可以自由選擇登入。管理員可以看到登入狀態，不同使用者有不同權限、策略、功能等。先幫我把網頁改成這種框架，之後會再開一個試算表」「發布的部分可以先暫緩，我要先改好程式碼」。
 - 使用者決定：混合式（股票功能留 Next.js＋Vercel，帳號／權限／登入紀錄改用 Google 試算表＋Apps Script）；**一定要登入才能用**；**只有管理員能開帳號**；先寫好 Apps Script，試算表之後使用者自己建。
-- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）～（深夜）。試算表已建好並驗證。**待使用者**：①在 Vercel 新專案補 AUTH_GAS_URL／AUTH_GAS_SECRET（值在 .env.local）與舊專案的 AI／Redis／資料 API 金鑰，Redeploy，用 ADMIN_SETUP_CODE 建第一個管理員；新正式站網址待使用者提供（CLAUDE.md 規則三的網址要跟著換）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
+- 第一階段（帳號制框架）已完成，見工作日誌 2026-10-07（晚）～（深夜）。試算表已建好並驗證。**待使用者**：⓪把新版 gas/Code.gs 貼進 Apps Script 並「管理部署作業→編輯→新版本」（Holdings 分頁與 replaceWhere 需要）；①在 Vercel 新專案補 AUTH_GAS_URL／AUTH_GAS_SECRET（值在 .env.local）與舊專案的 AI／Redis／資料 API 金鑰，Redeploy，用 ADMIN_SETUP_CODE 建第一個管理員；新正式站網址待使用者提供（CLAUDE.md 規則三的網址要跟著換）；②決定「投資策略」各選項要怎麼影響 AI 建議（目前只記錄與顯示）；③發布：GitHub 改用 OMG8787/StockWeb 後 Vercel 未連動（舊專案綁 hj110b13-Andy/Stock-web），使用者說先暫緩。
 - **安全待辦**：OMG8787/StockWeb 是 public repo（金鑰掃描全部歷史未發現外洩），建議改 Private；舊正式站的預設密碼與 `site_unlocked=granted` 偽造 cookie 漏洞會在新版部署後消失。
 - 本機開發：沒設 AUTH_GAS_URL 時用 .cache/auth-dev-store.json 當假資料庫；這台電腦沒有 .env.local（check-feedback.py 等腳本目前無法執行；新版腳本改用 SERVICE_API_KEY，舊正式站不認這把金鑰）。
 
@@ -470,6 +470,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-07（深夜，續）：申請帳號／忘記密碼／記住裝置、關注清單與庫存綁定帳號
+- 使用者要求「登入頁要有忘記密碼跟建立帳號，登入後記住此裝置跟使用者，除非被管理員剔除」：登入頁加「申請帳號」（待審核，管理員在 /admin 核准並勾權限或拒絕，待審核上限 30）與「忘記密碼」（帳號＋聯絡方式送出申請，回覆一律相同；管理員確認本人後重設，標記自動清除）；cookie 400 天且使用中延長；已登入開 /login 直接回首頁；登入頁立即帶入上次帳號。
+- 使用者要求「記錄帳戶存股狀況在試算表，關注清單跟庫存都綁定帳號」：關注清單／庫存從 Redis 改存試算表 Holdings 分頁（一檔一列含持有狀態，新 GAS 操作 replaceWhere 一次換掉某帳號的列）；WatchlistSync 改為對齊後才推送、2 秒合併、單一請求、換人登入不混清單、登出先送出再清本機；取消權限 35（一律綁定）。**gas/Code.gs 有更新，使用者要貼上新版並部署新版本**。
+- 驗證：653 測試（新增申請／審核／忘記密碼 5 項、Holdings 經模擬試算表 1 項）、tsc、build 通過；本機 Playwright 跑 18 項流程（申請、待審核擋登入、核准、400 天 cookie、清單存帳號、跨裝置同清單、換人不外洩、登出清除、忘記密碼與重設）全過，「記住帳號」原本要等伺服器回應才填入，已改為立即填入並複查。
 
 ### 2026-10-07（深夜）：接上真的 Google 試算表、Vercel 新專案、登入確認改背景進行
 - 使用者在 OMG8787 的 Vercel 建立新專案 stock-web（Hobby，分支 claude/relaxed-curie-c69kp0，已填 AUTH_SECRET／ADMIN_SETUP_CODE／SERVICE_API_KEY，尚未填試算表兩個變數與舊專案金鑰）；建好試算表並部署 Apps Script，網址與 API_SECRET 已存本機 .env.local（gitignore）。

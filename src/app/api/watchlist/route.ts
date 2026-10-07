@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sessionFrom } from "@/lib/auth/server";
-import { getServerWatchlist, setServerWatchlist, watchlistSyncAvailable } from "@/lib/watchlistStore";
+import { getServerWatchlist, setServerWatchlist } from "@/lib/watchlistStore";
+import { authErrorResponse } from "@/lib/auth/server";
 import type { WatchlistItem } from "@/lib/watchlist";
 import { isValidSaleDate, sanitizeSales } from "@/lib/soldRecords";
 
@@ -37,37 +38,41 @@ function normalize(item: WatchlistItem): WatchlistItem {
     name: item.name,
     costBasis: finitePositive(item.costBasis),
     shares: finitePositive(item.shares),
+    ...(typeof item.order === "number" && Number.isFinite(item.order) ? { order: item.order } : {}),
     ...(isValidSaleDate(item.buyDate) ? { buyDate: item.buyDate, buyDateSrc: item.buyDateSrc === "auto" ? "auto" : "user" } : {}),
     ...(sales.length > 0 ? { sales } : {}),
   };
 }
 
-// 以帳號內部編號（UserId）當儲存鍵；舊版 Google 登入用 email 存的資料不會自動搬移。
+// 關注清單與庫存綁定帳號，存在 Google 試算表 Holdings 分頁（見 lib/watchlistStore.ts）。
 export async function GET(req: NextRequest) {
-  const userId = sessionFrom(req)?.uid;
-  if (!userId) return NextResponse.json({ error: "未登入" }, { status: 401 });
-  if (!watchlistSyncAvailable) {
-    return NextResponse.json({ items: [], syncAvailable: false });
+  const session = sessionFrom(req);
+  if (!session) return NextResponse.json({ error: "未登入" }, { status: 401 });
+  try {
+    return NextResponse.json({ items: await getServerWatchlist(session.uid), syncAvailable: true });
+  } catch (err) {
+    return authErrorResponse(err);
   }
-  const items = await getServerWatchlist(userId);
-  return NextResponse.json({ items, syncAvailable: true });
 }
 
 export async function PUT(req: NextRequest) {
-  const userId = sessionFrom(req)?.uid;
-  if (!userId) return NextResponse.json({ error: "未登入" }, { status: 401 });
-  if (!watchlistSyncAvailable) {
-    return NextResponse.json({ error: "尚未設定共用儲存，無法跨裝置同步" }, { status: 503 });
-  }
+  const session = sessionFrom(req);
+  if (!session) return NextResponse.json({ error: "未登入" }, { status: 401 });
 
   const body = await req.json().catch(() => null);
   if (!Array.isArray(body?.items)) return NextResponse.json({ error: "格式錯誤" }, { status: 400 });
   if (body.items.length > MAX_ITEMS) {
     return NextResponse.json({ error: `關注清單最多 ${MAX_ITEMS} 檔` }, { status: 400 });
   }
-  const items: WatchlistItem[] = body.items.filter(isWatchlistItem).map(normalize);
+  // 同一檔只留最後一筆（試算表一檔一列，ID＝帳號:市場:代號）
+  const byKey = new Map<string, WatchlistItem>();
+  for (const item of (body.items as unknown[]).filter(isWatchlistItem).map(normalize)) byKey.set(`${item.market}:${item.symbol}`, item);
+  const items = [...byKey.values()];
 
-  const ok = await setServerWatchlist(userId, items);
-  if (!ok) return NextResponse.json({ error: "儲存失敗，請稍後再試" }, { status: 503 });
+  try {
+    await setServerWatchlist({ userId: session.uid, account: session.acc, name: session.name }, items);
+  } catch (err) {
+    return authErrorResponse(err);
+  }
   return NextResponse.json({ items });
 }

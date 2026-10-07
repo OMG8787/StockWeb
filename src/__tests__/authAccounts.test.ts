@@ -6,8 +6,12 @@ import {
   createUser,
   hashPassword,
   kick,
+  FORGOT_REPLY,
   login,
   logout,
+  register,
+  requestPasswordReset,
+  reviewUser,
   resetUserPassword,
   revalidate,
   setupFirstAdmin,
@@ -113,11 +117,68 @@ describe("帳號系統", () => {
   });
 });
 
+describe("申請帳號、審核、忘記密碼", () => {
+  beforeEach(() => setStoreForTests(new MemoryStore()));
+  afterEach(() => setStoreForTests(null));
+
+  it("還沒有管理員時不能申請", async () => {
+    await expect(register({ account: "amy", name: "Amy", password: "amy-pass-1", contact: "amy@x.com" })).rejects.toThrow("管理員");
+  });
+
+  it("申請 → 待審核不能登入 → 核准並設權限 → 可登入", async () => {
+    const admin = await seedAdmin();
+    await register({ account: "amy", name: "Amy", password: "amy-pass-1", contact: "amy@x.com" });
+    await expect(register({ account: "AMY", name: "x", password: "xxxx-pass", contact: "x@x.com" })).rejects.toThrow("已經有人使用");
+    await expect(login("amy", "amy-pass-1", info)).rejects.toThrow("審核中");
+    const ov = await adminOverview(admin);
+    const amy = ov.users.find((u) => u.account === "amy")!;
+    expect(amy).toMatchObject({ approval: "待審核", contact: "amy@x.com", perms: [] });
+    await reviewUser(admin, amy.userId, "approve", { perms: [PERM.MARKET, PERM.AI_CHAT], strategy: "long" });
+    const s = await login("amy", "amy-pass-1", info);
+    expect(s).toMatchObject({ perms: [PERM.MARKET, PERM.AI_CHAT], strategy: "long", mcp: false });
+  });
+
+  it("拒絕後不能登入；一般帳號不能審核", async () => {
+    const admin = await seedAdmin();
+    await register({ account: "bob", name: "Bob", password: "bob-pass-1", contact: "0912345678" });
+    const bob = (await adminOverview(admin)).users.find((u) => u.account === "bob")!;
+    const { tempPassword } = await createUser(admin, { account: "plain", perms: [PERM.MARKET] });
+    const plain = await login("plain", tempPassword, info);
+    await expect(reviewUser(plain, bob.userId, "approve", { perms: [PERM.SUPER_ADMIN] })).rejects.toThrow("沒有系統管理權限");
+    await reviewUser(admin, bob.userId, "reject");
+    await expect(login("bob", "bob-pass-1", info)).rejects.toThrow("未通過");
+  });
+
+  it("忘記密碼：資料對才標記申請，回覆一律相同；管理員重設後清除標記", async () => {
+    const admin = await seedAdmin();
+    await register({ account: "cat", name: "Cat", password: "cat-pass-1", contact: "Cat@Mail.com" });
+    const cat = (await adminOverview(admin)).users.find((u) => u.account === "cat")!;
+    await reviewUser(admin, cat.userId, "approve", { perms: [PERM.MARKET] });
+    expect(await requestPasswordReset("nobody", "x@x.com")).toBe(FORGOT_REPLY);
+    expect(await requestPasswordReset("cat", "wrong@mail.com")).toBe(FORGOT_REPLY);
+    expect((await adminOverview(admin)).users.find((u) => u.account === "cat")!.resetRequestedAt).toBe("");
+    expect(await requestPasswordReset("CAT", " cat@mail.com ")).toBe(FORGOT_REPLY); // 不分大小寫、忽略空白
+    const flagged = (await adminOverview(admin)).users.find((u) => u.account === "cat")!;
+    expect(flagged.resetRequestedAt).not.toBe("");
+    await resetUserPassword(admin, cat.userId);
+    expect((await adminOverview(admin)).users.find((u) => u.account === "cat")!.resetRequestedAt).toBe("");
+  });
+
+  it("待審核的申請有上限", async () => {
+    await seedAdmin();
+    for (let i = 0; i < 30; i++) await register({ account: `p${i}xx`, name: "p", password: "pppp-pass", contact: "p@p.com" });
+    await expect(register({ account: "p99xx", name: "p", password: "pppp-pass", contact: "p@p.com" })).rejects.toThrow("太多");
+  });
+});
+
 describe("權限與網址", () => {
   it("網址對應的權限", () => {
     expect(routeAccess("/login")).toEqual({ kind: "public" });
     expect(routeAccess("/api/cron/warm-cache")).toEqual({ kind: "public" });
     expect(routeAccess("/account")).toEqual({ kind: "user", need: [] });
+    expect(routeAccess("/api/auth/register")).toEqual({ kind: "public" });
+    expect(routeAccess("/api/auth/forgot")).toEqual({ kind: "public" });
+    expect(routeAccess("/api/admin/review")).toEqual({ kind: "user", need: [PERM.ADMIN] });
     expect(routeAccess("/api/auth/logout")).toEqual({ kind: "user", need: [] });
     expect(routeAccess("/admin")).toEqual({ kind: "user", need: [PERM.ADMIN] });
     expect(routeAccess("/api/ask-feedback")).toEqual({ kind: "user", need: [PERM.AI_CHAT] });

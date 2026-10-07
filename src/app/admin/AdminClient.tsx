@@ -13,8 +13,13 @@ interface UserView {
   perms: PermCode[];
   strategy: string;
   isActive: boolean;
+  approval: "已核准" | "待審核" | "已拒絕";
+  contact: string;
+  resetRequestedAt: string;
+  resetContact: string;
   mustChangePassword: boolean;
   note: string;
+  createdAt: string;
   lastLoginAt: string;
   sessionCount: number;
   online: boolean;
@@ -115,6 +120,11 @@ export default function AdminClient() {
 
   const isSuper = me?.perms.includes(PERM.SUPER_ADMIN) ?? false;
   const onlineCount = data?.users.filter((u) => u.online).length ?? 0;
+  const pendingCount = data?.users.filter((u) => u.approval === "待審核").length ?? 0;
+  const resetCount = data?.users.filter((u) => u.resetRequestedAt).length ?? 0;
+  // 待審核、申請重設密碼的排最前面
+  const priority = (u: UserView) => (u.approval === "待審核" ? 0 : u.resetRequestedAt ? 1 : u.approval === "已拒絕" ? 3 : 2);
+  const sortedUsers = data ? [...data.users].sort((a, b) => priority(a) - priority(b)) : [];
 
   return (
     // pb-24：避免右下角 AI 問答按鈕蓋住表格最後一列的操作按鈕
@@ -126,6 +136,8 @@ export default function AdminClient() {
             {data.users.length} 個帳號・{onlineCount} 人線上（{data.onlineMinutes} 分鐘內有活動）
           </span>
         )}
+        {pendingCount > 0 && <span className="rounded-full bg-(--price-up) px-2 py-0.5 text-xs text-white">🆕 {pendingCount} 個帳號待審核</span>}
+        {resetCount > 0 && <span className="rounded-full bg-(--price-up) px-2 py-0.5 text-xs text-white">🔑 {resetCount} 個重設密碼申請</span>}
         <button type="button" className={`${btnGhost} ml-auto`} onClick={() => run(async () => {})} disabled={busy}>
           🔄 重新整理
         </button>
@@ -183,7 +195,7 @@ export default function AdminClient() {
                 </tr>
               </thead>
               <tbody>
-                {data.users.map((u) => (
+                {sortedUsers.map((u) => (
                   <UserRow key={`${u.userId}:${u.perms.join(",")}:${u.strategy}:${u.isActive}`} user={u} isSuper={isSuper} busy={busy} run={run} />
                 ))}
               </tbody>
@@ -324,7 +336,9 @@ function PermChecks({ perms, onChange, isSuper }: { perms: PermCode[]; onChange:
 }
 
 function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolean; busy: boolean; run: Run }) {
-  const [perms, setPerms] = useState<PermCode[]>(user.perms);
+  const pending = user.approval === "待審核";
+  // 待審核的帳號預設勾「一般使用者」範本，管理員可以再調整後按核准
+  const [perms, setPerms] = useState<PermCode[]>(pending && user.perms.length === 0 ? ROLE_TEMPLATES.find((r) => r.id === "basic")!.perms : user.perms);
   const [strategy, setStrategy] = useState(user.strategy);
   const dirty = perms.slice().sort().join() !== user.perms.slice().sort().join() || strategy !== user.strategy;
 
@@ -342,6 +356,14 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
             <div className="text-xs text-(--text-muted)">
               {user.online ? `線上（${user.lastActiveAt}）` : user.lastLoginAt ? `上次登入 ${user.lastLoginAt}` : "尚未登入"}
             </div>
+            {user.contact && <div className="text-xs text-(--text-muted)">聯絡：{user.contact}</div>}
+            {pending && <div className="mt-1 text-xs font-medium text-(--price-up)">🆕 申請帳號（{user.createdAt}）</div>}
+            {user.approval === "已拒絕" && <div className="mt-1 text-xs text-(--text-muted)">已拒絕申請</div>}
+            {user.resetRequestedAt && (
+              <div className="mt-1 text-xs font-medium text-(--price-up)">
+                🔑 申請重設密碼（{user.resetRequestedAt}）{user.resetContact && `，填的聯絡方式：${user.resetContact}`}
+              </div>
+            )}
           </div>
         </div>
       </td>
@@ -360,6 +382,39 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
         {user.mustChangePassword && <span className="block text-(--text-muted)">待改臨時密碼</span>}
       </td>
       <td className={td}>
+        {user.approval !== "已核准" ? (
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              className={btnPrimary + " !py-1 text-xs"}
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await sendJson("/api/admin/review", { userId: user.userId, decision: "approve", perms, strategy });
+                  return `已核准 ${user.name}，對方現在可以登入`;
+                })
+              }
+            >
+              核准（套用勾選的權限）
+            </button>
+            {pending && (
+              <button
+                type="button"
+                className={btnGhost + " text-xs"}
+                disabled={busy}
+                onClick={() =>
+                  confirm(`確定拒絕 ${user.name} 的帳號申請？`) &&
+                  run(async () => {
+                    await sendJson("/api/admin/review", { userId: user.userId, decision: "reject" });
+                    return `已拒絕 ${user.name} 的申請`;
+                  })
+                }
+              >
+                拒絕
+              </button>
+            )}
+          </div>
+        ) : (
         <div className="flex flex-wrap gap-1">
           <button
             type="button"
@@ -400,7 +455,7 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
               })
             }
           >
-            重設密碼
+            {user.resetRequestedAt ? "🔑 重設密碼" : "重設密碼"}
           </button>
           {user.sessionCount > 0 && (
             <button
@@ -419,6 +474,7 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
             </button>
           )}
         </div>
+        )}
       </td>
     </tr>
   );

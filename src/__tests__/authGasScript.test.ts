@@ -6,6 +6,7 @@ import { adminOverview, createUser, kick, login, revalidate, setupFirstAdmin, up
 import { getStore, setStoreForTests } from "@/lib/auth/store";
 import { PERM } from "@/lib/auth/permissions";
 import { appendFeedback, listFeedback, updateFeedback } from "@/lib/feedbackStore";
+import { getServerWatchlist, setServerWatchlist } from "@/lib/watchlistStore";
 
 /**
  * 在 Node 裡模擬 Google 試算表，直接執行 gas/Code.gs，再讓正式環境用的 GasStore
@@ -39,6 +40,10 @@ class FakeRange {
   setNote() {
     return this;
   }
+  clearContent() {
+    for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) this.sheet.set(this.r + i, this.c + j, "");
+    return this;
+  }
 }
 
 class FakeSheet {
@@ -55,8 +60,11 @@ class FakeSheet {
   getName() {
     return this.name;
   }
+  /** 跟 Google 試算表一樣：最後一個「有內容」的列 */
   getLastRow() {
-    return this.rows.length;
+    let n = this.rows.length;
+    while (n > 0 && this.rows[n - 1].every((c) => c === "" || c === undefined)) n--;
+    return n;
   }
   getLastColumn() {
     return this.rows.reduce((m, r) => Math.max(m, r.length), 0);
@@ -137,7 +145,7 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
   });
 
   it("setup 建立三張表、刪掉空白預設工作表、產生 API_SECRET", () => {
-    expect(env.sheets.map((s) => s.name).sort()).toEqual(["Feedback", "LoginLog", "Sessions", "Users"]);
+    expect(env.sheets.map((s) => s.name).sort()).toEqual(["Feedback", "Holdings", "LoginLog", "Sessions", "Users"]);
     expect(env.secret).toMatch(/^[0-9a-f-]{60,}$/);
     expect(env.sheets.find((s) => s.name === "Users")!.rows[0]).toContain("PasswordHash");
   });
@@ -220,5 +228,33 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
 
     await expect(updateFeedback(id, { status: "亂寫" }, { name: "老闆" })).rejects.toThrow("未知");
     await expect(updateFeedback("nope", { status: "已完成" }, null)).rejects.toThrow("查無");
+  });
+
+  it("關注清單與庫存綁定帳號：整份換新只影響自己的列，讀回欄位完整", async () => {
+    const amy = { userId: "U1", account: "amy", name: "艾咪" };
+    const bob = { userId: "U2", account: "bob", name: "鮑伯" };
+    await setServerWatchlist(amy, [
+      { symbol: "2330", market: "TW", name: "台積電", shares: 1000, costBasis: 950.5, buyDate: "2026-09-01", buyDateSrc: "user", order: 1 },
+      { symbol: "0050", market: "TW", name: "元大台灣50" },
+      { symbol: "2303", market: "TW", name: "聯電", shares: 0, costBasis: 50, sales: [{ id: "s1", date: "2026-10-01", shares: 2000, remaining: 0, buyPrice: 50, sellPrice: 55 }] },
+    ]);
+    await setServerWatchlist(bob, [{ symbol: "AAPL", market: "US", name: "Apple", shares: 10, costBasis: 180 }]);
+    const a = await getServerWatchlist("U1");
+    expect(a.map((x) => x.symbol)).toEqual(["2330", "0050", "2303"]);
+    expect(a[0]).toMatchObject({ shares: 1000, costBasis: 950.5, buyDate: "2026-09-01", buyDateSrc: "user", order: 1 });
+    expect(a[1]).toEqual({ symbol: "0050", market: "TW", name: "元大台灣50", costBasis: undefined, shares: undefined });
+    expect(a[2].sales?.[0]).toMatchObject({ date: "2026-10-01", shares: 2000, sellPrice: 55 });
+    // 代號開頭的 0 不會被吃掉；試算表看得到狀態
+    const sheet = env.sheets.find((x) => x.name === "Holdings")!;
+    const h = sheet.rows[0];
+    const statusOf = (sym: string) => sheet.rows.find((r) => r[h.indexOf("Symbol")] === sym)![h.indexOf("HoldStatus")];
+    expect([statusOf("2330"), statusOf("0050"), statusOf("2303")]).toEqual(["持有中", "關注", "已賣出"]);
+
+    await setServerWatchlist(amy, [{ symbol: "2454", market: "TW", name: "聯發科" }]);
+    expect((await getServerWatchlist("U1")).map((x) => x.symbol)).toEqual(["2454"]);
+    expect((await getServerWatchlist("U2")).map((x) => x.symbol)).toEqual(["AAPL"]);
+    await setServerWatchlist(amy, []);
+    expect(await getServerWatchlist("U1")).toEqual([]);
+    expect(await getServerWatchlist("U2")).toHaveLength(1);
   });
 });

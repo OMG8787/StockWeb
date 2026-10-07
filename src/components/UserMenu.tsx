@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { isAdmin } from "@/lib/auth/permissions";
 import { useProfile } from "@/lib/auth/useProfile";
+import { flushAndClearLocalWatchlist } from "@/lib/watchlistOwner";
 
 export default function UserMenu() {
   const profile = useProfile();
@@ -12,6 +13,8 @@ export default function UserMenu() {
   if (!profile) return null;
 
   async function handleLogout() {
+    // 先把還沒送出的關注清單修改送上帳號，再清掉這台電腦上的清單（下一個人看不到）
+    await flushAndClearLocalWatchlist();
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- 刻意整頁重載：登入狀態改變後要丟掉路由快取
     window.location.href = "/login";
