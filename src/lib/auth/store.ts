@@ -105,8 +105,8 @@ const SHARED_CACHE_TABLES = new Set<TableName>(["Users", "Sessions", "Holdings",
 const LOCAL_SHARED_TTL_MS = 3_000;
 const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
 
-/** 取結果（Google 轉址後的網址）失敗時重試幾次 */
-const FETCH_RESULT_ATTEMPTS = 4;
+/** 結果這麼久還沒回來就對沖（再送一次同 reqId 的請求）；正常時結果 0.1～0.2 秒就回來，POST 約 1.2 秒 */
+const HEDGE_MS = 3_000;
 /** 排不到鎖時重送一次：第一次失敗得在這段時間內發生（Apps Script 等鎖最久 20 秒）才重送，避免整體拖太久 */
 const LOCK_RETRY_WITHIN_MS = 25_000;
 const LOCK_RETRY_GAP_MS = 1_500;
@@ -231,7 +231,8 @@ class GasStore implements TableStore {
     for (let attempt = 0; ; attempt++) {
       const elapsed = Date.now() - startedAt;
       try {
-        return await this.send(ops, attempt === 0 ? GAS_TIMEOUT_MS : Math.min(RETRY_TIMEOUT_MS, Math.max(8_000, RETRY_BUDGET_MS - elapsed)), reqId);
+        const timeout = attempt === 0 ? GAS_TIMEOUT_MS : Math.min(RETRY_TIMEOUT_MS, Math.max(8_000, RETRY_BUDGET_MS - elapsed));
+        return await this.send(ops, timeout, reqId, readOnly || this.replaySafe(ops));
       } catch (err) {
         if (!(err instanceof StoreUnavailableError) || attempt >= MAX_RETRIES) throw err;
         const lockRetry = err.lockTimeout && elapsed < LOCK_RETRY_WITHIN_MS;
@@ -251,8 +252,51 @@ class GasStore implements TableStore {
     return this.protocol >= 2 || ops.every((o) => o.op !== "append");
   }
 
-  private async send(ops: StoreOp[], timeoutMs = GAS_TIMEOUT_MS, reqId = newReqId()): Promise<unknown[]> {
+  /**
+   * 送出一次。hedge＝對沖：Google 回結果的轉址服務有時 7～15 秒才回（甚至 404），而 POST 本身只要約 1.2 秒
+   * （2026-10-08 在 Vercel 端實測，見 /api/cron/gas-ping）；超過 HEDGE_MS 還沒收到結果，就用同一個 reqId 再送一次，
+   * 誰先拿到結果用誰。只在重複執行安全時才對沖（純讀取、無 append 的寫入、或 Apps Script v2 有結果暫存）。
+   */
+  private send(ops: StoreOp[], timeoutMs = GAS_TIMEOUT_MS, reqId = newReqId(), hedge = false): Promise<unknown[]> {
     const signal = AbortSignal.timeout(timeoutMs);
+    const first = this.sendOnce(ops, reqId, signal);
+    if (!hedge) return first;
+    return new Promise<unknown[]>((resolve, reject) => {
+      let settled = false;
+      let pending = 1;
+      let hedged = false;
+      const errors: unknown[] = [];
+      const attach = (p: Promise<unknown[]>) =>
+        p.then(
+          (v) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(v);
+          },
+          (err) => {
+            errors.push(err);
+            pending--;
+            // 還沒對沖就失敗：直接丟出去，交給外層重送；對沖後要兩邊都失敗才算失敗
+            if (!settled && (pending === 0 || !hedged)) {
+              settled = true;
+              clearTimeout(timer);
+              reject(errors.find((e) => e instanceof StoreUnavailableError && !e.retryable) ?? errors[0]);
+            }
+          },
+        );
+      const timer = setTimeout(() => {
+        if (settled) return;
+        hedged = true;
+        pending++;
+        console.warn("[gas] 結果超過 %d 毫秒還沒回來，用同一個 reqId 再送一次", HEDGE_MS);
+        attach(this.sendOnce(ops, reqId, signal));
+      }, HEDGE_MS);
+      attach(first);
+    });
+  }
+
+  private async sendOnce(ops: StoreOp[], reqId: string, signal: AbortSignal): Promise<unknown[]> {
     let res: Response;
     try {
       res = await fetch(this.url, {
@@ -302,19 +346,18 @@ class GasStore implements TableStore {
     return data.data as unknown[];
   }
 
+  /**
+   * 取結果：只讀一次。Google 的結果網址只能讀一次（再讀只會拿到 doGet 的健康檢查文字），
+   * 所以失敗不在這裡重取，交給上層用同一個 reqId 重送 POST。
+   */
   private async fetchResult(url: string, signal: AbortSignal): Promise<Response> {
-    let last: Response | null = null;
-    for (let attempt = 0; attempt < FETCH_RESULT_ATTEMPTS; attempt++) {
-      try {
-        last = await fetch(url, { cache: "no-store", redirect: "follow", signal });
-        if (last.ok || (last.status !== 404 && last.status < 500)) return last;
-      } catch (err) {
-        if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`, false, false, true);
-      }
-      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    try {
+      return await fetch(url, { cache: "no-store", redirect: "follow", signal });
+    } catch (err) {
+      if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`, false, false, true);
+      console.error("[gas]", (err as Error).message);
+      throw new StoreUnavailableError("連不上帳號資料庫（網路暫時有問題），請稍後再試一次。", true);
     }
-    if (last) return last;
-    throw new StoreUnavailableError("連不上帳號資料庫（網路暫時有問題），請稍後再試一次。", true);
   }
 }
 

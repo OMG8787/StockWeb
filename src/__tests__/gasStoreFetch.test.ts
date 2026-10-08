@@ -36,12 +36,12 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     setStoreForTests(null);
   });
 
-  it("寫入時取結果遇到 404：只重取結果、不重新執行（不會重複寫入）", async () => {
-    const g = fakeGas({ fail404: 2 });
+  it("取結果遇到 404：不重取（結果網址只能讀一次），改用同一個 reqId 重送 POST（重複執行也沒差的寫入）", async () => {
+    const g = fakeGas({ fail404: 1 });
     vi.stubGlobal("fetch", g.fetchMock);
-    const r = await getStore().batch([{ op: "append", table: "Strategies", row: { ID: "S1" } }]);
+    const r = await getStore().batch([{ op: "update", table: "Strategies", key: "S1", patch: { Name: "x" } }]);
     expect(r).toEqual([true]);
-    expect(g.counts()).toEqual({ posts: 1, gets: 3 });
+    expect(g.counts()).toEqual({ posts: 2, gets: 2 });
   });
 
   it("讀過的表 60 秒內不再呼叫；寫入後作廢重讀；同一批只送沒暫存的表", async () => {
@@ -178,5 +178,53 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     expect(r).toEqual([true]);
     expect(g.posts).toHaveLength(3);
     expect(g.posts[2].reqId).toBe(g.posts[1].reqId);
+  });
+
+  it("對沖：結果網址一直不回來時，3 秒後用同一個 reqId 再送一次，先回來的先用", async () => {
+    vi.useFakeTimers();
+    try {
+      const bodies: Array<{ reqId: string }> = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: { method?: string; body?: string; signal?: AbortSignal }) => {
+          if (init?.method === "POST") {
+            bodies.push(JSON.parse(init.body!));
+            return new Response(null, { status: 302, headers: { location: `https://script.googleusercontent.com/echo?n=${bodies.length}` } });
+          }
+          if (url.endsWith("n=1")) return new Promise<Response>(() => {}); // 第一次的結果永遠等不到
+          return new Response(JSON.stringify({ success: true, data: [[{ ID: "1" }]] }), { status: 200 });
+        }),
+      );
+      const p = getStore().batch([{ op: "read", table: "Alerts" }]);
+      await vi.advanceTimersByTimeAsync(3_100);
+      expect(await p).toEqual([[{ ID: "1" }]]);
+      expect(bodies).toHaveLength(2);
+      expect(bodies[1].reqId).toBe(bodies[0].reqId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("含 append 的寫入、Apps Script 舊版：不對沖（只送一次）", async () => {
+    vi.useFakeTimers();
+    try {
+      let posts = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: { method?: string }) => {
+          if (init?.method === "POST") {
+            posts++;
+            return new Response(null, { status: 302, headers: { location: "https://script.googleusercontent.com/echo?n=1" } });
+          }
+          return new Promise<Response>((resolve) => setTimeout(() => resolve(new Response(JSON.stringify({ success: true, data: [true] }), { status: 200 })), 5_000));
+        }),
+      );
+      const p = getStore().batch([{ op: "append", table: "SimTrades", row: { ID: "T9" } }]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      expect(await p).toEqual([true]);
+      expect(posts).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
