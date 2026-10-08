@@ -13,10 +13,10 @@ import { findTerms, hasTerm, type GlossaryEntry } from "@/lib/glossary";
  *   並確認游標真的落在名詞的文字範圍內（不是附近的空白）。
  * - 提示：頁面上有名詞的文字用 CSS Custom Highlight API 畫虛線底線（不改動 DOM、不影響版面與其他元件）；
  *   瀏覽器不支援時沒有底線，但滑過去一樣有說明。
- * - 略過：輸入框、表格資料格、程式碼、已經有 title 的元素（避免兩個提示重疊）、標了 data-no-gloss 的區塊。
+ * - 略過：導覽列（避免蓋住下拉選單）、輸入框、表格資料格、程式碼、已經有 title 的元素（避免兩個提示重疊）、標了 data-no-gloss 的區塊。
  */
 
-const EXCLUDE = "script,style,noscript,textarea,input,select,option,td,code,pre,[title],[data-no-gloss],[contenteditable='true']";
+const EXCLUDE = "script,style,noscript,textarea,input,select,option,td,code,pre,nav,[title],[data-no-gloss],[contenteditable='true']";
 const DWELL_MS = 250;
 const SCAN_DEBOUNCE_MS = 600;
 const MAX_RANGES = 1500;
