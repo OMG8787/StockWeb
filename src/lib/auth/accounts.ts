@@ -197,11 +197,13 @@ export async function login(accountRaw: string, password: string, info: ClientIn
   const account = cleanText(accountRaw, 60);
   if (!account || !password) throw new AuthError("請輸入帳號與密碼");
 
-  const [userRows] = await readTables("Users");
+  // 帳號表與「這個帳號自己的」登入紀錄一次請求讀回（登入紀錄在 Google 端篩選，表再大也不用整張傳回來）
+  const accountKeys = [...new Set([account, account.toLowerCase(), account.toUpperCase()])];
+  const [userRows, logRows] = (await getStore().batch([
+    { op: "read", table: "Users" },
+    { op: "readKeys", table: "LoginLog", col: "Account", values: accountKeys },
+  ])) as Row[][];
   const row = userRows.find((r) => normAccount(r.Account ?? "") === normAccount(account));
-  // 只讀這個帳號自己的登入紀錄（在 Google 端篩選）：登入紀錄表會越來越大，整張讀回來很慢
-  const accountKeys = [...new Set([account, row?.Account ?? account, account.toLowerCase()])];
-  const [logRows] = (await getStore().batch([{ op: "readKeys", table: "LoginLog", col: "Account", values: accountKeys }])) as Row[][];
   const user = row ? toUser(row) : null;
   const now = taipeiNow();
 

@@ -117,6 +117,14 @@ class GasStore implements TableStore {
       return c && now - c.at < READ_CACHE_MS ? c : null;
     };
     if (ops.every((o) => o.op === "readKeys")) return this.sendWithRetry(ops, true);
+    if (ops.every(isReadOp) && ops.some((o) => o.op === "readKeys")) {
+      // 一般讀取＋篩選讀取混在同一批（例如登入）：一次送出，可重試；一般讀取的結果順便暫存
+      const results = await this.sendWithRetry(ops, true);
+      ops.forEach((o, i) => {
+        if (o.op === "read") this.cache.set(o.table, { rows: results[i] as Row[], at: Date.now() });
+      });
+      return results;
+    }
     if (ops.every((o) => o.op === "read")) {
       let missing = [...new Set(ops.filter((o) => !fresh(o.table)).map((o) => o.table))];
       if (missing.length) await this.fillFromShared(missing);
