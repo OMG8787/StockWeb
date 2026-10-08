@@ -126,7 +126,9 @@ export default function ChatWidget() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: trimmed, symbol: contextSymbol?.symbol, history, holdings }),
       });
-      const data = await res.json();
+      // 伺服器逾時等情況回的是 HTML 錯誤頁，不是 JSON：轉成看得懂的訊息
+      const data = await res.json().catch(() => null);
+      if (!data) throw new Error(res.status === 504 ? "伺服器處理逾時，請再問一次（資料已暫存，第二次通常很快）" : `伺服器暫時無法回應（${res.status}），請稍後再試`);
       if (!res.ok) throw new Error(data.error ?? "發生錯誤");
       setMessages((m) => [...m, { role: "assistant", text: data.answer, model: data.model, usedAi: data.usedAi }]);
     } catch (err) {
@@ -268,7 +270,7 @@ export default function ChatWidget() {
                 </div>
               </div>
             ))}
-            {loading && <p className="text-xs text-(--text-muted)">思考中…</p>}
+            {loading && <ThinkingHint />}
           </div>
 
           <div className="border-t border-(--gridline) p-3">
@@ -348,5 +350,20 @@ export default function ChatWidget() {
         {open ? "✕" : "💬"}
       </button>
     </div>
+  );
+}
+
+/** 「思考中…」超過 15 秒補一句說明（冷資料時要先抓行情、法人、財報再交給 AI，常要半分鐘以上） */
+function ThinkingHint() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 15_000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <p className="text-xs text-(--text-muted)">
+      思考中…
+      {slow && <span className="block">正在整理行情、法人與財報資料再交給 AI 分析，有時需要 30 秒～1 分鐘，請稍候。</span>}
+    </p>
   );
 }

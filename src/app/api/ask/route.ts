@@ -10,7 +10,9 @@ import { isValidSaleDate, sanitizeSales } from "@/lib/soldRecords";
 // earnings+news, several sub-fetches each) per holding, then a longer AI
 // call to actually write a per-stock analysis — see ask.ts's
 // HOLDINGS_ANALYSIS_INTENT_PATTERN branch for the fuller reasoning.
-export const maxDuration = 60;
+// 2026-10-08：沒有 Redis 共用快取時，冷資料抓取＋AI 45 秒預算會超過 60 秒被中斷（使用者看到
+// 「Unexpected token ... is not valid JSON」）；放寬到 Hobby 上限 300 秒（不收費）。
+export const maxDuration = 300;
 
 const MAX_HISTORY_TURNS = 10;
 const MAX_TURN_LENGTH = 2000;
