@@ -8,6 +8,8 @@ import ThemeToggle from "./ThemeToggle";
 import UserMenu from "./UserMenu";
 import { startNavigating } from "./NavigationOverlay";
 import { canSeePath } from "@/lib/auth/permissions";
+import { DesktopNav, MobileNav } from "./SiteNav";
+import { NAV_ITEMS } from "@/lib/navItems";
 import { useProfile } from "@/lib/auth/useProfile";
 
 interface SymbolSuggestion {
@@ -16,19 +18,6 @@ interface SymbolSuggestion {
   market: "TW" | "US";
   exchange?: "TWSE" | "TPEx";
 }
-
-/** 桌機／手機兩份導覽列原本各自硬寫一次完全一樣的5個項目，只有className不同——
- *  2026-09-22 地毯式審計發現這是「同一份清單兩處各寫一次」的例子，改成共用陣列
- *  搭配.map()渲染，新增/修改一個導覽項目只要改這裡一處，不會漏改其中一個裝置版本。 */
-const NAV_ITEMS: Array<{ href: string; label: string }> = [
-  { href: "/", label: "首頁" },
-  { href: "/action", label: "今日建議" },
-  { href: "/highlights", label: "每日焦點" },
-  { href: "/portfolio", label: "AI 模擬組合" },
-  { href: "/sim", label: "模擬倉" },
-  { href: "/news", label: "重大新聞" },
-  { href: "/search", label: "搜尋 / 篩選" },
-];
 
 /** 使用者看得懂的市場別標籤（內部的 exchange 欄位不直接曝光）。 */
 function marketLabel(item: SymbolSuggestion): string {
@@ -56,9 +45,13 @@ export default function SiteHeader() {
   const briefTitle = useBriefStance().briefTitle;
   // 只顯示這個帳號有權限的項目；未登入（登入頁）時不顯示導覽與搜尋
   const profile = useProfile();
-  const navItems = NAV_ITEMS.filter((item) => profile && canSeePath(profile.perms, item.href)).map((item) =>
-    item.href === "/action" ? { ...item, label: briefTitle } : item,
-  );
+  const navItems = NAV_ITEMS.filter((item) => profile && canSeePath(profile.perms, item.href))
+    .map((item) => ({ ...item, children: item.children?.filter((c) => canSeePath(profile!.perms, c.href)) }))
+    .map((item) =>
+      item.href === "/action"
+        ? { ...item, label: briefTitle, children: item.children?.map((c) => (c.href === "/action" ? { ...c, label: briefTitle } : c)) }
+        : item,
+    );
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<SymbolSuggestion[]>([]);
@@ -219,18 +212,7 @@ export default function SiteHeader() {
           <span className="font-semibold text-lg tracking-tight">股情雷達</span>
         </Link>
 
-        <nav className="hidden sm:flex items-center gap-1 text-sm">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              prefetch={false}
-              className="px-3 py-2 rounded-md text-(--text-secondary) hover:text-(--text-primary) hover:bg-(--page-plane)"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
+        <DesktopNav items={navItems} />
 
         {profile ? (
         <div ref={boxRef} className="relative ml-auto flex-1 max-w-sm">
@@ -300,26 +282,7 @@ export default function SiteHeader() {
         <UserMenu />
         <ThemeToggle />
       </div>
-      {/* overflow-x-auto + whitespace-nowrap: 5 nav items no longer fit an
-          average phone width on one line without wrapping — an Opus QA pass
-          measured every label breaking mid-word ("今日建/議") at every real
-          phone width once this went from 3 items to 5. A horizontally
-          scrollable row keeps each label intact; there's no visual "more"
-          affordance, but the row starting mid-scroll on first-visible items
-          is a familiar enough mobile pattern and avoids a bigger layout
-          rework for what's still a short list. */}
-      <nav className="flex sm:hidden items-center gap-1 overflow-x-auto px-4 pb-2 text-sm">
-        {navItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            prefetch={false}
-            className="shrink-0 whitespace-nowrap rounded-md px-3 py-1.5 text-(--text-secondary) hover:bg-(--page-plane)"
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+      <MobileNav items={navItems} />
     </header>
   );
 }

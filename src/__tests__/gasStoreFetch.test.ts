@@ -64,4 +64,38 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     vi.stubGlobal("fetch", g.fetchMock);
     await expect(getStore().batch([{ op: "append", table: "Indicators", row: { ID: "I" } }])).rejects.toThrow("404");
   });
+
+  /** 模擬 Apps Script 排不到鎖：前 n 次回「Lock timeout」，之後成功 */
+  function lockyGas(lockFails: number) {
+    let posts = 0;
+    const fetchMock = vi.fn(async (_url: string, init?: { method?: string }) => {
+      if (init?.method === "POST") {
+        posts++;
+        return new Response(null, { status: 302, headers: { location: "https://script.googleusercontent.com/echo?x=1" } });
+      }
+      const body =
+        posts <= lockFails
+          ? { success: false, message: "系統錯誤：Lock timeout: another process was holding the lock for too long." }
+          : { success: true, data: [true] };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    return { fetchMock, posts: () => posts };
+  }
+
+  it("寫入排不到鎖（Lock timeout）：自動重送一次就成功，不會重複寫入", async () => {
+    const g = lockyGas(1);
+    vi.stubGlobal("fetch", g.fetchMock);
+    const r = await getStore().batch([{ op: "update", table: "Users", key: "1", patch: { Name: "x" } }]);
+    expect(r).toEqual([true]);
+    expect(g.posts()).toBe(2);
+  });
+
+  it("一直排不到鎖：回中文說明，不顯示英文技術訊息", async () => {
+    const g = lockyGas(99);
+    vi.stubGlobal("fetch", g.fetchMock);
+    const err = await getStore().batch([{ op: "update", table: "Users", key: "1", patch: { Name: "x" } }]).catch((e: Error) => e);
+    expect((err as Error).message).toContain("比較忙");
+    expect((err as Error).message).not.toMatch(/Lock timeout|aborted/i);
+    expect(g.posts()).toBe(2);
+  });
 });

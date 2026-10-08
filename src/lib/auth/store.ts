@@ -76,9 +76,16 @@ export interface TableStore {
 }
 
 export class StoreUnavailableError extends Error {
-  constructor(message: string, readonly retryable = false) {
+  constructor(message: string, readonly retryable = false, readonly lockTimeout = false) {
     super(message);
   }
+}
+
+/** Apps Script 回的技術訊息 → 使用者看得懂的說明（原始訊息只留在伺服器紀錄） */
+const BUSY_HINT = "試算表資料庫目前比較忙，請等幾秒再按一次（資料沒有遺失）";
+function friendlyStoreMessage(raw: string): string {
+  if (/Lock timeout|另一個|holding the lock/i.test(raw)) return `${BUSY_HINT}。`;
+  return `帳號資料庫錯誤：${raw}`;
 }
 
 // Apps Script 平常 2～5 秒，偶爾（例如剛建好的試算表第一次寫入）超過 20 秒，2026-10-07 實測；放寬到 45 秒
@@ -95,6 +102,9 @@ const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
 
 /** 取結果（Google 轉址後的網址）失敗時重試幾次 */
 const FETCH_RESULT_ATTEMPTS = 4;
+/** 排不到鎖時重送一次：第一次失敗得在這段時間內發生（Apps Script 等鎖最久 20 秒）才重送，避免整體拖太久 */
+const LOCK_RETRY_WITHIN_MS = 28_000;
+const LOCK_RETRY_GAP_MS = 1_500;
 
 /**
  * Google Apps Script 的回應流程：POST 執行程式 → 302 轉址到 script.googleusercontent.com 取結果。
@@ -180,11 +190,20 @@ class GasStore implements TableStore {
   }
 
   private async sendWithRetry(ops: StoreOp[], readOnly: boolean): Promise<unknown[]> {
+    const startedAt = Date.now();
     try {
       return await this.send(ops);
     } catch (err) {
-      // 純讀取在 POST 這一步就失敗（網路錯誤）可以整個重送；寫入不重送，避免重複寫入
-      if (readOnly && err instanceof StoreUnavailableError && err.retryable) return this.send(ops);
+      if (err instanceof StoreUnavailableError) {
+        // 純讀取在 POST 這一步就失敗（網路錯誤）可以整個重送；寫入不重送，避免重複寫入
+        if (readOnly && err.retryable) return this.send(ops);
+        // 「排不到鎖」＝這批寫入完全沒有執行，重送不會重複寫入；等一下別人寫完就排得到了
+        // （2026-10-08 使用者看到 Lock timeout：Apps Script 寫入實際上一筆接一筆處理，短時間湧入就會排隊超過 20 秒）
+        if (err.lockTimeout && Date.now() - startedAt < LOCK_RETRY_WITHIN_MS) {
+          await new Promise((r) => setTimeout(r, LOCK_RETRY_GAP_MS));
+          return this.send(ops);
+        }
+      }
       throw err;
     }
   }
@@ -203,7 +222,9 @@ class GasStore implements TableStore {
         signal,
       });
     } catch (err) {
-      throw new StoreUnavailableError(`帳號資料庫連線失敗：${(err as Error).message}`, true);
+      if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`);
+      console.error("[gas]", (err as Error).message);
+      throw new StoreUnavailableError("連不上帳號資料庫（網路暫時有問題），請稍後再試一次。", true);
     }
     const location = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && location) {
@@ -218,7 +239,8 @@ class GasStore implements TableStore {
       if (msg.includes("未知的資料表") || msg.includes("未知的操作")) {
         throw new StoreUnavailableError(`試算表的 Apps Script 不是最新版（${msg}）：請把 gas/Code.gs 整份貼上，並「部署 → 管理部署作業 → 編輯 → 新版本」`);
       }
-      throw new StoreUnavailableError(`帳號資料庫錯誤：${msg}`);
+      console.error("[gas]", msg);
+      throw new StoreUnavailableError(friendlyStoreMessage(msg), false, /Lock timeout|holding the lock/i.test(msg));
     }
     return data.data;
   }
@@ -230,12 +252,12 @@ class GasStore implements TableStore {
         last = await fetch(url, { cache: "no-store", redirect: "follow", signal });
         if (last.ok || (last.status !== 404 && last.status < 500)) return last;
       } catch (err) {
-        if (signal.aborted) throw new StoreUnavailableError(`帳號資料庫連線逾時：${(err as Error).message}`);
+        if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`);
       }
       await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
     if (last) return last;
-    throw new StoreUnavailableError("帳號資料庫連線失敗（取結果時網路錯誤）", true);
+    throw new StoreUnavailableError("連不上帳號資料庫（網路暫時有問題），請稍後再試一次。", true);
   }
 }
 
