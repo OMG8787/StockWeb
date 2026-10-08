@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import LabTabs from "@/components/strategy/LabTabs";
 import SimForm from "@/components/strategy/SimForm";
-import { api, money, pct, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
+import { api, money, pct, universeLabel, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 interface Trade {
@@ -153,7 +153,7 @@ export default function SimDetailClient({ id }: { id: string }) {
         <h1 className="text-xl font-semibold">{sim.name}</h1>
         <span className="text-sm text-(--text-muted)">
           {strategy ? `策略：${strategy.name}` : sim.strategyId ? "（策略已刪除）" : "只手動下單"}・
-          {sim.universe === "market" ? `全市場前 ${sim.marketTopN} 名` : `自選 ${sim.symbols.length} 檔`}・{sim.autoTrade ? "自動交易中" : "未開自動交易"}
+          {universeLabel(sim)}・{sim.autoTrade ? "自動交易中" : "未開自動交易"}
         </span>
       </div>
 

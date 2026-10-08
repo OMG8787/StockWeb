@@ -27,7 +27,8 @@ export type TableName =
   | "BriefArchive"
   | "ModelStats"
   // 即時提醒設定（每個帳號一列）
-  | "Alerts";
+  | "Alerts"
+  | "VolumeHistory";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
@@ -48,6 +49,7 @@ export const TABLE_KEYS: Record<TableName, string> = {
   BriefArchive: "ID",
   ModelStats: "ID",
   Alerts: "ID",
+  VolumeHistory: "ID",
 };
 
 export type StoreOp =
@@ -241,7 +243,7 @@ export class MemoryStore implements TableStore {
   private async load(): Promise<Record<TableName, Row[]>> {
     const empty: Record<TableName, Row[]> = {
       Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [], Indicators: [], Strategies: [], Sims: [], SimTrades: [], SimNav: [],
-      RatingLog: [], RatingConfirm: [], Learning: [], SimPortfolio: [], BriefArchive: [], ModelStats: [], Alerts: [],
+      RatingLog: [], RatingConfirm: [], Learning: [], SimPortfolio: [], BriefArchive: [], ModelStats: [], Alerts: [], VolumeHistory: [],
     };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);

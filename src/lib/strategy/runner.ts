@@ -128,6 +128,13 @@ export function needsOf(cfg: StrategyConfig, indicators: UserIndicator[]): Set<I
 }
 
 /** 全市場模式：台股成交量前 N 名（排除權證等沒有日K的會在抓資料時自然略過） */
+/** 依策略設定的股票篩選判斷產生名單（策略沒設定篩選時報錯，請使用者到策略庫設定或改用自選清單） */
+async function strategyScreenTargets(cfg: StrategyConfig, userId: string): Promise<Target[]> {
+  if (!cfg.screen) throw new StrategyError("這個策略沒有設定「股票篩選判斷」，請到策略庫設定，或把模擬倉改成自選清單");
+  const { runScreen } = await import("./screen");
+  return (await runScreen(cfg.screen, userId)).map((s) => ({ symbol: s.symbol, market: s.market, name: s.name }));
+}
+
 async function marketTopTargets(n: number): Promise<Target[]> {
   const items = await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" });
   return items.slice(0, n).map((i) => ({ symbol: i.symbol, market: "TW" as const, name: i.name }));
@@ -170,7 +177,12 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   const cache = opts.cache ?? new DataCache(new Set());
   cache.addNeeds(needsOf(cfg, indicators), rangeFor(cfg, indicators));
 
-  const universe = sim.universe === "market" ? await marketTopTargets(sim.marketTopN) : sim.symbols;
+  const universe =
+    sim.universe === "market"
+      ? await marketTopTargets(sim.marketTopN)
+      : sim.universe === "strategy"
+        ? await strategyScreenTargets(cfg, sim.userId)
+        : sim.symbols;
   const heldTargets: Target[] = sim.positions.map((p) => ({ symbol: p.symbol, market: p.market, name: p.name }));
   const all = new Map<string, Target>();
   for (const t of [...heldTargets, ...universe]) all.set(`${t.market}:${t.symbol}`, t);

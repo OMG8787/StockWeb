@@ -170,3 +170,12 @@ export function computeVolumeMetrics(
   const volumeRatio = avgVolume !== undefined && avgVolume > 0 ? volume / avgVolume : undefined;
   return { volumeRatio, volumeTrend: computeVolumeTrend(changePercent, volumeRatio) };
 }
+
+/**
+ * 完整的每日成交量歷史（股票篩選用：5 日均量、當週、當月）。
+ * days 是舊到新、最後一筆是 lastRecordedDate 那天；沒有日期，週／月用「最近幾個交易日」估算。
+ */
+export async function getVolumeHistory(market: Market): Promise<{ lastRecordedDate: string; bySymbol: Record<string, number[]> } | null> {
+  return (await peekCached<VolumeHistoryBlob>(historyKey(market))) ?? null;
+}
+

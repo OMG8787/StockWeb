@@ -24,6 +24,8 @@ const DURABLE: Array<{ prefix: string; table: TableName; exclude?: RegExp }> = [
   { prefix: "sim-portfolio:v1:", table: "SimPortfolio", exclude: /^sim-portfolio:v1:lock/ },
   { prefix: "brief-archive:v1:", table: "BriefArchive" },
   { prefix: "ai-model-stats:v1:", table: "ModelStats" },
+  // 全市場每日成交量（近 20 個交易日），股票篩選的 5 日均量／當週／當月用；快取被清掉不用重新累積
+  { prefix: "volume-history:", table: "VolumeHistory" },
 ];
 
 export function durableTableOf(key: string): TableName | null {

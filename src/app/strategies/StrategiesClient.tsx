@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import { api, useList, type Indicator, type Strategy, type StrategyConfig } from "@/components/strategy/api";
+import ScreenEditor from "@/components/strategy/ScreenEditor";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 const EMPTY: StrategyConfig = {
@@ -18,6 +19,7 @@ const EMPTY: StrategyConfig = {
   maxHoldDays: 0,
   positionPct: 20,
   maxPositions: 5,
+  screen: null,
 };
 
 type Draft = { id?: string; name: string; note: string; config: StrategyConfig };
@@ -154,6 +156,8 @@ export default function StrategiesClient() {
             <input placeholder="策略名稱" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className={inputCls} />
             <input placeholder="備註（選填）" value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} className={inputCls} />
           </div>
+
+          <ScreenEditor value={c.screen} onChange={(screen) => setCfg({ screen })} />
 
           <div className="flex flex-wrap gap-4 text-sm">
             <label className="flex items-center gap-1">

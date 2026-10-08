@@ -108,6 +108,7 @@ export default function CompareClient() {
   const [toAdd, setToAdd] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [screening, setScreening] = useState(false);
   const [error, setError] = useState("");
 
   const options = [AI, ...(strategies.items ?? []).map((s) => ({ id: s.id, name: s.name }))];
@@ -140,6 +141,35 @@ export default function CompareClient() {
               帶入關注清單
             </button>
           </div>
+          {(strategies.items ?? []).some((s) => s.config.screen) && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-(--text-muted)">用策略的股票篩選帶入：</span>
+              {(strategies.items ?? [])
+                .filter((s) => s.config.screen)
+                .map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`${btnGhost} text-xs`}
+                    disabled={screening}
+                    onClick={async () => {
+                      setScreening(true);
+                      setError("");
+                      try {
+                        const r = await api<{ items: Array<{ symbol: string }> }>("/api/strategy/screen", { body: { strategyId: s.id } });
+                        setSymbolsText(r.items.slice(0, MAX_SYMBOLS).map((x) => x.symbol).join(", "));
+                      } catch (err) {
+                        setError((err as Error).message);
+                      } finally {
+                        setScreening(false);
+                      }
+                    }}
+                  >
+                    {screening ? "篩選中…" : s.name}
+                  </button>
+                ))}
+            </div>
+          )}
           {symbols.length > MAX_SYMBOLS && <p className="text-xs text-(--price-up)">超過 {MAX_SYMBOLS} 檔，只會比對前 {MAX_SYMBOLS} 檔。</p>}
         </div>
 

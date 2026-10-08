@@ -1,5 +1,6 @@
 import { buyFee as twBuyFee, sellFee as twSellFee } from "@/lib/simPortfolio/rules";
 import { evaluateIndicator, type EvalContext, type EvalResult } from "./indicatorCatalog";
+import { normalizeScreen, type ScreenConfig } from "./screenConfig";
 
 /**
  * 策略判斷與模擬倉每日交易的純邏輯（不抓資料、不寫試算表；I/O 在 runner.ts）。
@@ -38,6 +39,8 @@ export interface StrategyConfig {
   /** 每檔投入「初始資金」的百分比 */
   positionPct: number;
   maxPositions: number;
+  /** 股票篩選判斷：先篩出名單再跑策略（模擬倉選「依策略的股票篩選」、策略疊圖帶入股票時用）；null＝不篩選 */
+  screen: ScreenConfig | null;
 }
 
 export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
@@ -52,6 +55,7 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
   maxHoldDays: 0,
   positionPct: 20,
   maxPositions: 5,
+  screen: null,
 };
 
 const clampNum = (v: unknown, min: number, max: number, d: number) => {
@@ -89,6 +93,7 @@ export function normalizeStrategyConfig(raw: unknown, validIds: Set<string>): St
     maxHoldDays: Math.round(clampNum(r.maxHoldDays, 0, 3650, d.maxHoldDays)),
     positionPct: clampNum(r.positionPct, 1, 100, d.positionPct),
     maxPositions: Math.round(clampNum(r.maxPositions, 1, 50, d.maxPositions)),
+    screen: normalizeScreen(r.screen),
   };
 }
 

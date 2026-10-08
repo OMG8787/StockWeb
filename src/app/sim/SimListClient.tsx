@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import SimForm from "@/components/strategy/SimForm";
-import { money, pct, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
+import { money, pct, universeLabel, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
 import { btnPrimary, cardCls } from "@/components/auth/ui";
 
 export default function SimListClient() {
@@ -53,7 +53,7 @@ export default function SimListClient() {
               <div>
                 <div className="font-semibold">{s.name}</div>
                 <div className="text-xs text-(--text-muted)">
-                  {stName(s.strategyId)}・{s.universe === "market" ? `全市場前 ${s.marketTopN} 名` : `自選 ${s.symbols.length} 檔`}
+                  {stName(s.strategyId)}・{universeLabel(s)}
                 </div>
               </div>
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs ${s.autoTrade ? "border-(--accent) text-(--accent)" : "border-(--gridline) text-(--text-muted)"}`}>

@@ -4,6 +4,7 @@ import { taipeiNow } from "@/lib/auth/accounts";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { INDICATOR_TYPE_MAP, normalizeParams } from "./indicatorCatalog";
 import { normalizeStrategyConfig, type SimPosition, type StrategyConfig, type UserIndicator } from "./engine";
+import { describeScreen } from "./screenConfig";
 
 /**
  * 參考指標、策略庫、模擬倉的儲存（Google 試算表 Indicators／Strategies／Sims／SimTrades／SimNav，
@@ -143,7 +144,7 @@ function strategySummary(cfg: StrategyConfig): string {
     cfg.mode === "score"
       ? `加權計分（${Object.keys(cfg.weights).length} 個指標，≥${cfg.buyScore} 買、≤${cfg.sellScore} 賣）`
       : `條件式（買進 ${cfg.buy.ids.length} 個${cfg.buy.match ? `中 ${cfg.buy.match} 個` : "全部"}符合；賣出 ${cfg.sell.ids.length} 個）`;
-  return `${head}；${risk.join("、")}`;
+  return `${cfg.screen ? `股票：${describeScreen(cfg.screen)}；` : ""}${head}；${risk.join("、")}`;
 }
 
 function toStrategy(r: Row, validIds: Set<string>): StrategyView {
@@ -198,7 +199,8 @@ export interface SimView {
   account: string;
   name: string;
   strategyId: string;
-  universe: "list" | "market";
+  /** list＝自選清單；market＝成交量前 N 名（舊設定）；strategy＝依策略的股票篩選 */
+  universe: "list" | "market" | "strategy";
   symbols: Array<{ symbol: string; market: "TW" | "US"; name: string }>;
   marketTopN: number;
   initialCash: number;
@@ -224,7 +226,7 @@ export function toSim(r: Row): SimView {
     account: r.Account ?? "",
     name: r.Name ?? "",
     strategyId: r.StrategyId ?? "",
-    universe: r.Universe === "market" ? "market" : "list",
+    universe: r.Universe === "market" ? "market" : r.Universe === "strategy" ? "strategy" : "list",
     symbols: parseJson(r.Symbols, []),
     marketTopN: Number(r.MarketTopN) || 30,
     initialCash,
@@ -288,12 +290,16 @@ export async function saveSim(
   if (!name) throw new StrategyError("請填寫模擬倉名稱");
   const strategyId = String(input.strategyId ?? "");
   if (strategyId && !strategies.some((s) => s.ID === strategyId)) throw new StrategyError("找不到選擇的策略");
-  const universe = input.universe === "market" ? "market" : "list";
+  const universe = input.universe === "market" ? "market" : input.universe === "strategy" ? "strategy" : "list";
   const symbols = await withNames(cleanSymbols(input.symbols));
   const topN = Math.round(Math.min(MAX_MARKET_TOP_N, Math.max(10, Number(input.marketTopN) || 30)));
   const autoTrade = input.autoTrade !== false && input.autoTrade !== "false";
   if (autoTrade && !strategyId) throw new StrategyError("開啟自動交易要先選擇策略");
   if (autoTrade && universe === "list" && symbols.length === 0) throw new StrategyError("自選清單模式至少要有一檔股票");
+  if (universe === "strategy") {
+    const st = strategies.find((s) => s.ID === strategyId);
+    if (!st || !parseJson<{ screen?: unknown }>(st.Config, {}).screen) throw new StrategyError("選擇的策略沒有設定「股票篩選判斷」，請先到策略庫設定");
+  }
   const now = taipeiNow();
   const patch: Row = {
     Account: owner.account, Name: name, StrategyId: strategyId, Universe: universe, Symbols: JSON.stringify(symbols),

@@ -28,7 +28,8 @@ export default function SimForm({
 }) {
   const [name, setName] = useState(sim?.name ?? "");
   const [strategyId, setStrategyId] = useState(sim?.strategyId ?? strategies[0]?.id ?? "");
-  const [universe, setUniverse] = useState<"list" | "market">(sim?.universe ?? "list");
+  const [universe, setUniverse] = useState<"list" | "market" | "strategy">(sim?.universe ?? "list");
+  const chosen = strategies.find((s) => s.id === strategyId);
   const [symbolsText, setSymbolsText] = useState(sim?.symbols.map((s) => s.symbol).join(", ") ?? "");
   const [topN, setTopN] = useState(sim?.marketTopN ?? 30);
   const [initialCash, setInitialCash] = useState(1_000_000);
@@ -81,6 +82,10 @@ export default function SimForm({
       <div className="space-y-2 text-sm">
         <span>策略要從哪些股票裡挑</span>
         <div className="flex flex-wrap gap-4">
+          <label className={`flex items-center gap-1 ${chosen?.config.screen ? "" : "opacity-50"}`} title={chosen?.config.screen ? "" : "所選策略沒有設定股票篩選判斷"}>
+            <input type="radio" disabled={!chosen?.config.screen} checked={universe === "strategy"} onChange={() => setUniverse("strategy")} />
+            依策略的股票篩選
+          </label>
           <label className="flex items-center gap-1">
             <input type="radio" checked={universe === "list"} onChange={() => setUniverse("list")} />
             自選清單
@@ -90,7 +95,9 @@ export default function SimForm({
             台股全市場成交量前 N 名
           </label>
         </div>
-        {universe === "list" ? (
+        {universe === "strategy" ? (
+          <p className="text-xs text-(--text-muted)">每次執行時依策略「{chosen?.name}」的股票篩選重新產生名單，再用策略判斷買賣。</p>
+        ) : universe === "list" ? (
           <div className="space-y-1">
             <textarea
               value={symbolsText}

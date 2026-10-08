@@ -37,7 +37,13 @@ export interface StrategyConfig {
   maxHoldDays: number;
   positionPct: number;
   maxPositions: number;
+  screen: ScreenConfig | null;
 }
+
+export type ScreenConfig =
+  | { source: "metric"; metric: string; position: "top" | "middle" | "bottom"; count: number }
+  | { source: "ai"; mode: string; count: number }
+  | { source: "watchlist" };
 
 export interface Strategy {
   id: string;
@@ -60,7 +66,7 @@ export interface Sim {
   id: string;
   name: string;
   strategyId: string;
-  universe: "list" | "market";
+  universe: "list" | "market" | "strategy";
   symbols: Array<{ symbol: string; market: "TW" | "US"; name: string }>;
   marketTopN: number;
   initialCash: number;
@@ -103,6 +109,13 @@ export function useList<T>(url: string): { items: T[] | null; error: string; rel
     return () => clearTimeout(t);
   }, [reload]);
   return { items, error, reload };
+}
+
+/** 模擬倉股票範圍的顯示文字 */
+export function universeLabel(s: Pick<Sim, "universe" | "marketTopN" | "symbols">): string {
+  if (s.universe === "market") return `全市場前 ${s.marketTopN} 名`;
+  if (s.universe === "strategy") return "依策略的股票篩選";
+  return `自選 ${s.symbols.length} 檔`;
 }
 
 export const money = (v: number) => Math.round(v).toLocaleString("zh-TW");
