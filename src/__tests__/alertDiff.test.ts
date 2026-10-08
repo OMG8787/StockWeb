@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffAlerts } from "@/components/strategy/AlertWatcher";
+import { diffAlerts, dueAlarms, formatAlert, normalizeAlarms } from "@/lib/strategy/alertFormat";
 
 const item = (a: "buy" | "sell" | null, b: "buy" | "sell" | null) => ({
   symbol: "2330",
@@ -7,28 +7,60 @@ const item = (a: "buy" | "sell" | null, b: "buy" | "sell" | null) => ({
   price: 1000,
   allBuy: a === "buy" && b === "buy",
   lines: [
-    { id: "s1", name: "策略一", current: a, summary: "x" },
-    { id: "ai", name: "AI 建議策略", current: b, summary: "y" },
+    { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）", current: b, summary: "建議買進" },
+    { id: "s1", name: "我的策略", current: a, summary: "x" },
   ],
 });
 
+describe("即時提醒：通知格式", () => {
+  it("標題是股票、每個策略一行，沒訊號寫觀察", () => {
+    expect(formatAlert(item(null, "buy"))).toEqual({ title: "2330 台積電　1000", body: "AI 策略：買進（建議買進）\n我的策略：觀察" });
+    expect(formatAlert(item("buy", "buy")).body).toBe("AI 策略：買進（建議買進）\n我的策略：買進\n✅ 全部 2 個策略都是買進");
+    expect(formatAlert(item("sell", "sell")).body).toBe("AI 策略：先不要買\n我的策略：賣出");
+  });
+});
+
 describe("即時提醒：比對訊號變化", () => {
-  it("第一次只記錄、不通知（避免一打開就一堆通知）", () => {
-    const r = diffAlerts({}, [item("buy", null)]);
-    expect(r.toasts).toEqual([]);
+  it("第一次看到就是買進要通知；第一次看到是賣出、或沒訊號不通知", () => {
+    expect(diffAlerts({}, [item("buy", null)]).notices.map((n) => n.tone)).toEqual(["buy"]);
+    expect(diffAlerts({}, [item("sell", null)]).notices).toEqual([]);
+    expect(diffAlerts({}, [item(null, null)]).notices).toEqual([]);
   });
 
-  it("訊號變成買進／賣出才通知；變成不動作不通知；全部買進另外通知一次", () => {
-    let s = diffAlerts({}, [item(null, "sell")]).next;
-    let r = diffAlerts(s, [item("buy", "sell")]);
-    expect(r.toasts.map((t) => t.body)).toEqual(["策略一：出現買進訊號（x）"]);
-    s = r.next;
-    r = diffAlerts(s, [item("buy", "buy")]);
-    expect(r.toasts.map((t) => t.body)).toEqual(["AI 建議策略：出現買進訊號（y）", "✅ 全部 2 個策略都是買進訊號"]);
-    s = r.next;
-    r = diffAlerts(s, [item("buy", "buy")]);
-    expect(r.toasts).toEqual([]); // 沒變化不重複通知
-    r = diffAlerts(r.next, [item(null, "buy")]);
-    expect(r.toasts).toEqual([]); // 變成不動作不通知
+  it("新出現買進／賣出才通知（一檔一則，列出全部策略）；沒變化、變成觀察不通知", () => {
+    let s = diffAlerts({}, [item(null, null)]).next;
+    let r = diffAlerts(s, [item("buy", null)]);
+    expect(r.notices).toEqual([{ title: "2330 台積電　1000", body: "AI 策略：觀察\n我的策略：買進", tone: "buy" }]);
+    r = diffAlerts(r.next, [item("buy", null)]);
+    expect(r.notices).toEqual([]);
+    s = diffAlerts(r.next, [item(null, null)]).next;
+    r = diffAlerts(s, [item("sell", null)]);
+    expect(r.notices.map((n) => n.tone)).toEqual(["sell"]);
+    expect(diffAlerts(s, [item("sell", null)], false).notices).toEqual([]); // 關掉賣出通知
+  });
+});
+
+describe("定時提醒（鬧鐘）", () => {
+  const alarms = normalizeAlarms([
+    { id: "a1", time: "8:45", days: "weekdays", label: "開盤前" },
+    { id: "a2", time: "20:00", days: "daily", enabled: false },
+    { time: "25:00" },
+  ]);
+  // 2026-10-08（四）台北 08:47 ＝ UTC 00:47
+  const thu0847 = new Date("2026-10-08T00:47:00Z");
+
+  it("整理設定：補零、壞時間丟掉", () => {
+    expect(alarms.map((a) => [a.id, a.time, a.days, a.enabled])).toEqual([
+      ["a1", "08:45", "weekdays", true],
+      ["a2", "20:00", "daily", false],
+    ]);
+  });
+
+  it("時間到（10 分鐘內補響）、今天響過不再響、週末不響平日鬧鐘", () => {
+    expect(dueAlarms(alarms, new Set(), thu0847).map((a) => a.id)).toEqual(["a1"]);
+    expect(dueAlarms(alarms, new Set(["a1|2026-10-08"]), thu0847)).toEqual([]);
+    expect(dueAlarms(alarms, new Set(), new Date("2026-10-08T00:40:00Z"))).toEqual([]); // 還沒到
+    expect(dueAlarms(alarms, new Set(), new Date("2026-10-08T01:00:00Z"))).toEqual([]); // 超過 10 分鐘
+    expect(dueAlarms(alarms, new Set(), new Date("2026-10-10T00:47:00Z"))).toEqual([]); // 週六
   });
 });

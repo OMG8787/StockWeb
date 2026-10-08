@@ -4,6 +4,7 @@ import { taipeiNow } from "@/lib/auth/accounts";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { INDICATOR_TYPE_MAP, normalizeParams } from "./indicatorCatalog";
 import { normalizeStrategyConfig, type SimPosition, type StrategyConfig, type UserIndicator } from "./engine";
+import { normalizeAlarms, type AlarmSetting } from "./alertFormat";
 import { describeSources, normalizeSources, type SourceMode, type StockSource } from "./screenConfig";
 
 /**
@@ -442,10 +443,15 @@ export interface AlertConfig {
   symbols: string[];
   strategyIds: string[];
   intervalSec: number;
+  /** 盤中追蹤策略訊號 */
   enabled: boolean;
+  /** 賣出（AI 策略是「先不要買」）訊號也通知 */
+  notifySell: boolean;
+  /** 定時提醒（鬧鐘） */
+  alarms: AlarmSetting[];
 }
 
-const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false };
+const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, alarms: [] };
 
 export async function getAlertConfig(userId: string): Promise<AlertConfig> {
   const [rows] = (await getStore().batch([{ op: "read", table: "Alerts" }])) as Row[][];
@@ -456,6 +462,8 @@ export async function getAlertConfig(userId: string): Promise<AlertConfig> {
     strategyIds: parseJson<string[]>(r.StrategyIds, ["ai"]),
     intervalSec: (ALERT_LIMITS.intervals as readonly number[]).includes(Number(r.IntervalSec)) ? Number(r.IntervalSec) : 30,
     enabled: String(r.Enabled).toUpperCase() === "TRUE",
+    notifySell: String(r.NotifySell ?? "TRUE").toUpperCase() !== "FALSE",
+    alarms: normalizeAlarms(parseJson<unknown[]>(r.Alarms, [])),
   };
 }
 
@@ -463,7 +471,7 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
   const symbols = [...new Set((Array.isArray(input.symbols) ? input.symbols : []).map((s) => text(s, 12).toUpperCase()).filter((s) => /^[A-Z0-9.]{1,12}$/.test(s)))].slice(0, ALERT_LIMITS.maxSymbols);
   const strategyIds = [...new Set((Array.isArray(input.strategyIds) ? input.strategyIds : []).map((s) => text(s, 40)).filter(Boolean))].slice(0, ALERT_LIMITS.maxStrategies);
   const intervalSec = (ALERT_LIMITS.intervals as readonly number[]).includes(Number(input.intervalSec)) ? Number(input.intervalSec) : 30;
-  const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true };
+  const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true, notifySell: input.notifySell !== false, alarms: normalizeAlarms(input.alarms) };
   if (cfg.enabled && (symbols.length === 0 || strategyIds.length === 0)) throw new StrategyError("開啟提醒前，請至少設定一檔股票和一個策略");
   await getStore().batch([
     {
@@ -472,7 +480,8 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
       rows: [
         {
           ID: owner.userId, Account: owner.account, Symbols: JSON.stringify(symbols), StrategyIds: JSON.stringify(strategyIds),
-          IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE", UpdatedAt: taipeiNow(),
+          IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE",
+          NotifySell: cfg.notifySell ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), UpdatedAt: taipeiNow(),
         },
       ],
     },
