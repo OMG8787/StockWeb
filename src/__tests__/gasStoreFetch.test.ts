@@ -98,4 +98,33 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     expect((err as Error).message).not.toMatch(/Lock timeout|aborted/i);
     expect(g.posts()).toBe(2);
   });
+
+  it("讀取失敗但這台伺服器有舊資料：先用舊資料；寫入過的表不會拿到舊資料", async () => {
+    vi.useFakeTimers();
+    try {
+      let broken = false;
+      let posts = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
+          if (init?.method === "POST") {
+            posts++;
+            if (broken) return new Response("<html>Service invoked too many times</html>", { status: 200 });
+            return new Response(null, { status: 302, headers: { location: "https://script.googleusercontent.com/echo?x=1" } });
+          }
+          return new Response(JSON.stringify({ success: true, data: [[{ ID: "1", Name: "舊" }]] }), { status: 200 });
+        }),
+      );
+      const store = getStore();
+      await store.batch([{ op: "read", table: "Users" }]);
+      broken = true;
+      vi.setSystemTime(Date.now() + 2 * 60_000); // 暫存已過期（>60 秒）但還在 10 分鐘內
+      expect(await store.batch([{ op: "read", table: "Users" }])).toEqual([[{ ID: "1", Name: "舊" }]]);
+      vi.setSystemTime(Date.now() + 20 * 60_000); // 超過 10 分鐘：不能再用，要報錯
+      await expect(store.batch([{ op: "read", table: "Users" }])).rejects.toThrow("回應開頭");
+      expect(posts).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -93,6 +93,8 @@ const GAS_TIMEOUT_MS = 45_000;
 
 /** 讀過的資料表在同一個伺服器實例暫存多久（有寫入會立即作廢；跨實例最多晚這麼久看到別人的修改） */
 const READ_CACHE_MS = 60_000;
+/** 試算表讀取失敗時，最多容許拿多舊的暫存資料先頂著 */
+const STALE_OK_MS = 10 * 60_000;
 /**
  * 有 Redis 時，小表的讀取暫存也放進 Redis，所有伺服器實例共用（Vercel 每個請求常落在不同實例，
  * 只靠記憶體幾乎命中不了）。大表（登入紀錄、交易紀錄、回饋、每日淨值）不放，避免超過單筆大小上限。
@@ -140,9 +142,20 @@ class GasStore implements TableStore {
       if (missing.length) await this.fillFromShared(missing);
       missing = missing.filter((t) => !fresh(t));
       if (missing.length) {
-        const results = await this.sendWithRetry(missing.map((table) => ({ op: "read" as const, table })), true);
-        missing.forEach((t, i) => this.cache.set(t, { rows: results[i] as Row[], at: Date.now() }));
-        await this.saveShared(missing, results as Row[][]);
+        try {
+          const results = await this.sendWithRetry(missing.map((table) => ({ op: "read" as const, table })), true);
+          missing.forEach((t, i) => this.cache.set(t, { rows: results[i] as Row[], at: Date.now() }));
+          await this.saveShared(missing, results as Row[][]);
+        } catch (err) {
+          // 試算表暫時讀不到（逾時、Google 偶發錯誤）：這台伺服器 10 分鐘內讀過就先用舊資料，
+          // 畫面照常顯示；沒有舊資料才報錯。寫入的表在寫入時已作廢，不會拿到自己剛改之前的舊資料。
+          const usable = missing.every((t) => {
+            const c = this.cache.get(t);
+            return c && Date.now() - c.at < STALE_OK_MS;
+          });
+          if (!usable) throw err;
+          console.error("[gas] 讀取失敗，暫用舊資料：", (err as Error).message);
+        }
       }
       return ops.map((o) => this.cache.get(o.table)!.rows.map((r) => ({ ...r })));
     }
