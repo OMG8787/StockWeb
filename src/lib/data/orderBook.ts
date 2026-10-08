@@ -94,7 +94,8 @@ async function fetchBatch(symbols: string[]): Promise<void> {
     const exCh = chunk.flatMap((s) => [`tse_${s}.tw`, `otc_${s}.tw`]).join("|");
     const at = Date.now();
     try {
-      const rows = await fetchMisRows<DepthRow>(exCh, 4000, { retryStale: true });
+      // 偶爾會逾時或回空：重試一次
+      const rows = await fetchMisRows<DepthRow>(exCh, 4000, { retryStale: true }).catch(() => fetchMisRows<DepthRow>(exCh, 4000, { retryStale: true }));
       const got = new Map(rows.filter((r) => r.c).map((r) => [r.c, rowToOrderBook(r)]));
       for (const s of chunk) cache.set(s, { at, book: got.get(s) ?? null });
     } catch {

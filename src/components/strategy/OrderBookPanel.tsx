@@ -123,7 +123,11 @@ export default function OrderBookPanel({ symbols, title = "📊 即時五檔" }:
       </div>
       {err && <p className="text-xs text-(--price-up)">{err}</p>}
       {books === null && !err && <p className="text-xs text-(--text-muted)">載入中…</p>}
-      {books && books.length === 0 && <p className="text-xs text-(--text-muted)">查不到五檔（代號不對，或不是上市櫃股票）。</p>}
+      {books && books.length < tw.length && (
+        <p className="text-xs text-(--text-muted)">
+          查不到五檔：{tw.filter((s) => !books.some((b) => b.symbol === s)).join("、")}（代號不對、興櫃，或不是上市櫃股票）
+        </p>
+      )}
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {books?.map((b) => (
           <Book key={b.symbol} b={b} />

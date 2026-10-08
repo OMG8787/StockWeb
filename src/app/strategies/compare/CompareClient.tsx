@@ -132,7 +132,8 @@ function OverlayChart({ row }: { row: Row }) {
         aria-label={`${row.name} 策略訊號疊圖`}
         onPointerMove={pick}
         onPointerDown={pick}
-        onPointerLeave={() => setHover(null)}
+        // 觸控點一下之後瀏覽器會馬上送出 pointerleave：只有滑鼠移出才清掉，手機點完會停在那一天
+        onPointerLeave={(e) => e.pointerType === "mouse" && setHover(null)}
       >
         {row.consensus.map((c, i) =>
           showConsensus && c ? <rect key={`band-${i}`} x={LABEL_W + i * cellW} y={0} width={cellW} height={PRICE_H} fill="var(--price-up)" opacity={0.12} /> : null,
@@ -178,7 +179,7 @@ function OverlayChart({ row }: { row: Row }) {
         <div>
           每一排是一個策略每天的訊號：紅＝買進、綠＝賣出（AI 策略為「先不要買」）、淡灰＝不動作。
           {showConsensus && "最後一排「全部同時買進」＝上面所有策略在同一天都是買進（價格圖上的淡紅底與 ▲ 也是同一件事）。"}
-          滑鼠移到圖上（手機用手指按住滑動）可看那一天的價格與訊號。
+          滑鼠移到圖上（手機點一下或按住滑動）可看那一天的價格與訊號。
         </div>
         <div>
           {row.days[0]} ～ {row.days.at(-1)}
