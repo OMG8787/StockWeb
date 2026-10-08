@@ -3,7 +3,9 @@ import { getActionBrief } from "@/lib/ai/actionBrief";
 
 // Mirrors api/daily-brief: generation fans out several already-cached data
 // fetches plus one AI call comfortably past Vercel's ~10s default budget.
-export const maxDuration = 60;
+// 2026-10-08：新 Vercel 專案還沒有 Redis 時，冷快取要替整批候選股算評等，盤中實測超過 60 秒被中斷（504），
+// 卡片一直停在載入中；放寬到 Hobby 上限 300 秒（不收費，只是用量），算完會留在記憶體快取，之後就快。
+export const maxDuration = 300;
 
 // Backs the client-side fetch in ActionBriefCard — kept off the page's
 // server-rendered blocking path for the same reason as DailyBriefCard.
