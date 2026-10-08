@@ -126,7 +126,8 @@ export default function NewsFeedList() {
   }
 
   return (
-    <div className="space-y-6">
+    // 新聞用詞常是一般意思（「融資」＝公司借款、「壓力」＝評價壓力），不套名詞說明避免誤導
+    <div data-no-gloss className="space-y-6">
       {pinned && pinned.length > 0 && (
         <section>
           <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-(--text-primary)">🔥 重大焦點</h2>

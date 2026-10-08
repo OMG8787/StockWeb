@@ -217,6 +217,8 @@ export default function StrategiesClient() {
             </div>
           </div>
 
+          {/* 錯誤訊息在頁面最上方，表單很長時按完儲存看不到：在按鈕旁再顯示一次 */}
+          {msg && !msg.ok && <p className="text-sm text-(--price-up)">{msg.text}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" className={btnPrimary} disabled={busy} onClick={save}>
               {busy ? "處理中…" : "儲存策略"}
@@ -261,6 +263,9 @@ export default function StrategiesClient() {
         <button type="button" className={btnPrimary} disabled={indicators.length === 0} onClick={() => setDraft({ name: "", note: "", config: EMPTY })}>
           ＋ 新增策略
         </button>
+      )}
+      {!draft && indicators.length === 0 && !ind.error && (
+        <p className="text-xs text-(--text-muted)">{ind.items === null ? "載入參考指標中…（載入完才能新增策略）" : "要先有參考指標才能新增策略，請到「參考指標」頁建立。"}</p>
       )}
 
       <section className="space-y-2">

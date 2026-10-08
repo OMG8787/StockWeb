@@ -123,7 +123,7 @@ export default function AlertsClient() {
     <div className="space-y-5 pb-24">
       <LabTabs
         active="/strategies/alerts"
-        intro="兩種提醒：①定時提醒（像鬧鐘，例如開盤前 08:45 提醒你）；②策略訊號提醒（盤中每 10～30 秒檢查追蹤名單，有策略新出現買點就立刻通知）。沒有訊號的股票不會通知。要有開著網站的分頁才會運作。"
+        intro="兩種提醒：①定時提醒（像鬧鐘，例如開盤前 08:45 提醒你）；②策略訊號提醒（盤中每 5～30 秒檢查追蹤名單，有策略新出現買點就立刻通知）。沒有訊號的股票不會通知。要有開著網站的分頁才會運作。"
       />
       {msg && <p className={`text-sm ${msg.ok ? "text-(--price-down)" : "text-(--price-up)"}`}>{msg.text}</p>}
 

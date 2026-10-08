@@ -105,7 +105,9 @@ const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
 /** 取結果（Google 轉址後的網址）失敗時重試幾次 */
 const FETCH_RESULT_ATTEMPTS = 4;
 /** 排不到鎖時重送一次：第一次失敗得在這段時間內發生（Apps Script 等鎖最久 20 秒）才重送，避免整體拖太久 */
-const LOCK_RETRY_WITHIN_MS = 28_000;
+const LOCK_RETRY_WITHIN_MS = 25_000;
+/** 重送那次最多等多久（整體最壞約 25＋1.5＋25 秒，不再拖到 70 秒以上） */
+const LOCK_RETRY_TIMEOUT_MS = 25_000;
 const LOCK_RETRY_GAP_MS = 1_500;
 
 /**
@@ -214,15 +216,15 @@ class GasStore implements TableStore {
         // （2026-10-08 使用者看到 Lock timeout：Apps Script 寫入實際上一筆接一筆處理，短時間湧入就會排隊超過 20 秒）
         if (err.lockTimeout && Date.now() - startedAt < LOCK_RETRY_WITHIN_MS) {
           await new Promise((r) => setTimeout(r, LOCK_RETRY_GAP_MS));
-          return this.send(ops);
+          return this.send(ops, LOCK_RETRY_TIMEOUT_MS);
         }
       }
       throw err;
     }
   }
 
-  private async send(ops: StoreOp[]): Promise<unknown[]> {
-    const signal = AbortSignal.timeout(GAS_TIMEOUT_MS);
+  private async send(ops: StoreOp[], timeoutMs = GAS_TIMEOUT_MS): Promise<unknown[]> {
+    const signal = AbortSignal.timeout(timeoutMs);
     let res: Response;
     try {
       res = await fetch(this.url, {

@@ -12,7 +12,7 @@ const TABS = [
 export default function LabTabs({ active, intro }: { active: string; intro: string }) {
   return (
     <div className="space-y-2">
-      <div className="flex gap-1 overflow-x-auto border-b border-(--gridline)">
+      <div data-no-gloss className="flex gap-1 overflow-x-auto border-b border-(--gridline)">
         {TABS.map((t) => (
           <Link
             key={t.href}
