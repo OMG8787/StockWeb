@@ -19,6 +19,7 @@ import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { runLearningUpdate } from "@/lib/ai/learning/learningStore";
 import { runSimPortfolio } from "@/lib/simPortfolio/run";
+import { getMarketStatus } from "@/lib/marketStatus";
 
 // Triggered every few minutes by an external scheduler (see
 // .github/workflows/warm-cache.yml — Vercel's own Cron is limited to once a
@@ -96,48 +97,52 @@ export async function GET(req: NextRequest) {
   };
 
   try {
-    const all = Promise.all([
-      // 2026-09-22 地毯式審計抓到：這4項原本沒包 warm()，任何一項拋錯會讓整個
-      // Promise.all直接中止、回應只剩籠統的「預熱失敗」503，跟這支路由自己
-      // 在上面說明裡宣稱的「每一項獨立降級、結果都要能回報出來」設計互相矛盾。
-      // 補上跟其他項目一致的處理方式。
-      warm("search TW", searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" })),
-      warm("search US", searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" })),
-      warm("multi-signal TW", getMultiSignalStocks("TW")),
-      warm("multi-signal US", getMultiSignalStocks("US")),
-      // AI 問答「多重技術指標篩選」用的全市場指標快照（成交金額前120/60檔各抓
-      // 一次3個月K線）——這是這支 cron 裡最昂貴的一項，正是為什麼要在背景預熱：
-      // 真正的使用者問「有沒有MACD跟KD都黃金交叉的股票」時就直接讀快取，不用
-      // 現場等一百多次K線抓取。用 warm() 包起來單獨降級，上游不穩時不會拖垮
-      // 其他預熱項目。
-      warm("technical screen TW", getTechnicalScreen("TW")),
-      warm("technical screen US", getTechnicalScreen("US")),
+    // 預熱項目分層（2026-10-08 使用者：不重要的資料不用每次都取，這樣才能 5 分鐘一次又不耗盡 Redis 免費額度）：
+    //  - fast（每次）：行情表、指數、台指期夜盤——數字盤中每幾十秒就變，TTL 短。
+    //  - slow（每 30 分鐘才跑一次，或 ?full=1 強制）：技術篩選、概念篩選、訊號共振、市場歷史、籌碼比例、
+    //    快報／新聞（AI）、基本面／籌碼／財報／公告整包——變動慢、重算貴；平常沒人看就讓「過期先回舊資料、
+    //    背景更新」（swrPolicy）兜底，不必每 5 分鐘都翻一遍。
+    //  - 市場別：台股盤中只更新台股項目、美股盤中只更新美股項目；兩邊都休市時兩邊的 slow 項目照常 30 分鐘一次。
+    //  - 永遠執行：學習工作與 AI 模擬組合（自己會判斷時點，沒到時間幾乎不碰 Redis）。
+    const full = req.nextUrl.searchParams.get("full") === "1";
+    const slowDue = full || new Date().getUTCMinutes() % 30 < 5;
+    const twOpen = getMarketStatus("TW") === "open";
+    const usOpen = getMarketStatus("US") === "open";
+    const twActive = full || twOpen || !usOpen;
+    const usActive = full || usOpen || !twOpen;
+    type Entry = { label: string; run: () => Promise<unknown>; market?: "TW" | "US"; slow?: boolean };
+    const entries: Entry[] = [
+      { label: "search TW", market: "TW", run: () => searchStocks({ market: "TW", sortBy: "changePercent", sortDir: "desc" }) },
+      { label: "search US", market: "US", run: () => searchStocks({ market: "US", sortBy: "changePercent", sortDir: "desc" }) },
+      { label: "multi-signal TW", market: "TW", slow: true, run: () => getMultiSignalStocks("TW") },
+      { label: "multi-signal US", market: "US", slow: true, run: () => getMultiSignalStocks("US") },
+      // AI 問答「多重技術指標篩選」用的全市場指標快照（成交金額前120/60檔各抓一次3個月K線）——這是這支 cron 裡
+      // 最昂貴的一項，正是為什麼要在背景預熱：使用者問「有沒有MACD跟KD都黃金交叉的股票」時直接讀快取。
+      { label: "technical screen TW", market: "TW", slow: true, run: () => getTechnicalScreen("TW") },
+      { label: "technical screen US", market: "US", slow: true, run: () => getTechnicalScreen("US") },
       // 概念篩選（抗壓性、上漲趨勢…，2026-10-07）：沿用技術篩選同一份母體與 K 線快取（同 key 單飛，不會重抓）。
-      warm("concept screen TW", getConceptScreen()),
-      warm("indices", getIndices()),
-      // 2026-10-04 補上：首頁大盤區塊的台指期夜盤、AI 快報／建議／問答共用的市場
-      // 歷史包、列表籌碼比例欄位用的三份全市場整包（融資融券／外資持股／集保大戶，
-      // 用一檔代表股就會整包預熱）。台股／美股全市場報價表已由上面的 search TW/US
-      // 預熱（searchStocks 底下就是 getMarketQuoteMap）。這些資料都已開「過期先回
-      // 舊資料、背景更新」（lib/data/swrPolicy.ts）：讀到過期值時這支路由會先拿到舊值，
-      // 重算在 after() 裡跑完（maxDuration 涵蓋），所以一樣有預熱效果。
-      warm("taifex night", getTaifexNightFutures()),
-      warm("market history", getMarketHistory()),
-      warm("chips ratios packs", getChipsRatiosBatch([WARM_PROBE_SYMBOL]).then((m) => m.get(WARM_PROBE_SYMBOL))),
-      warm("daily brief", getDailyBrief()),
-      warm("action brief", getActionBrief()),
-      warm("news feed", getNewsFeed()),
-      warm("fundamentals", getFundamentals(WARM_PROBE_SYMBOL, "TW")),
-      warm("chips", getChips(WARM_PROBE_SYMBOL, "TW")),
-      warm("earnings", getEarnings(WARM_PROBE_SYMBOL, "TW")),
-      warm("announcements", getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW")),
+      { label: "concept screen TW", market: "TW", slow: true, run: () => getConceptScreen() },
+      { label: "indices", run: () => getIndices() },
+      { label: "taifex night", run: () => getTaifexNightFutures() },
+      { label: "market history", slow: true, run: () => getMarketHistory() },
+      { label: "chips ratios packs", slow: true, run: () => getChipsRatiosBatch([WARM_PROBE_SYMBOL]).then((m) => m.get(WARM_PROBE_SYMBOL)) },
+      { label: "daily brief", slow: true, run: () => getDailyBrief() },
+      { label: "action brief", slow: true, run: () => getActionBrief() },
+      { label: "news feed", slow: true, run: () => getNewsFeed() },
+      { label: "fundamentals", market: "TW", slow: true, run: () => getFundamentals(WARM_PROBE_SYMBOL, "TW") },
+      { label: "chips", market: "TW", slow: true, run: () => getChips(WARM_PROBE_SYMBOL, "TW") },
+      { label: "earnings", market: "TW", slow: true, run: () => getEarnings(WARM_PROBE_SYMBOL, "TW") },
+      { label: "announcements", market: "TW", slow: true, run: () => getMaterialAnnouncements(WARM_PROBE_SYMBOL, "TW") },
       // AI 學習循環的每日工作（評等紀錄算獎勵、更新權重／相似案例／成績看板）：盤中與當天已做完時立刻略過，
       // 實際只有收盤後第一次預熱會跑（一天一次，見 learning/learningStore.ts）。
-      warm("learning (daily)", runLearningUpdate().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`)),
+      { label: "learning (daily)", run: () => runLearningUpdate().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`) },
       // AI 模擬投資組合（lib/simPortfolio）：只在 09:30／13:00／13:35 起的時點、且當天該時點還沒做過才交易（冪等＋鎖），
       // 其餘時間不打 Redis 直接略過。13:35 那次另寫一段 AI 檢討（一天一次 lite 呼叫）。
-      warm("sim portfolio", runSimPortfolio().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`)),
-    ]);
+      { label: "sim portfolio", run: () => runSimPortfolio().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`) },
+    ];
+    const due = entries.filter((e) => (!e.slow || slowDue) && (e.market !== "TW" || twActive) && (e.market !== "US" || usActive));
+    for (const e of entries) if (!due.includes(e)) outcomes[e.label] = "本次略過（非此時段或未到更新時間）";
+    const all = Promise.all(due.map((e) => warm(e.label, e.run())));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const finishedInTime = await Promise.race([
       all.then(() => true),
