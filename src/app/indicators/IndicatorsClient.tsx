@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
-import { api, useList, type Indicator, type IndicatorTypeInfo } from "@/components/strategy/api";
+import { api, runBusy, useList, type Indicator, type IndicatorTypeInfo } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 type Draft = { id?: string; typeId: string; name: string; note: string; params: Record<string, number | string> };
@@ -37,10 +37,12 @@ export default function IndicatorsClient() {
     setBusy(true);
     setMsg("");
     try {
-      await api("/api/strategy/indicators", { body: draft });
-      setDraft(null);
-      await reload();
-      setMsg("已儲存");
+      await runBusy("儲存參考指標中…", async () => {
+        await api("/api/strategy/indicators", { body: draft });
+        await reload();
+        setDraft(null);
+        setMsg(`已儲存參考指標「${draft.name || "新指標"}」，列表已更新`);
+      });
     } catch (err) {
       setMsg((err as Error).message);
     } finally {
@@ -52,8 +54,11 @@ export default function IndicatorsClient() {
     if (!confirm(`確定刪除參考指標「${ind.name}」？`)) return;
     setBusy(true);
     try {
-      await api(`/api/strategy/indicators?id=${encodeURIComponent(ind.id)}`, { method: "DELETE" });
-      await reload();
+      await runBusy("刪除參考指標中…", async () => {
+        await api(`/api/strategy/indicators?id=${encodeURIComponent(ind.id)}`, { method: "DELETE" });
+        await reload();
+        setMsg(`已刪除參考指標「${ind.name}」`);
+      });
     } catch (err) {
       setMsg((err as Error).message);
     } finally {
@@ -66,7 +71,7 @@ export default function IndicatorsClient() {
   return (
     <div className="space-y-5 pb-24">
       <LabTabs active="/indicators" intro="參考指標是策略的判斷依據：從系統清單挑一種、設定參數，存成自己的指標，再到「策略庫」組合使用。" />
-      {(error || msg) && <p className={`text-sm ${error || (msg && msg !== "已儲存") ? "text-(--price-up)" : "text-(--price-down)"}`}>{error || msg}</p>}
+      {(error || msg) && <p className={`text-sm ${error || (msg && !msg.startsWith("已")) ? "text-(--price-up)" : "text-(--price-down)"}`}>{error || msg}</p>}
 
       {draft && draftType ? (
         <section className={`${cardCls} space-y-3`}>

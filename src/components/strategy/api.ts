@@ -88,7 +88,56 @@ export interface Sim {
   createdAt: string;
 }
 
-export async function api<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
+// ============================================================
+// 「處理中」遮罩的計數（BusyOverlay 顯示）。所有寫入類請求（POST／DELETE）自動計入，
+// 讀取（GET）不算；整段「儲存＋重新載入列表」想一起遮住時用 runBusy 包起來。
+// ============================================================
+export interface BusyState {
+  count: number;
+  text: string;
+}
+let busyState: BusyState = { count: 0, text: "處理中…" };
+const busyListeners = new Set<() => void>();
+const setBusyState = (next: BusyState) => {
+  busyState = next;
+  busyListeners.forEach((fn) => fn());
+};
+export const subscribeBusy = (fn: () => void) => {
+  busyListeners.add(fn);
+  return () => void busyListeners.delete(fn);
+};
+export const getBusyState = () => busyState;
+const SERVER_BUSY: BusyState = { count: 0, text: "處理中…" };
+export const getServerBusyState = () => SERVER_BUSY;
+
+function busyStart(text?: string) {
+  setBusyState({ count: busyState.count + 1, text: text ?? (busyState.count > 0 ? busyState.text : "處理中…") });
+}
+function busyEnd() {
+  setBusyState({ count: Math.max(0, busyState.count - 1), text: busyState.text });
+}
+
+/** 把一段操作（例如「儲存→重新載入列表」）整個包在「處理中」遮罩裡，成功或失敗都會收起 */
+export async function runBusy<T>(text: string, fn: () => Promise<T>): Promise<T> {
+  busyStart(text);
+  try {
+    return await fn();
+  } finally {
+    busyEnd();
+  }
+}
+
+export async function api<T>(url: string, init?: { method?: string; body?: unknown; busyText?: string }): Promise<T> {
+  const mutating = (init?.method ?? (init?.body !== undefined ? "POST" : "GET")) !== "GET";
+  if (mutating) busyStart(init?.busyText);
+  try {
+    return await apiRequest<T>(url, init);
+  } finally {
+    if (mutating) busyEnd();
+  }
+}
+
+async function apiRequest<T>(url: string, init?: { method?: string; body?: unknown }): Promise<T> {
   const res = await fetch(url, {
     method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
     headers: init?.body !== undefined ? { "Content-Type": "application/json" } : undefined,

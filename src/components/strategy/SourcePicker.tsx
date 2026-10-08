@@ -120,7 +120,7 @@ export default function SourcePicker({
     setBusy(true);
     setError("");
     try {
-      setPreview(await api<PreviewResult>("/api/strategy/screen", { body: { sources, mode, strategyId: strategy?.id } }));
+      setPreview(await api<PreviewResult>("/api/strategy/screen", { body: { sources, mode, strategyId: strategy?.id }, busyText: "篩選股票名單中…（指標排名第一次約 10～60 秒）" }));
     } catch (err) {
       setError((err as Error).message);
     } finally {

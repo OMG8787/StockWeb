@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
-import { api, useList, type Indicator, type Strategy, type StrategyConfig } from "@/components/strategy/api";
+import { api, runBusy, useList, type Indicator, type Strategy, type StrategyConfig } from "@/components/strategy/api";
 import SourcePicker from "@/components/strategy/SourcePicker";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
@@ -98,10 +98,14 @@ export default function StrategiesClient() {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api<{ item: Strategy }>("/api/strategy/strategies", { body: draft });
-      setDraft({ id: r.item.id, name: r.item.name, note: r.item.note, config: r.item.config });
-      await st.reload();
-      setMsg({ ok: true, text: "已儲存" });
+      // 儲存＋重新載入列表一起遮住；完成後收起表單、直接看到列表上的策略（要試跑再按「編輯／測試」）
+      await runBusy("儲存策略中…", async () => {
+        const r = await api<{ item: Strategy }>("/api/strategy/strategies", { body: draft });
+        await st.reload();
+        setDraft(null);
+        setPreview(null);
+        setMsg({ ok: true, text: `已儲存策略「${r.item.name}」，列表已更新` });
+      });
     } catch (err) {
       setMsg({ ok: false, text: (err as Error).message });
     } finally {
@@ -112,8 +116,11 @@ export default function StrategiesClient() {
   async function remove(s: Strategy) {
     if (!confirm(`確定刪除策略「${s.name}」？`)) return;
     try {
-      await api(`/api/strategy/strategies?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
-      await st.reload();
+      await runBusy("刪除策略中…", async () => {
+        await api(`/api/strategy/strategies?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
+        await st.reload();
+        setMsg({ ok: true, text: `已刪除策略「${s.name}」` });
+      });
     } catch (err) {
       setMsg({ ok: false, text: (err as Error).message });
     }
@@ -125,7 +132,7 @@ export default function StrategiesClient() {
     setPreview(null);
     setMsg(null);
     try {
-      setPreview(await api<Preview>("/api/strategy/strategies/preview", { body: { strategyId: draft.id, symbol: testSymbol } }));
+      setPreview(await api<Preview>("/api/strategy/strategies/preview", { body: { strategyId: draft.id, symbol: testSymbol }, busyText: "試跑策略中…" }));
     } catch (err) {
       setMsg({ ok: false, text: (err as Error).message });
     } finally {

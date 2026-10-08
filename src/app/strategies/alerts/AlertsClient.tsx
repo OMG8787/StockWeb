@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import OrderBookPanel from "@/components/strategy/OrderBookPanel";
 import { ALERT_CHECK_NOW_EVENT, ALERT_CONFIG_EVENT, ALERT_TEST_EVENT } from "@/components/strategy/AlertWatcher";
-import { api, useList, type Strategy } from "@/components/strategy/api";
+import { api, runBusy, useList, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 import { getWatchlist } from "@/lib/watchlist";
 import { lineLabel, MAX_ALARMS, signalText, type AlarmSetting, type AlertItem, type NamedSymbol } from "@/lib/strategy/alertFormat";
@@ -129,7 +129,7 @@ export default function AlertsClient() {
       }, 90_000);
     });
     window.dispatchEvent(new Event(ALERT_CHECK_NOW_EVENT));
-    const result = await done;
+    const result = await runBusy("檢查追蹤名單的訊號中…", () => done);
     if (!result) setMsg({ ok: false, text: "沒有檢查到：請先在「設定通知」選好追蹤名單並儲存（或資料庫暫時比較忙，等幾秒再按一次）。" });
     setBusy(false);
   }

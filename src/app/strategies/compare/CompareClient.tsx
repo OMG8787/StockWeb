@@ -215,7 +215,7 @@ export default function CompareClient() {
     setBusy(true);
     setError("");
     try {
-      setRows((await api<{ rows: Row[] }>("/api/strategy/compare", { body: { symbols: symbols.slice(0, MAX_SYMBOLS), strategyIds: picked } })).rows);
+      setRows((await api<{ rows: Row[] }>("/api/strategy/compare", { body: { symbols: symbols.slice(0, MAX_SYMBOLS), strategyIds: picked }, busyText: "比對策略訊號中…（約 10～60 秒）" })).rows);
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import LabTabs from "@/components/strategy/LabTabs";
 import SimForm from "@/components/strategy/SimForm";
-import { api, money, pct, universeLabel, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
+import { api, runBusy, money, pct, universeLabel, upDownCls, useList, type Sim, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 interface Trade {
@@ -126,8 +126,11 @@ export default function SimDetailClient({ id }: { id: string }) {
     setNotice("");
     setError("");
     try {
-      setNotice(await fn());
-      await load();
+      // 整段「操作＋重新載入」都在遮罩裡：完成時畫面已經是最新的
+      await runBusy("處理中…", async () => {
+        setNotice(await fn());
+        await load();
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {

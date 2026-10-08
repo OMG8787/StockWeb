@@ -9,6 +9,7 @@ import { PERM } from "@/lib/auth/permissions";
 import WatchlistSync from "@/components/WatchlistSync";
 import NavigationOverlay from "@/components/NavigationOverlay";
 import GlossaryHover from "@/components/GlossaryHover";
+import BusyOverlay from "@/components/BusyOverlay";
 import AlertWatcher from "@/components/strategy/AlertWatcher";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { THEME_STORAGE_KEY } from "@/lib/theme";
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <SiteHeader />
       <NavigationOverlay />
       <GlossaryHover />
+      <BusyOverlay />
       <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6">{children}</main>
       <footer className="border-t border-(--gridline) py-6 text-center text-xs text-(--text-muted)">
         <p>本站資訊為公開資料整理與 AI 生成內容，僅供研究參考，不構成投資建議。</p>

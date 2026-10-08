@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import SourcePicker from "./SourcePicker";
-import { api, type Sim, type SourceMode, type StockSource, type Strategy } from "./api";
+import { api, runBusy, type Sim, type SourceMode, type StockSource, type Strategy } from "./api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 /** 建立或編輯模擬倉（初始資金只有建立時能設定） */
@@ -17,7 +17,7 @@ export default function SimForm({
   strategies: Strategy[];
   /** 策略清單還在載入（下拉選單先顯示載入中，避免以為自己沒有策略） */
   strategiesLoading?: boolean;
-  onSaved: (s: Sim) => void;
+  onSaved: (s: Sim) => void | Promise<void>;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(sim?.name ?? "");
@@ -34,10 +34,13 @@ export default function SimForm({
     setBusy(true);
     setError("");
     try {
-      const r = await api<{ item: Sim }>("/api/strategy/sims", {
-        body: { id: sim?.id, name, strategyId, sources, sourceMode, initialCash, autoTrade },
+      // 儲存＋重新載入列表一起遮住，完成時直接看到新的模擬倉
+      await runBusy(sim ? "儲存模擬倉中…" : "建立模擬倉中…", async () => {
+        const r = await api<{ item: Sim }>("/api/strategy/sims", {
+          body: { id: sim?.id, name, strategyId, sources, sourceMode, initialCash, autoTrade },
+        });
+        await onSaved(r.item);
       });
-      onSaved(r.item);
     } catch (err) {
       setError((err as Error).message);
     } finally {
