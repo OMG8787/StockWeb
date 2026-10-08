@@ -18,7 +18,14 @@ export type TableName =
   | "Strategies"
   | "Sims"
   | "SimTrades"
-  | "SimNav";
+  | "SimNav"
+  // 永久紀錄（durableKv.ts：原本存 Redis 的資料，一個欄位一列）
+  | "RatingLog"
+  | "RatingConfirm"
+  | "Learning"
+  | "SimPortfolio"
+  | "BriefArchive"
+  | "ModelStats";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
@@ -32,6 +39,12 @@ export const TABLE_KEYS: Record<TableName, string> = {
   Sims: "ID",
   SimTrades: "ID",
   SimNav: "ID",
+  RatingLog: "ID",
+  RatingConfirm: "ID",
+  Learning: "ID",
+  SimPortfolio: "ID",
+  BriefArchive: "ID",
+  ModelStats: "ID",
 };
 
 export type StoreOp =
@@ -41,7 +54,16 @@ export type StoreOp =
   | { op: "delete"; table: TableName; key: string }
   | { op: "trim"; table: TableName; keep: number }
   /** 把「col＝value」的所有列換成 rows（例如整份關注清單換新），一次完成 */
-  | { op: "replaceWhere"; table: TableName; col: string; value: string; rows: Row[] };
+  | { op: "replaceWhere"; table: TableName; col: string; value: string; rows: Row[] }
+  /** 只讀 col 欄位值在 values 裡的列（在 Google 端篩選） */
+  | { op: "readKeys"; table: TableName; col: string; values: string[] }
+  /** 依主鍵批次新增或更新 */
+  | { op: "upsert"; table: TableName; rows: Row[] }
+  /** 刪除 col 欄位值在 values 裡的所有列 */
+  | { op: "deleteWhere"; table: TableName; col: string; values: string[] };
+
+/** 不會改資料的操作（可以重送、不用排隊） */
+export const isReadOp = (o: StoreOp) => o.op === "read" || o.op === "readKeys";
 
 export interface TableStore {
   readonly kind: "gas" | "file" | "memory";
@@ -89,6 +111,7 @@ class GasStore implements TableStore {
       const c = this.cache.get(t);
       return c && now - c.at < READ_CACHE_MS ? c : null;
     };
+    if (ops.every((o) => o.op === "readKeys")) return this.sendWithRetry(ops, true);
     if (ops.every((o) => o.op === "read")) {
       let missing = [...new Set(ops.filter((o) => !fresh(o.table)).map((o) => o.table))];
       if (missing.length) await this.fillFromShared(missing);
@@ -101,7 +124,7 @@ class GasStore implements TableStore {
       return ops.map((o) => this.cache.get(o.table)!.rows.map((r) => ({ ...r })));
     }
     // 有寫入：先作廢（就算失敗，之後也重讀最新的），成功後再作廢一次（避免途中被別的請求填回舊資料）
-    const written = new Set(ops.filter((o) => o.op !== "read").map((o) => o.table));
+    const written = new Set(ops.filter((o) => !isReadOp(o)).map((o) => o.table));
     await this.invalidate(written);
     const results = await this.sendWithRetry(ops, false);
     await this.invalidate(written);
@@ -215,6 +238,7 @@ export class MemoryStore implements TableStore {
   private async load(): Promise<Record<TableName, Row[]>> {
     const empty: Record<TableName, Row[]> = {
       Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [], Indicators: [], Strategies: [], Sims: [], SimTrades: [], SimNav: [],
+      RatingLog: [], RatingConfirm: [], Learning: [], SimPortfolio: [], BriefArchive: [], ModelStats: [],
     };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);
@@ -267,6 +291,27 @@ export class MemoryStore implements TableStore {
           const keep = Math.max(50, op.keep);
           if (rows.length > keep) rows.splice(0, rows.length - keep);
           return true;
+        }
+        case "readKeys": {
+          const want = new Set(op.values);
+          return rows.filter((x) => want.has(x[op.col])).map((x) => ({ ...x }));
+        }
+        case "upsert": {
+          for (const r of op.rows) {
+            const clean = Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v ?? "")]));
+            const hit = rows.find((x) => x[key] === clean[key]);
+            if (hit) Object.assign(hit, clean);
+            else rows.push(clean);
+          }
+          return op.rows.length;
+        }
+        case "deleteWhere": {
+          const want = new Set(op.values);
+          const before = rows.length;
+          const kept = rows.filter((x) => !want.has(x[op.col]));
+          rows.length = 0;
+          rows.push(...kept);
+          return before - kept.length;
         }
         case "replaceWhere": {
           const kept = rows.filter((x) => x[op.col] !== op.value);

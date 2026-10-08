@@ -260,4 +260,20 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
     expect(await getServerWatchlist("U1")).toEqual([]);
     expect(await getServerWatchlist("U2")).toHaveLength(1);
   });
+
+  it("永久紀錄用的操作：readKeys 只回傳指定鍵、upsert 新增或覆蓋、deleteWhere 刪除、讀取不拿鎖也正確", async () => {
+    const store = getStore();
+    await store.batch([
+      { op: "upsert", table: "RatingLog", rows: [
+        { ID: "k1§a§0", Key: "k1", Field: "a", Part: "0", Parts: "1", Kind: "h", Value: "1" },
+        { ID: "k2§a§0", Key: "k2", Field: "a", Part: "0", Parts: "1", Kind: "h", Value: "2" },
+      ] },
+    ]);
+    await store.batch([{ op: "upsert", table: "RatingLog", rows: [{ ID: "k1§a§0", Key: "k1", Field: "a", Part: "0", Parts: "1", Kind: "h", Value: "9" }] }]);
+    const [only] = (await store.batch([{ op: "readKeys", table: "RatingLog", col: "Key", values: ["k1"] }])) as Array<Array<Record<string, string>>>;
+    expect(only.map((r) => r.Value)).toEqual(["9"]);
+    await store.batch([{ op: "deleteWhere", table: "RatingLog", col: "Key", values: ["k1"] }]);
+    const [left] = (await store.batch([{ op: "read", table: "RatingLog" }])) as Array<Array<Record<string, string>>>;
+    expect(left.map((r) => r.Key)).toEqual(["k2"]);
+  });
 });

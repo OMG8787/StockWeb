@@ -129,7 +129,7 @@ function doPost(e) {
     if (!ops.length || ops.length > 300) return json_({ success: false, message: '操作數量錯誤' });
 
     // 只有寫入需要排隊；純讀取不拿鎖，不必等別人的寫入完成
-    const readOnly = ops.every(op => op.op === 'read');
+    const readOnly = ops.every(op => op.op === 'read' || op.op === 'readKeys');
     const lock = readOnly ? null : LockService.getScriptLock();
     try {
         if (lock) lock.waitLock(20000);
@@ -183,6 +183,44 @@ function runOp_(op) {
             if (last >= 2) sheet.getRange(2, 1, last - 1, headers.length).clearContent();
             if (all.length) sheet.getRange(2, 1, all.length, headers.length).setNumberFormat('@').setValues(all);
             return true;
+        }
+        case 'readKeys': {
+            // 只回傳 col 欄位值在 values 裡的列（在 Google 端篩選，不必把整張表傳回去）
+            const want = {};
+            (Array.isArray(op.values) ? op.values : []).forEach(v => { want[String(v)] = true; });
+            const col = String(op.col || def.key);
+            return readRows_(sheet).filter(r => want[String(r.obj[col])]).map(r => r.obj);
+        }
+        case 'upsert': {
+            // 依主鍵批次新增或更新：已存在的列整列覆蓋指定欄位，新的列一次附加在最下面
+            const rows = Array.isArray(op.rows) ? op.rows : [];
+            if (!rows.length) return 0;
+            let headers = headers_(sheet);
+            rows.forEach(r => { headers = ensureCols_(sheet, Object.keys(r)); });
+            const keyIdx = headers.indexOf(def.key);
+            const last = sheet.getLastRow();
+            const index = {};
+            if (last >= 2) sheet.getRange(2, keyIdx + 1, last - 1, 1).getDisplayValues().forEach((v, i) => { index[String(v[0])] = i + 2; });
+            const appends = [];
+            rows.forEach(r => {
+                const rowNum = index[String(r[def.key])];
+                if (rowNum) writeRow_(sheet, rowNum, r);
+                else appends.push(headers.map(h => (r[h] == null ? '' : String(r[h]))));
+            });
+            if (appends.length) {
+                const start = sheet.getLastRow() + 1;
+                sheet.getRange(start, 1, appends.length, headers.length).setNumberFormat('@').setValues(appends);
+            }
+            return rows.length;
+        }
+        case 'deleteWhere': {
+            // 刪除 col 欄位值在 values 裡的所有列（由下往上刪，列號才不會跑掉）
+            const want = {};
+            (Array.isArray(op.values) ? op.values : []).forEach(v => { want[String(v)] = true; });
+            const col = String(op.col || def.key);
+            const hit = readRows_(sheet).filter(r => want[String(r.obj[col])]).map(r => r.row).sort((a, b) => b - a);
+            hit.forEach(row => sheet.deleteRow(row));
+            return hit.length;
         }
         case 'trim': {
             // 只保留最新 keep 筆（資料由舊到新附加在下方）

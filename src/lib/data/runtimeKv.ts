@@ -37,14 +37,14 @@ function autoParse(v: unknown): unknown {
 export class RuntimeKv {
   constructor(private cache: RuntimeCache = getCache({ namespace: "stockweb" })) {}
 
-  private async read(key: string): Promise<Entry | null> {
+  protected async read(key: string): Promise<Entry | null> {
     const e = (await this.cache.get(key)) as Entry | null;
     if (!e || typeof e !== "object" || !("v" in e)) return null;
     if (e.x != null && e.x <= Date.now()) return null;
     return e;
   }
 
-  private async write(key: string, v: unknown, expiresAt: number | null): Promise<void> {
+  protected async write(key: string, v: unknown, expiresAt: number | null): Promise<void> {
     const ttl = expiresAt == null ? DEFAULT_TTL_SEC : Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000));
     await this.cache.set(key, { v, x: expiresAt } satisfies Entry, { ttl, name: "" });
   }
