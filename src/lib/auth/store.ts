@@ -1,3 +1,5 @@
+import { Redis } from "@upstash/redis";
+import { RedisTableStore, type HashClient } from "./redisStore";
 import { promises as fs } from "node:fs";
 import { redis } from "@/lib/data/kv";
 import path from "node:path";
@@ -71,7 +73,7 @@ export type StoreOp =
 export const isReadOp = (o: StoreOp) => o.op === "read" || o.op === "readKeys";
 
 export interface TableStore {
-  readonly kind: "gas" | "file" | "memory";
+  readonly kind: "gas" | "file" | "memory" | "redis";
   batch(ops: StoreOp[]): Promise<unknown[]>;
 }
 
@@ -471,6 +473,14 @@ export function getStore(): TableStore {
   if (cached) return cached;
   const url = process.env.AUTH_GAS_URL;
   const secret = process.env.AUTH_GAS_SECRET;
+  // 明確指定才用 Redis（AUTH_STORE=redis）：Redis 連線設定跟快取共用（KV_REST_API_URL／UPSTASH_REDIS_REST_URL）。
+  // 沒指定時維持原本行為，換回試算表只要拿掉這個環境變數。
+  if (process.env.AUTH_STORE === "redis") {
+    const rUrl = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+    const rToken = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+    if (!rUrl || !rToken) throw new StoreUnavailableError("AUTH_STORE=redis，但沒有設定 Redis（KV_REST_API_URL／KV_REST_API_TOKEN 或 UPSTASH_REDIS_REST_URL／UPSTASH_REDIS_REST_TOKEN）");
+    return (cached = new RedisTableStore(new Redis({ url: rUrl, token: rToken }) as unknown as HashClient, TABLE_KEYS, (m) => new StoreUnavailableError(m, true)));
+  }
   if (url && secret) return (cached = new GasStore(url, secret));
   if (process.env.NODE_ENV === "production") {
     throw new StoreUnavailableError("帳號資料庫尚未設定（AUTH_GAS_URL / AUTH_GAS_SECRET）");

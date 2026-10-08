@@ -488,6 +488,12 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（深夜，續4）：資料庫可切回 Upstash Redis（使用者：試算表太久了）
+- 使用者原話：「幫我將資料庫改為之前的線上，試算表太久了」。理解為帳號與各資料表改回之前用的線上 Redis（Upstash）。前面的量測也支持：Google 轉址服務偶發 7～50 秒，Redis 每個指令約 10～30 毫秒。
+- 實作：`lib/auth/redisStore.ts`（`RedisTableStore`，與 GasStore／MemoryStore 同一個 TableStore 介面，每張表一個 hash `tbl:v1:<表名>`，列內帶 `__n` 寫入順序）；`getStore()` 在環境變數 `AUTH_STORE=redis` 時使用（Redis 連線沿用 KV_REST_API_URL／KV_REST_API_TOKEN 或 UPSTASH_REDIS_REST_URL／TOKEN）；沒設定維持試算表，**要換回試算表只要刪掉 AUTH_STORE**。同時設了 Redis 連線後，快取與永久紀錄（評等紀錄、AI 模擬組合等）也自動改用真的 Redis（kv.ts 原本的優先順序）。`scripts/migrate-sheet-to-redis.mjs`（預演／--apply／--force）把試算表資料搬進 Redis，含永久紀錄表還原成原本的鍵。
+- 驗證：`redisStore.test.ts` 用假的 Upstash（JSON 序列化行為一致）跟 MemoryStore 逐項比對 read／readKeys／append／update／delete／upsert／deleteWhere／replaceWhere／trim 結果完全一致；預演腳本對真實試算表跑過（資料量：帳號 3、各表合計數十列）。**尚未用真的 Redis 連線測過**，要等使用者提供 Upstash 連線資訊。
+- 注意：Upstash 免費額度有每月指令上限（使用者 10/8 中午就是因此改用試算表）；本站帳號與資料表讀取已做 2 秒記憶體暫存，但即時提醒每 5 秒輪詢仍會用掉不少指令，超過上限最壞是被限流（不會收費）。待使用者提供連線資訊後切換並觀察用量。
+
 ### 2026-10-08（深夜，續3）：資料庫慢的真正位置——Google 結果轉址服務；對沖請求
 - 診斷端點 `/api/cron/gas-ping`（標頭 x-ping＝AUTH_GAS_SECRET 的 SHA-256 前 12 碼）在 Vercel iad1 端量：POST 本身穩定約 1.2～1.5 秒，**取結果那一步**時快時慢（70～180 毫秒、6.9 秒、7.2 秒，甚至 15 秒後回 404 的 HTML）。我從本機測則是 0.8～1.8 秒。所以正式站儲存要 10～50 秒的主因是 Google 轉址結果服務偶發慢，不是試算表或我們的程式。
 - 修：`GasStore.send` 對沖——結果 3 秒沒回來就用同一個 reqId 再送一次、先回來的先用（只在重複執行安全時：純讀取、無 append 的寫入、Apps Script v2）；取結果只讀一次（結果網址單次有效，原本的 4 次重取沒有意義）。測試涵蓋對沖、不對沖 append、404 改重送 POST。
