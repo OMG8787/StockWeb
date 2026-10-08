@@ -31,7 +31,20 @@ function parseJson<T>(s: string | undefined, fallback: T): T {
   }
 }
 
-async function readMine(table: "Indicators" | "Strategies" | "Sims", userId: string): Promise<Row[]> {
+type MyTable = "Indicators" | "Strategies" | "Sims";
+
+/** 一次請求讀好幾張表（試算表每次呼叫 2～5 秒，分開讀會慢好幾倍），只留自己帳號的列 */
+async function readMineMany(userId: string, ...tables: MyTable[]): Promise<Row[][]> {
+  const results = (await getStore().batch(tables.map((table) => ({ op: "read" as const, table })))) as Row[][];
+  return results.map((rows) => rows.filter((r) => r.UserId === userId));
+}
+
+/** 預先一次讀好策略與指標（runner 接著呼叫 listStrategies／listIndicators 會直接用暫存） */
+export async function prefetchStrategyTables(userId: string): Promise<void> {
+  await readMineMany(userId, "Strategies", "Indicators");
+}
+
+async function readMine(table: MyTable, userId: string): Promise<Row[]> {
   const [rows] = (await getStore().batch([{ op: "read", table }])) as Row[][];
   return rows.filter((r) => r.UserId === userId);
 }
@@ -94,6 +107,7 @@ export async function saveIndicator(
 }
 
 export async function deleteIndicator(owner: Owner, id: string): Promise<void> {
+  await prefetchStrategyTables(owner.userId);
   const [inds, strategies] = await Promise.all([readMine("Indicators", owner.userId), listStrategies(owner.userId)]);
   if (!inds.some((r) => r.ID === id)) throw new StrategyError("找不到這個參考指標", 404);
   const usedBy = strategies.filter((s) => strategyIndicatorIds(s.config).includes(id)).map((s) => s.name);
@@ -138,13 +152,13 @@ function toStrategy(r: Row, validIds: Set<string>): StrategyView {
 }
 
 export async function listStrategies(userId: string): Promise<StrategyView[]> {
-  const [rows, inds] = await Promise.all([readMine("Strategies", userId), readMine("Indicators", userId)]);
+  const [rows, inds] = await readMineMany(userId, "Strategies", "Indicators");
   const valid = new Set(inds.map((r) => r.ID));
   return rows.map((r) => toStrategy(r, valid));
 }
 
 export async function saveStrategy(owner: Owner, input: { id?: string; name?: unknown; config?: unknown; note?: unknown }): Promise<StrategyView> {
-  const [mine, inds] = await Promise.all([readMine("Strategies", owner.userId), readMine("Indicators", owner.userId)]);
+  const [mine, inds] = await readMineMany(owner.userId, "Strategies", "Indicators");
   const config = normalizeStrategyConfig(input.config, new Set(inds.map((r) => r.ID)));
   const name = text(input.name, 40);
   if (!name) throw new StrategyError("請填寫策略名稱");
@@ -167,7 +181,7 @@ export async function saveStrategy(owner: Owner, input: { id?: string; name?: un
 }
 
 export async function deleteStrategy(owner: Owner, id: string): Promise<void> {
-  const [mine, sims] = await Promise.all([readMine("Strategies", owner.userId), readMine("Sims", owner.userId)]);
+  const [mine, sims] = await readMineMany(owner.userId, "Strategies", "Sims");
   if (!mine.some((r) => r.ID === id)) throw new StrategyError("找不到這個策略", 404);
   const usedBy = sims.filter((s) => s.StrategyId === id).map((s) => s.Name);
   if (usedBy.length) throw new StrategyError(`這個策略還在模擬倉「${usedBy.join("、")}」使用，請先換掉或刪除模擬倉`, 409);
@@ -260,7 +274,8 @@ function cleanSymbols(v: unknown): SimView["symbols"] {
 /** 使用者只打代號也行：台股從股票清單補上名稱（補不到就維持代號） */
 async function withNames(list: SimView["symbols"]): Promise<SimView["symbols"]> {
   if (!list.some((x) => x.market === "TW" && x.name === x.symbol)) return list;
-  await ensureTwUniverseWarm().catch(() => {});
+  // 股票清單冷啟動可能要十幾秒：最多等 3 秒，查不到就先用代號（不影響交易，只是顯示名稱）
+  await Promise.race([ensureTwUniverseWarm().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
   return list.map((x) => (x.market === "TW" && x.name === x.symbol ? { ...x, name: findInUniverse(x.symbol, "TW")?.name ?? x.symbol } : x));
 }
 
@@ -268,7 +283,7 @@ export async function saveSim(
   owner: Owner,
   input: { id?: string; name?: unknown; strategyId?: unknown; universe?: unknown; symbols?: unknown; marketTopN?: unknown; initialCash?: unknown; autoTrade?: unknown },
 ): Promise<SimView> {
-  const [mine, strategies] = await Promise.all([readMine("Sims", owner.userId), readMine("Strategies", owner.userId)]);
+  const [mine, strategies] = await readMineMany(owner.userId, "Sims", "Strategies");
   const name = text(input.name, 40);
   if (!name) throw new StrategyError("請填寫模擬倉名稱");
   const strategyId = String(input.strategyId ?? "");

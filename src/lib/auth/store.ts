@@ -56,21 +56,62 @@ export class StoreUnavailableError extends Error {
 // Apps Script 平常 2～5 秒，偶爾（例如剛建好的試算表第一次寫入）超過 20 秒，2026-10-07 實測；放寬到 45 秒
 const GAS_TIMEOUT_MS = 45_000;
 
+/** 讀過的資料表在同一個伺服器實例暫存多久（有寫入會立即作廢；跨實例最多晚這麼久看到別人的修改） */
+const READ_CACHE_MS = 60_000;
+/** 取結果（Google 轉址後的網址）失敗時重試幾次 */
+const FETCH_RESULT_ATTEMPTS = 4;
+
+/**
+ * Google Apps Script 的回應流程：POST 執行程式 → 302 轉址到 script.googleusercontent.com 取結果。
+ * 偶爾「取結果」那一步回 404（程式已經執行過了；FonegleWeb 也遇過，2026-10-08 使用者儲存策略時
+ * 看到「帳號資料庫回應 404」）。所以這裡自己處理轉址：取結果失敗只重取結果、不重新 POST，
+ * 寫入也能安全重試，不會重複寫入。
+ *
+ * 另外每次呼叫 2～5 秒，同一個操作常要讀好幾張表：讀過的表在記憶體暫存 READ_CACHE_MS，
+ * 純讀取只送還沒暫存的表，寫入後把寫過的表作廢。
+ */
 class GasStore implements TableStore {
   readonly kind = "gas" as const;
+  private cache = new Map<TableName, { rows: Row[]; at: number }>();
   constructor(private url: string, private secret: string) {}
 
   async batch(ops: StoreOp[]): Promise<unknown[]> {
+    const now = Date.now();
+    const fresh = (t: TableName) => {
+      const c = this.cache.get(t);
+      return c && now - c.at < READ_CACHE_MS ? c : null;
+    };
+    if (ops.every((o) => o.op === "read")) {
+      const missing = [...new Set(ops.filter((o) => !fresh(o.table)).map((o) => o.table))];
+      if (missing.length) {
+        const results = await this.sendWithRetry(missing.map((table) => ({ op: "read" as const, table })), true);
+        missing.forEach((t, i) => this.cache.set(t, { rows: results[i] as Row[], at: Date.now() }));
+      }
+      return ops.map((o) => this.cache.get(o.table)!.rows.map((r) => ({ ...r })));
+    }
+    // 有寫入：先作廢（就算失敗，之後也重讀最新的），成功後再作廢一次（避免途中被別的請求填回舊資料）
+    const written = new Set(ops.filter((o) => o.op !== "read").map((o) => o.table));
+    written.forEach((t) => this.cache.delete(t));
+    const results = await this.sendWithRetry(ops, false);
+    written.forEach((t) => this.cache.delete(t));
+    ops.forEach((o, i) => {
+      if (o.op === "read" && !written.has(o.table)) this.cache.set(o.table, { rows: results[i] as Row[], at: Date.now() });
+    });
+    return results;
+  }
+
+  private async sendWithRetry(ops: StoreOp[], readOnly: boolean): Promise<unknown[]> {
     try {
       return await this.send(ops);
     } catch (err) {
-      // 純讀取遇到網路錯誤重試一次（偶發 fetch failed）；有寫入的不重試，避免重複寫入
-      if (err instanceof StoreUnavailableError && err.retryable && ops.every((o) => o.op === "read")) return this.send(ops);
+      // 純讀取在 POST 這一步就失敗（網路錯誤）可以整個重送；寫入不重送，避免重複寫入
+      if (readOnly && err instanceof StoreUnavailableError && err.retryable) return this.send(ops);
       throw err;
     }
   }
 
   private async send(ops: StoreOp[]): Promise<unknown[]> {
+    const signal = AbortSignal.timeout(GAS_TIMEOUT_MS);
     let res: Response;
     try {
       res = await fetch(this.url, {
@@ -78,14 +119,18 @@ class GasStore implements TableStore {
         // text/plain：Apps Script 網頁應用程式收 JSON 字串最穩定的方式
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ secret: this.secret, ops }),
-        redirect: "follow",
+        redirect: "manual",
         cache: "no-store",
-        signal: AbortSignal.timeout(GAS_TIMEOUT_MS),
+        signal,
       });
     } catch (err) {
       throw new StoreUnavailableError(`帳號資料庫連線失敗：${(err as Error).message}`, true);
     }
-    // Google 偶爾在回傳結果時給 404（Apps Script 已執行，只是結果沒送回來；FonegleWeb 也遇過），讀取可重試
+    const location = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && location) {
+      // 程式已經執行完，結果放在轉址後的網址：只重取這個網址
+      res = await this.fetchResult(location, signal);
+    }
     if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`, res.status === 404 || res.status >= 500);
     const data = (await res.json().catch(() => null)) as { success?: boolean; data?: unknown[]; message?: string } | null;
     if (!data?.success || !Array.isArray(data.data)) {
@@ -97,6 +142,21 @@ class GasStore implements TableStore {
       throw new StoreUnavailableError(`帳號資料庫錯誤：${msg}`);
     }
     return data.data;
+  }
+
+  private async fetchResult(url: string, signal: AbortSignal): Promise<Response> {
+    let last: Response | null = null;
+    for (let attempt = 0; attempt < FETCH_RESULT_ATTEMPTS; attempt++) {
+      try {
+        last = await fetch(url, { cache: "no-store", redirect: "follow", signal });
+        if (last.ok || (last.status !== 404 && last.status < 500)) return last;
+      } catch (err) {
+        if (signal.aborted) throw new StoreUnavailableError(`帳號資料庫連線逾時：${(err as Error).message}`);
+      }
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+    if (last) return last;
+    throw new StoreUnavailableError("帳號資料庫連線失敗（取結果時網路錯誤）", true);
   }
 }
 

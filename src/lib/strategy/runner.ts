@@ -17,7 +17,7 @@ import {
   type StrategyConfig,
   type UserIndicator,
 } from "./engine";
-import { listIndicators, listStrategies, persistSimResult, StrategyError, strategyIndicatorIds, type SimView } from "./store";
+import { listIndicators, listStrategies, persistSimResult, prefetchStrategyTables, StrategyError, strategyIndicatorIds, type SimView } from "./store";
 
 /**
  * 模擬倉的 I/O：準備判斷所需的資料（日K、法人、基本面、月營收、本站評等）、執行策略、寫回試算表。
@@ -131,6 +131,7 @@ export interface RunResult {
 export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?: number } = {}): Promise<RunResult> {
   const today = taipeiToday();
   const deadline = opts.deadline ?? Date.now() + FETCH_BUDGET_MS;
+  await prefetchStrategyTables(sim.userId);
   const [strategies, indicators] = await Promise.all([listStrategies(sim.userId), listIndicators(sim.userId)]);
   const strategy = strategies.find((s) => s.id === sim.strategyId);
   if (!strategy) throw new StrategyError("模擬倉沒有設定策略，或策略已被刪除");
@@ -241,6 +242,7 @@ async function resolveTradePrice(
 
 /** 試算：用策略判斷單一股票（策略頁的「測試一檔」）。 */
 export async function previewStrategy(userId: string, strategyId: string, target: { symbol: string; market?: "TW" | "US" }) {
+  await prefetchStrategyTables(userId);
   const [strategies, indicators] = await Promise.all([listStrategies(userId), listIndicators(userId)]);
   const strategy = strategies.find((s) => s.id === strategyId);
   if (!strategy) throw new StrategyError("找不到這個策略", 404);

@@ -128,17 +128,19 @@ function doPost(e) {
     const ops = Array.isArray(req.ops) ? req.ops : [];
     if (!ops.length || ops.length > 300) return json_({ success: false, message: '操作數量錯誤' });
 
-    const lock = LockService.getScriptLock();
+    // 只有寫入需要排隊；純讀取不拿鎖，不必等別人的寫入完成
+    const readOnly = ops.every(op => op.op === 'read');
+    const lock = readOnly ? null : LockService.getScriptLock();
     try {
-        lock.waitLock(20000);
+        if (lock) lock.waitLock(20000);
         const results = ops.map(runOp_);
-        SpreadsheetApp.flush();
+        if (!readOnly) SpreadsheetApp.flush();
         return json_({ success: true, data: results });
     } catch (err) {
         console.error(err && err.stack ? err.stack : err);
         return json_({ success: false, message: '系統錯誤：' + (err && err.message ? err.message : err) });
     } finally {
-        lock.releaseLock();
+        if (lock) lock.releaseLock();
     }
 }
 
