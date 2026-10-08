@@ -232,9 +232,17 @@ class GasStore implements TableStore {
       res = await this.fetchResult(location, signal);
     }
     if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`, res.status === 404 || res.status >= 500);
-    const data = (await res.json().catch(() => null)) as { success?: boolean; data?: unknown[]; message?: string } | null;
+    const bodyText = await res.text().catch(() => "");
+    let data: { success?: boolean; data?: unknown[]; message?: string } | null = null;
+    try {
+      data = JSON.parse(bodyText);
+    } catch {
+      data = null;
+    }
     if (!data?.success || !Array.isArray(data.data)) {
-      const msg = data?.message ?? "格式不正確";
+      // 回的不是 JSON（例如 Google 的錯誤網頁：同時執行太多、配額用完）：把開頭記下來才查得到原因
+      const snippet = bodyText.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+      const msg = data?.message ?? `格式不正確${snippet ? `（回應開頭：${snippet}）` : "（空回應）"}`;
       // 新功能用到新資料表，但試算表那邊的 Apps Script 還是舊版
       if (msg.includes("未知的資料表") || msg.includes("未知的操作")) {
         throw new StoreUnavailableError(`試算表的 Apps Script 不是最新版（${msg}）：請把 gas/Code.gs 整份貼上，並「部署 → 管理部署作業 → 編輯 → 新版本」`);
