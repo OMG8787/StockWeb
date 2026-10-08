@@ -474,6 +474,9 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（早）：今日建議一直沒資料
+- 使用者回報今日建議卡片一直是灰條。查證：正式站 /api/action-brief 盤中冷快取超過 60 秒被 Vercel 中斷（504 FUNCTION_INVOCATION_TIMEOUT）；根因是新專案沒有 Redis、每次都從頭替整批候選股算評等。maxDuration 60→300（action-brief、daily-brief），實測第一次 91 秒成功、第二次 0.8 秒；載入超過 10 秒顯示說明（兩張卡片共用 BriefSkeleton）。根治要靠使用者補 Redis，並把 cron-job.org 的預熱網址改成 stock-web-rho。
+
 ### 2026-10-08：換頁遮罩、模擬倉／策略庫／參考指標
 - 使用者回報「所有按鈕按下後都要等好久，要做遮罩但不能蓋導覽列」：新增 NavigationOverlay（捕獲階段攔站內連結點擊與 startNavigating()，導覽列下方遮罩，換頁完成收起；Next `<Link>` 會 preventDefault 所以不能看 defaultPrevented）。實測慢的主因是新 Vercel 專案沒設 Redis（首次 10～66 秒、第二次 0.2～1.9 秒）。Playwright 5 項驗證通過（`3789eb4`）。
 - 使用者要求「模擬倉、策略庫、參考指標，策略庫建立多個參考指標，模擬倉選策略，依帳號各自的策略與依據」，決定：指標從清單挑可調參數；策略可選條件式或加權計分；自動交易＋手動下單；範圍自選清單或全市場前 N 名。完成 17 種參考指標、策略引擎、模擬倉每日自動交易（vercel cron 台北 16:40 平日）、三個頁面、權限 36；Apps Script 改為接受符合命名規則的新表（之後加表免重新部署）。
