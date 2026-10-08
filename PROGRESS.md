@@ -488,6 +488,13 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（深夜，續5）：資料庫正式切到 Redis 並完成完整測試
+- 使用者：「把試算表都換成剛設定的線上資料庫、資料搬過去、完成後完整測試」。Vercel 已加 `AUTH_STORE=redis`（Upstash 的 KV_* 變數是整合自動加的）並重新部署；搬遷後再比對試算表，各表無缺漏。速度：登入 0.5～1.4 秒、讀 0.3～0.8 秒、新增 0.35～0.9 秒、刪除 0.4～0.7 秒（試算表時代 10～50 秒）。試算表資料保留當備份；換回只要刪 AUTH_STORE 並重新部署。
+- 完整測試（兩位 Sonnet agent）：登入／登出／錯誤密碼／申請帳號／審核中被擋／忘記密碼、管理頁（核准停用、建帳號臨時密碼、強制改密碼、權限擋 /admin、全部登出、回饋標已完成／退回／確認）、策略庫／參考指標／模擬倉（建立、買賣、刪除）／提醒／疊圖、首頁／今日建議／每日焦點／AI 模擬組合／成績看板／搜尋／新聞／個股（台美股）／AI 問答、導覽與名詞說明、手機版面——全部通過，無 5xx、無英文技術訊息。已刪除測試帳號 zzfull／zztmp1／zzapply1 與其資料、測試回饋；**zzverify3 與其策略指標仍在，待使用者決定要不要刪**。
+- 「AI 模擬組合還沒開始」「成績看板尚未產生彙總」不是搬遷遺漏：這些是外部 cron-job.org 每 5 分鐘呼叫 `/api/cron/warm-cache` 順帶觸發的，排程還指著舊網站。**待使用者：把 cron-job.org 的網址改成 https://stock-web-rho.vercel.app/api/cron/warm-cache**（美股時段若有另一個排程也一併改）。手動呼叫 warm-cache 與 learning 已確認新站正常（各子任務約 0.3～1.1 秒）。
+- 小項：補名詞說明「大戶持股比例」「融資使用率」；/account 沒有改顯示名稱功能、/admin 沒有刪除帳號按鈕（只有停用）——是否要做待使用者決定。
+- 觀察：Upstash 免費每月 50 萬次指令，要定期看 Vercel Storage → Usage；冷啟動第一次請求曾 27 秒（Vercel 冷啟動，不是資料庫）。
+
 ### 2026-10-08（深夜，續4）：資料庫可切回 Upstash Redis（使用者：試算表太久了）
 - 使用者原話：「幫我將資料庫改為之前的線上，試算表太久了」。理解為帳號與各資料表改回之前用的線上 Redis（Upstash）。前面的量測也支持：Google 轉址服務偶發 7～50 秒，Redis 每個指令約 10～30 毫秒。
 - 實作：`lib/auth/redisStore.ts`（`RedisTableStore`，與 GasStore／MemoryStore 同一個 TableStore 介面，每張表一個 hash `tbl:v1:<表名>`，列內帶 `__n` 寫入順序）；`getStore()` 在環境變數 `AUTH_STORE=redis` 時使用（Redis 連線沿用 KV_REST_API_URL／KV_REST_API_TOKEN 或 UPSTASH_REDIS_REST_URL／TOKEN）；沒設定維持試算表，**要換回試算表只要刪掉 AUTH_STORE**。同時設了 Redis 連線後，快取與永久紀錄（評等紀錄、AI 模擬組合等）也自動改用真的 Redis（kv.ts 原本的優先順序）。`scripts/migrate-sheet-to-redis.mjs`（預演／--apply／--force）把試算表資料搬進 Redis，含永久紀錄表還原成原本的鍵。
