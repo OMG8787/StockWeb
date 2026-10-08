@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
+import OrderBookPanel from "@/components/strategy/OrderBookPanel";
 import { api, useList, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 import { getWatchlist } from "@/lib/watchlist";
@@ -42,32 +43,112 @@ function SignalChip({ s, lineId }: { s: Signal; lineId?: string }) {
   return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{signalText(s, lineId)}</span>;
 }
 
-/** 收盤價走勢＋每個策略一條訊號帶＋共識帶；全部策略都買進的日子在價格圖上標出 */
+/** 每檔股票的「即時五檔」開關（打開才開始每 5 秒抓，避免 10 檔同時輪詢） */
+function BookToggle({ symbol }: { symbol: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="space-y-2">
+      <button type="button" className={`${btnGhost} text-xs`} onClick={() => setShow(!show)}>
+        {show ? "收起即時五檔" : "📊 看即時五檔（每 5 秒刷新）"}
+      </button>
+      {show && <OrderBookPanel symbols={[symbol]} title="即時五檔" />}
+    </div>
+  );
+}
+
+const shortName = (l: { id: string; name: string }) => (l.id === "ai" ? "AI 策略" : l.name);
+const pctText = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+
+/**
+ * 收盤價走勢＋每個策略一條訊號帶（＋兩個以上策略時的「全部同時買進」帶）。
+ * 滑鼠／手指移到哪一天就畫一條貫穿價格與訊號帶的垂直線，上方顯示當天價格、漲跌與所處階段，
+ * 才看得出買賣訊號出現時股價是在上漲、下跌還是盤整（2026-10-08 使用者要求）。
+ */
 function OverlayChart({ row }: { row: Row }) {
-  const W = 720;
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 760;
+  const LABEL_W = 110;
   const PRICE_H = 150;
   const STRIP_H = 14;
   const GAP = 4;
-  const LABEL_W = 0;
   const n = row.closes.length;
   if (n < 2) return null;
   const lo = Math.min(...row.closes);
   const hi = Math.max(...row.closes);
-  const x = (i: number) => LABEL_W + (i / (n - 1)) * (W - LABEL_W);
+  const plotW = W - LABEL_W;
+  const cellW = plotW / n;
+  const x = (i: number) => LABEL_W + (i + 0.5) * cellW;
   const y = (v: number) => 8 + (1 - (v - lo) / (hi - lo || 1)) * (PRICE_H - 16);
-  const cellW = (W - LABEL_W) / n;
-  const strips = [...row.lines.map((l) => ({ key: l.id, name: l.name, cells: l.signals })), { key: "consensus", name: "全部買進", cells: row.consensus.map((c) => (c ? "buy" : null) as Signal) }];
+  const showConsensus = row.lines.length > 1;
+  const strips = [
+    ...row.lines.map((l) => ({ key: l.id, name: shortName(l), cells: l.signals })),
+    ...(showConsensus ? [{ key: "consensus", name: "全部同時買進", cells: row.consensus.map((c) => (c ? "buy" : null) as Signal) }] : []),
+  ];
   const H = PRICE_H + GAP + strips.length * (STRIP_H + GAP);
   const path = row.closes.map((c, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(c).toFixed(1)}`).join(" ");
+  const at = hover ?? n - 1;
+  const close = row.closes[at];
+  const dayChg = at > 0 ? ((close - row.closes[at - 1]) / row.closes[at - 1]) * 100 : null;
+  const back5 = row.closes[Math.max(0, at - 5)];
+  const chg5 = at > 0 ? ((close - back5) / back5) * 100 : null;
+  const posPct = hi > lo ? Math.round(((close - lo) / (hi - lo)) * 100) : 50;
+  const stage = chg5 == null ? "" : chg5 >= 3 ? "近 5 日上漲" : chg5 <= -3 ? "近 5 日下跌" : "近 5 日盤整";
+
+  function pick(e: React.PointerEvent<SVGSVGElement>) {
+    const r = e.currentTarget.getBoundingClientRect();
+    const vx = ((e.clientX - r.left) / r.width) * W;
+    if (vx < LABEL_W) return setHover(null);
+    setHover(Math.min(n - 1, Math.max(0, Math.floor((vx - LABEL_W) / cellW))));
+  }
+
   return (
     <div className="space-y-1">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`${row.name} 策略訊號疊圖`}>
-        {row.consensus.map((c, i) =>
-          c ? <rect key={`band-${i}`} x={i * cellW} y={0} width={cellW} height={PRICE_H} fill="var(--price-up)" opacity={0.12} /> : null,
+      {/* 游標所在那天的資訊（沒有指著的時候顯示最新一天） */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-(--surface-2) px-2 py-1 text-xs">
+        <span className="font-medium">
+          {row.days[at]}
+          {hover == null && "（最新）"}
+        </span>
+        <span>收盤 {close}</span>
+        {dayChg != null && <span className={dayChg >= 0 ? "text-(--price-up)" : "text-(--price-down)"}>當日 {pctText(dayChg)}</span>}
+        {chg5 != null && (
+          <span className={chg5 >= 0 ? "text-(--price-up)" : "text-(--price-down)"}>
+            {stage}（{pctText(chg5)}）
+          </span>
         )}
+        <span className="text-(--text-muted)">位在區間高低的 {posPct}%</span>
+        {row.lines.map((l) => (
+          <span key={l.id} className="flex items-center gap-1">
+            {shortName(l)}
+            <SignalChip s={l.signals[at] ?? null} lineId={l.id} />
+          </span>
+        ))}
+        {showConsensus && row.consensus[at] && <span className="font-semibold text-(--price-up)">✅ 全部同時買進</span>}
+      </div>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full touch-pan-y select-none"
+        role="img"
+        aria-label={`${row.name} 策略訊號疊圖`}
+        onPointerMove={pick}
+        onPointerDown={pick}
+        onPointerLeave={() => setHover(null)}
+      >
+        {row.consensus.map((c, i) =>
+          showConsensus && c ? <rect key={`band-${i}`} x={LABEL_W + i * cellW} y={0} width={cellW} height={PRICE_H} fill="var(--price-up)" opacity={0.12} /> : null,
+        )}
+        <text x={4} y={14} fontSize={11} fill="var(--text-muted)">
+          {hi}
+        </text>
+        <text x={4} y={PRICE_H - 4} fontSize={11} fill="var(--text-muted)">
+          {lo}
+        </text>
+        <text x={4} y={PRICE_H / 2 + 4} fontSize={11} fill="var(--text-muted)">
+          收盤價
+        </text>
         <path d={path} fill="none" stroke="var(--accent)" strokeWidth={2} />
         {row.consensus.map((c, i) =>
-          c && !row.consensus[i - 1] ? (
+          showConsensus && c && !row.consensus[i - 1] ? (
             <text key={`tri-${i}`} x={x(i)} y={Math.min(PRICE_H - 2, y(row.closes[i]) + 16)} textAnchor="middle" fontSize={12} fill="var(--price-up)">
               ▲
             </text>
@@ -77,28 +158,34 @@ function OverlayChart({ row }: { row: Row }) {
           const top = PRICE_H + GAP + si * (STRIP_H + GAP);
           return (
             <g key={s.key}>
+              <text x={4} y={top + STRIP_H - 3} fontSize={11} fill={s.key === "consensus" ? "var(--price-up)" : "var(--text-secondary)"}>
+                {s.name.length > 9 ? `${s.name.slice(0, 8)}…` : s.name}
+              </text>
               {s.cells.map((c, i) => (
-                <rect key={i} x={i * cellW + 0.5} y={top} width={Math.max(1, cellW - 1)} height={STRIP_H} fill={signalColor(c)} opacity={c ? 0.9 : 0.35}>
-                  <title>{`${row.days[i]} ${s.name}：${s.key === "consensus" ? (c ? "全部策略都是買進" : "—") : signalText(c, s.key)}`}</title>
-                </rect>
+                <rect key={i} x={LABEL_W + i * cellW + 0.5} y={top} width={Math.max(1, cellW - 1)} height={STRIP_H} fill={signalColor(c)} opacity={c ? 0.9 : 0.35} />
               ))}
             </g>
           );
         })}
+        {hover != null && (
+          <g pointerEvents="none">
+            <line x1={x(hover)} x2={x(hover)} y1={0} y2={H} stroke="var(--text-primary)" strokeWidth={1} strokeDasharray="3 3" opacity={0.7} />
+            <circle cx={x(hover)} cy={y(close)} r={4} fill="var(--accent)" stroke="var(--surface-1)" strokeWidth={1.5} />
+          </g>
+        )}
       </svg>
       <div className="space-y-0.5 text-xs text-(--text-muted)">
-        {strips.map((s, si) => (
-          <div key={s.key} className="flex items-center gap-2">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: si === strips.length - 1 ? "var(--price-up)" : "var(--baseline)" }} />
-            第 {si + 1} 條：{s.name}
-          </div>
-        ))}
+        <div>
+          每一排是一個策略每天的訊號：紅＝買進、綠＝賣出（AI 策略為「先不要買」）、淡灰＝不動作。
+          {showConsensus && "最後一排「全部同時買進」＝上面所有策略在同一天都是買進（價格圖上的淡紅底與 ▲ 也是同一件事）。"}
+          滑鼠移到圖上（手機用手指按住滑動）可看那一天的價格與訊號。
+        </div>
         <div>
           {row.days[0]} ～ {row.days.at(-1)}
-          {row.live && "（最後一根為盤中即時價）"}・紅＝買進、綠＝賣出（AI 建議策略為「先不要買」）、淡色＝不動作・價格圖上的淡紅底＝全部策略都買進
+          {row.live && "（最後一根為盤中即時價）"}
         </div>
         {row.lines.some((l) => l.id === "ai" && l.signals.slice(0, -1).every((x) => x === null)) && (
-          <div>※ AI 建議策略的歷史取自本站的評等紀錄，紀錄從新系統上線後才開始累積，之前的日子顯示為不動作，「全部買進」也只會出現在有紀錄的日子。</div>
+          <div>※ AI 策略的歷史取自本站的評等紀錄，紀錄從新系統上線後才開始累積，之前的日子顯示為不動作，「全部同時買進」也只會出現在有紀錄的日子。</div>
         )}
       </div>
     </div>
@@ -265,6 +352,7 @@ export default function CompareClient() {
                   ))}
                 </div>
                 <OverlayChart row={row} />
+                {row.market === "TW" && <BookToggle symbol={row.symbol} />}
               </>
             )}
           </section>

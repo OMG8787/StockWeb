@@ -1,6 +1,7 @@
 import { getChartLive } from "@/lib/data/chartLive";
 import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQuote, normalizeSymbol } from "@/lib/data";
 import { getTwChipsHistory, type TwChipsDay } from "@/lib/data/chipsHistory";
+import { getOrderBook } from "@/lib/data/orderBook";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { getStockRating } from "@/lib/ai/stockRating";
 import { taipeiNow } from "@/lib/auth/accounts";
@@ -89,6 +90,8 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleR
   const jobs: Promise<unknown>[] = [];
   if (needs.has("fundamentals")) jobs.push(getFundamentals(t.symbol, t.market).then((f) => (ctx.fundamentals = f)).catch(() => null));
   if (needs.has("earnings")) jobs.push(getEarnings(t.symbol, t.market).then((e) => (ctx.earnings = e)).catch(() => null));
+  // 五檔只在盤中即時判斷時抓（收盤後的快照不是當沖要看的東西）
+  if (needs.has("orderbook") && live && t.market === "TW") jobs.push(getOrderBook(t.symbol).then((b) => (ctx.orderBook = b)).catch(() => null));
   if (needs.has("rating")) jobs.push(getStockRating(t.symbol, t.market).then((r) => (ctx.ratingCode = r?.rating.code ?? null)).catch(() => null));
   if (needs.has("chips") && t.market === "TW") {
     jobs.push(

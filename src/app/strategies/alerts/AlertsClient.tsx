@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
+import OrderBookPanel from "@/components/strategy/OrderBookPanel";
 import { ALERT_CONFIG_EVENT, ALERT_TEST_EVENT } from "@/components/strategy/AlertWatcher";
 import { api, useList, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
@@ -23,7 +24,7 @@ interface Check {
 }
 
 const AI = { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）" };
-const INTERVALS = [10, 15, 20, 30];
+const INTERVALS = [5, 10, 15, 20, 30];
 /** 常用的鬧鐘時間（台股 09:00 開盤、13:30 收盤） */
 const ALARM_PRESETS = [
   { time: "08:45", label: "開盤前" },
@@ -266,6 +267,12 @@ export default function AlertsClient() {
             </section>
           )}
         </>
+      )}
+
+      {cfg && cfg.symbols.length > 0 && (
+        <section className={cardCls}>
+          <OrderBookPanel symbols={cfg.symbols} title="📊 追蹤名單的即時五檔" />
+        </section>
       )}
 
       {check && (

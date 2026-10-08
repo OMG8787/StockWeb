@@ -437,7 +437,7 @@ export async function persistSimResult(
 // 即時提醒設定（每個帳號一列，ID＝UserId）
 // ============================================================
 
-export const ALERT_LIMITS = { maxSymbols: 20, maxStrategies: 8, intervals: [10, 15, 20, 30] as const };
+export const ALERT_LIMITS = { maxSymbols: 20, maxStrategies: 8, intervals: [5, 10, 15, 20, 30] as const };
 
 export interface AlertConfig {
   symbols: string[];

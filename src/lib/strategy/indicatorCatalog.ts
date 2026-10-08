@@ -1,3 +1,4 @@
+import type { OrderBook } from "@/lib/data/orderBook";
 import type { Candle, Fundamentals, Earnings } from "@/lib/data/types";
 import type { TwChipsDay } from "@/lib/data/chipsHistory";
 import {
@@ -29,13 +30,15 @@ export interface EvalContext {
   chipsDays?: TwChipsDay[] | null;
   /** 本站綜合評等代碼（buy／buy-on-pullback／avoid） */
   ratingCode?: string | null;
+  /** 即時五檔（只有盤中即時判斷才有：策略疊圖最新一天、即時提醒） */
+  orderBook?: OrderBook | null;
 }
 
 export type ParamDef =
   | { key: string; label: string; type: "number"; default: number; min: number; max: number; step?: number; unit?: string }
   | { key: string; label: string; type: "select"; default: string; options: Array<{ value: string; label: string }> };
 
-export type IndicatorNeed = "candles" | "fundamentals" | "earnings" | "chips" | "rating";
+export type IndicatorNeed = "candles" | "fundamentals" | "earnings" | "chips" | "rating" | "orderbook";
 
 export interface EvalResult {
   /** 條件是否成立；資料不足時為 null（不當成立也不當不成立，策略會略過這檔） */
@@ -47,7 +50,7 @@ export interface EvalResult {
 export interface IndicatorType {
   id: string;
   label: string;
-  group: "技術面" | "籌碼面" | "基本面" | "本站";
+  group: "技術面" | "籌碼面" | "基本面" | "本站" | "即時盤";
   description: string;
   params: ParamDef[];
   needs: IndicatorNeed[];
@@ -449,6 +452,38 @@ export const INDICATOR_TYPES: IndicatorType[] = [
       // 「等回檔」已併入建議買進（siteRating.ts 二分結論）
       const isBuy = ctx.ratingCode === "buy" || ctx.ratingCode === "buy-on-pullback";
       return { pass: p.code === "avoid" ? !isBuy : isBuy, detail: `本站評等：${isBuy ? "建議買進" : "建議先不要買"}` };
+    },
+  },
+  {
+    id: "order_book",
+    label: "即時五檔（委買委賣力道）",
+    group: "即時盤",
+    description:
+      "盤中最佳五檔的委買量合計與委賣量合計相比，看買盤或賣壓哪邊強（當沖參考）。只有盤中即時判斷才有資料：即時提醒（可每 5 秒檢查）與策略疊圖的最新一天；模擬倉收盤後判斷與歷史日子沒有五檔，這個條件會視為資料不足。",
+    params: [
+      {
+        key: "side",
+        label: "條件",
+        type: "select",
+        default: "bid",
+        options: [
+          { value: "bid", label: "買盤強：委買量 ÷ 委賣量 ≥ 倍數" },
+          { value: "ask", label: "賣壓重：委賣量 ÷ 委買量 ≥ 倍數" },
+        ],
+      },
+      { key: "ratio", label: "倍數", type: "number", default: 1.5, min: 1, max: 10, step: 0.1, unit: "倍" },
+    ],
+    needs: ["orderbook"],
+    twOnly: true,
+    describe: (p) => `五檔${p.side === "ask" ? "委賣量是委買量" : "委買量是委賣量"}的 ${fmt(n(p.ratio, 1.5), 1)} 倍以上`,
+    evaluate(ctx, p) {
+      const b = ctx.orderBook;
+      if (!b || (b.bidTotal === 0 && b.askTotal === 0)) return { pass: null, detail: "沒有即時五檔（只在盤中即時判斷時有）" };
+      const ratio = n(p.ratio, 1.5);
+      const detail = `五檔委買 ${b.bidTotal} 張／委賣 ${b.askTotal} 張`;
+      // 一邊是 0（漲停鎖住沒人賣、跌停鎖住沒人買）：該邊視為無限強
+      const v = p.side === "ask" ? (b.bidTotal ? b.askTotal / b.bidTotal : Infinity) : b.askTotal ? b.bidTotal / b.askTotal : Infinity;
+      return { pass: v >= ratio, detail };
     },
   },
 ];
