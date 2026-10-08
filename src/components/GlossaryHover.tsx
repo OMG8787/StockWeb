@@ -158,7 +158,9 @@ export default function GlossaryHover() {
     document.addEventListener("pointerdown", (e) => e.pointerType === "mouse" && hide(), { passive: true });
     document.addEventListener("scroll", hide, { passive: true, capture: true });
     document.addEventListener("keydown", hide, { passive: true });
-    document.documentElement.addEventListener("pointerleave", hide);
+    // 觸控點完手指離開會送 pointerleave，不能因此關掉剛顯示的提示：只有滑鼠移出視窗才關
+    const onLeave = (e: PointerEvent) => e.pointerType === "mouse" && hide();
+    document.documentElement.addEventListener("pointerleave", onLeave);
     return () => {
       observer.disconnect();
       style.remove();
@@ -169,7 +171,7 @@ export default function GlossaryHover() {
       document.removeEventListener("pointerup", onTap);
       document.removeEventListener("scroll", hide, true);
       document.removeEventListener("keydown", hide);
-      document.documentElement.removeEventListener("pointerleave", hide);
+      document.documentElement.removeEventListener("pointerleave", onLeave);
       (CSS as unknown as HighlightApi).highlights?.delete(HIGHLIGHT_NAME);
     };
   }, []);
