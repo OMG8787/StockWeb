@@ -488,6 +488,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（深夜，續8）：Redis 用量盤點與修正（評等紀錄日期索引）
+- 使用者問「3 位使用者一起用會不會很快用完 50 萬次？網站沒開就不會呼叫對嗎？」。用正式站量到：**一次即時提醒檢查要 ~1000 個 Redis 指令**（5 秒輪詢一小時 72 萬次，一小時燒光額度）。根因：評等紀錄／評等確認／評等變化三處「往回逐日各讀一次」（`readRatingLog` 200 天＝201 個 HGETALL，`readPreviousRatings` 6 天、`bootstrapFromRatingLog` 21 天），而資料只有幾天。修（`0b0de54`）：`ratingLog.existingRatingLogDays`＋Redis set `rating-days:v1`（第一次用時掃 400 天建一次索引並標記 `rating-days:v1:built`，之後寫入評等紀錄就 sadd 日期；最近 3 天一律保留；索引讀不到退回舊辦法）；測試 `ratingLogDaysIndex.test.ts`（200 天範圍讀取 <12 指令）。
+- 修後（直接數 Upstash 請求，冷實例最壞情況）：一次提醒檢查 ≈ 9 + 3×股票檔數 個指令（1 檔 12、5 檔 24；每檔＝K 線快取、報價、評等各 1 GET）。**Redis `INFO` 計數器不可信**（兩個節點各報各的、會跳動），用量一律用程式端數請求（做法見 count 測試寫法：攔截 fetch 計 Upstash body 的指令數）。
+- 用量估算（月，22 個交易日）：外部排程 warm-cache（台股時段每 5 分鐘）約 7～8 萬（美股時段再加同量）；一位使用者瀏覽約 5～6 萬；**即時提醒是最大項**：30 秒間隔、5 檔、盤中全程開著分頁約 28 萬／人，5 秒間隔約 190 萬／人。網站沒人開時只剩排程那一份。建議：提醒預設 30～60 秒、追蹤檔數少；若多人同時開提醒要再優化（記憶體快取層、MGET 合併）。
+
 ### 2026-10-08（深夜，續7）：管理頁「刪除帳號」、個人頁「改顯示名稱」
 - 使用者要求：管理頁增加刪除帳號按鈕；個人頁讓使用者自己改顯示名稱。
 - 實作：`accounts.deleteUser`（連同 Sessions、LoginLog、Holdings、Indicators、Strategies、Sims＋SimTrades／SimNav、Alerts 一起刪，最後才刪 Users 本身，中途失敗可再按一次；不能刪自己、不能刪最高管理員、只有最高管理員能刪管理員帳號；使用者回報保留）、`DELETE /api/admin/users`、管理頁每列「🗑 刪除帳號」（確認視窗說明會刪什麼，自己與最高管理員那列不顯示）；`accounts.updateOwnName`、`POST /api/auth/profile`（重寫登入 cookie）、個人頁「顯示名稱」輸入框＋儲存（成功後整頁重載讓各處名字一起更新）。
