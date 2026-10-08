@@ -341,6 +341,29 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
   const [perms, setPerms] = useState<PermCode[]>(pending && user.perms.length === 0 ? ROLE_TEMPLATES.find((r) => r.id === "basic")!.perms : user.perms);
   const [strategy, setStrategy] = useState(user.strategy);
   const dirty = perms.slice().sort().join() !== user.perms.slice().sort().join() || strategy !== user.strategy;
+  const me = useProfile();
+  // 能不能刪：不是自己、不是最高管理員；管理員帳號只有最高管理員能刪（後端也會檢查）
+  const canDelete = me?.account !== user.account && !user.perms.includes(PERM.SUPER_ADMIN) && (isSuper || !user.perms.includes(PERM.ADMIN));
+  const deleteBtn = canDelete && (
+    <button
+      type="button"
+      className={btnGhost + " text-xs !text-(--price-up)"}
+      disabled={busy}
+      title="連同這個帳號的登入紀錄、策略、模擬倉等資料一起刪除，無法復原"
+      onClick={() =>
+        confirm(`確定刪除帳號「${user.name}（${user.account}）」？
+
+會一併刪除他的登入紀錄、關注清單、參考指標、策略、模擬倉（含交易紀錄）和提醒設定，無法復原。
+（只是不想讓他登入的話，請改用「停用」。）`) &&
+        run(async () => {
+          await sendJson("/api/admin/users", { userId: user.userId }, "DELETE");
+          return `已刪除帳號 ${user.name}（${user.account}）及其資料`;
+        })
+      }
+    >
+      🗑 刪除帳號
+    </button>
+  );
 
   return (
     <tr className={`border-b border-(--gridline) last:border-0 ${user.isActive ? "" : "opacity-60"}`}>
@@ -413,6 +436,7 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
                 拒絕
               </button>
             )}
+            {deleteBtn}
           </div>
         ) : (
         <div className="flex flex-wrap gap-1">
@@ -473,6 +497,7 @@ function UserRow({ user, isSuper, busy, run }: { user: UserView; isSuper: boolea
               全部登出
             </button>
           )}
+          {deleteBtn}
         </div>
         )}
       </td>

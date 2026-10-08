@@ -126,7 +126,7 @@ function cleanText(v: unknown, max: number): string {
   return String(v ?? "").replace(/[\r\n\t]+/g, " ").trim().slice(0, max);
 }
 
-async function readTables(...tables: Array<"Users" | "Sessions" | "LoginLog">): Promise<Row[][]> {
+async function readTables(...tables: Array<"Users" | "Sessions" | "LoginLog" | "Sims">): Promise<Row[][]> {
   return (await getStore().batch(tables.map((table) => ({ op: "read" as const, table })))) as Row[][];
 }
 
@@ -287,6 +287,17 @@ export async function changePassword(p: SessionPayload, oldPw: string, newPw: st
     ...others.flatMap((s) => endSessionOps(s, "已變更密碼", now)),
   ]);
   return { ...sessionPayload(toUser(row), p.t, p.sid), mcp: false };
+}
+
+/** 使用者自己改畫面上的顯示名稱（帳號本身不能改）；回傳新的登入資料，呼叫端要重寫 cookie */
+export async function updateOwnName(p: SessionPayload, nameRaw: string): Promise<SessionPayload> {
+  const name = cleanText(nameRaw, 40);
+  if (!name) throw new AuthError("顯示名稱不能空白");
+  const [users] = await readTables("Users");
+  const row = users.find((r) => r.UserId === p.uid);
+  if (!row) throw new AuthError("查無帳號", 404);
+  await getStore().batch([{ op: "update", table: "Users", key: p.uid, patch: { Name: name, UpdatedAt: taipeiNow() } }]);
+  return sessionPayload(toUser({ ...row, Name: name }), p.t, p.sid);
 }
 
 // ============================================================
@@ -564,6 +575,42 @@ export async function updateUser(actor: SessionPayload, userId: string, input: U
   }
   await getStore().batch(ops);
   return next;
+}
+
+/**
+ * 刪除帳號（管理員）：連同這個帳號的登入狀態、登入紀錄、關注清單、參考指標、策略、模擬倉（含交易與淨值）、提醒設定一起刪，無法復原。
+ * 不能刪自己；不能刪最高管理員（要先移除對方的最高管理員權限）；只有最高管理員能刪管理員帳號。
+ * 使用者回報（Feedback）是站上的紀錄，保留不動。
+ */
+export async function deleteUser(actor: SessionPayload, userId: string): Promise<{ account: string; name: string }> {
+  const [users, sims] = await readTables("Users", "Sims");
+  const admin = requireAdmin(users, actor.uid);
+  const row = users.find((r) => r.UserId === userId);
+  if (!row) throw new AuthError("查無帳號", 404);
+  const target = toUser(row);
+  if (userId === admin.userId) throw new AuthError("不能刪除自己的帳號");
+  if (target.perms.includes(PERM.SUPER_ADMIN)) throw new AuthError("不能刪除最高管理員（要先移除對方的最高管理員權限）", 403);
+  if (target.perms.includes(PERM.ADMIN) && !admin.perms.includes(PERM.SUPER_ADMIN)) throw new AuthError("只有最高管理員能刪除管理員帳號", 403);
+  const simIds = sims.filter((r) => r.UserId === userId).map((r) => r.ID);
+  const ops: StoreOp[] = [
+    { op: "deleteWhere", table: "Sessions", col: "UserId", values: [userId] },
+    { op: "deleteWhere", table: "LoginLog", col: "UserId", values: [userId] },
+    { op: "deleteWhere", table: "Holdings", col: "UserId", values: [userId] },
+    { op: "deleteWhere", table: "Indicators", col: "UserId", values: [userId] },
+    { op: "deleteWhere", table: "Strategies", col: "UserId", values: [userId] },
+    ...(simIds.length
+      ? ([
+          { op: "deleteWhere", table: "SimTrades", col: "SimId", values: simIds },
+          { op: "deleteWhere", table: "SimNav", col: "SimId", values: simIds },
+        ] as StoreOp[])
+      : []),
+    { op: "deleteWhere", table: "Sims", col: "UserId", values: [userId] },
+    { op: "deleteWhere", table: "Alerts", col: "ID", values: [userId] },
+    // 最後才刪帳號本身：前面任何一步失敗，帳號還在，可以再按一次刪除
+    { op: "delete", table: "Users", key: userId },
+  ];
+  await getStore().batch(ops);
+  return { account: target.account, name: target.name };
 }
 
 export async function resetUserPassword(actor: SessionPayload, userId: string): Promise<{ tempPassword: string }> {

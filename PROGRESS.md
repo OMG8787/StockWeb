@@ -488,6 +488,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（深夜，續7）：管理頁「刪除帳號」、個人頁「改顯示名稱」
+- 使用者要求：管理頁增加刪除帳號按鈕；個人頁讓使用者自己改顯示名稱。
+- 實作：`accounts.deleteUser`（連同 Sessions、LoginLog、Holdings、Indicators、Strategies、Sims＋SimTrades／SimNav、Alerts 一起刪，最後才刪 Users 本身，中途失敗可再按一次；不能刪自己、不能刪最高管理員、只有最高管理員能刪管理員帳號；使用者回報保留）、`DELETE /api/admin/users`、管理頁每列「🗑 刪除帳號」（確認視窗說明會刪什麼，自己與最高管理員那列不顯示）；`accounts.updateOwnName`、`POST /api/auth/profile`（重寫登入 cookie）、個人頁「顯示名稱」輸入框＋儲存（成功後整頁重載讓各處名字一起更新）。
+- 驗證：`authAccounts.test.ts` 新增兩個測試（刪除連動與限制、改名生效含 revalidate 與登入）；正式站驗證待派。
+
 ### 2026-10-08（深夜，續6）：預熱排程分層（快／慢、台股／美股），讓 5 分鐘一次不耗盡 Redis 免費額度
 - 使用者沒有設過 cron-job.org（原本是前一位接手者的帳號），改成自己註冊（帳號信箱 garydong41505）；問「可以五分鐘一次嗎、不重要的資料不用每次取嗎」。量測：warm-cache 資料新鮮時一次約 14 個 Redis 指令、重算時約 261 個（INFO 計數器會在兩個節點間跳動，只採用這兩個可信點）。
 - 改 `/api/cron/warm-cache`：項目分 fast（行情表、指數、台指期夜盤，每次跑）與 slow（技術／概念篩選、訊號共振、市場歷史、籌碼比例、快報、新聞、基本面／籌碼／財報／公告，每 30 分鐘一次，`?full=1` 強制全跑）；台股盤中只更新台股項目、美股盤中只更新美股項目，兩邊休市時 slow 項目照 30 分鐘一次；學習與 AI 模擬組合永遠執行（自己判斷時點）。回應的 outcomes 會標出「本次略過」的項目。

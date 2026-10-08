@@ -17,10 +17,31 @@ export default function AccountClient() {
   const [newPw2, setNewPw2] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  // 顯示名稱：editing 為 null 時顯示目前的名字，開始輸入後才用輸入的值
+  const [nameEdit, setNameEdit] = useState<string | null>(null);
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameMsg, setNameMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const deniedNeed = denied ? routeAccess(denied) : null;
   const deniedLabels =
     deniedNeed?.kind === "user" ? deniedNeed.need.map((c) => PERMISSION_LIST.find((p) => p.code === c)?.label).filter(Boolean).join("、") : "";
+
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    const name = (nameEdit ?? "").trim();
+    if (!name) return setNameMsg({ ok: false, text: "顯示名稱不能空白" });
+    setNameBusy(true);
+    setNameMsg(null);
+    try {
+      await sendJson("/api/auth/profile", { name });
+      // 整頁重載：右上角、導覽列等各處的名字都從登入 cookie 讀，重載後一起換成新名字
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- 刻意整頁重載：登入資料改變後要丟掉路由快取
+      window.location.href = "/account?renamed=1";
+    } catch (err) {
+      setNameMsg({ ok: false, text: (err as Error).message });
+      setNameBusy(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -61,8 +82,24 @@ export default function AccountClient() {
       {profile && (
         <section className={cardCls}>
           <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
-            <dt className="text-(--text-muted)">名稱</dt>
-            <dd>{profile.name}</dd>
+            <dt className="text-(--text-muted)">顯示名稱</dt>
+            <dd>
+              <form onSubmit={saveName} className="flex flex-wrap items-center gap-2">
+                <input
+                  value={nameEdit ?? profile.name}
+                  onChange={(e) => setNameEdit(e.target.value)}
+                  maxLength={40}
+                  aria-label="顯示名稱"
+                  className={`${inputCls} !w-auto min-w-40 flex-1 !py-1`}
+                />
+                <button type="submit" className={`${btnPrimary} !py-1 text-xs`} disabled={nameBusy || nameEdit === null || nameEdit.trim() === profile.name || !nameEdit.trim()}>
+                  {nameBusy ? "儲存中…" : "儲存名稱"}
+                </button>
+              </form>
+              <p className="mt-1 text-xs text-(--text-muted)">畫面右上角與管理員看到的名字；帳號（{profile.account}）不能改。</p>
+              {nameMsg && <p className={`mt-1 text-xs ${nameMsg.ok ? "text-(--price-down)" : "text-(--price-up)"}`}>{nameMsg.text}</p>}
+              {params.get("renamed") === "1" && !nameMsg && <p className="mt-1 text-xs text-(--price-down)">✅ 顯示名稱已更新</p>}
+            </dd>
             <dt className="text-(--text-muted)">帳號</dt>
             <dd>{profile.account}</dd>
             <dt className="text-(--text-muted)">投資風格</dt>

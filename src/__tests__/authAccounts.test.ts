@@ -4,6 +4,7 @@ import {
   adminOverview,
   changePassword,
   createUser,
+  deleteUser,
   hashPassword,
   kick,
   FORGOT_REPLY,
@@ -15,10 +16,11 @@ import {
   resetUserPassword,
   revalidate,
   setupFirstAdmin,
+  updateOwnName,
   updateUser,
   verifyPassword,
 } from "@/lib/auth/accounts";
-import { MemoryStore, setStoreForTests } from "@/lib/auth/store";
+import { MemoryStore, getStore, setStoreForTests } from "@/lib/auth/store";
 import { PERM, canSeePath, hasPerm, parsePerms, routeAccess } from "@/lib/auth/permissions";
 import { NextResponse } from "next/server";
 import { decodeSession, encodeSession, writeSessionCookies } from "@/lib/auth/sessionCookie";
@@ -56,6 +58,53 @@ describe("帳號系統", () => {
     expect(after.mcp).toBe(false);
     await expect(login("amy", tempPassword, info)).rejects.toThrow("帳號或密碼錯誤");
     expect((await login("amy", "amy-new-pass", info)).mcp).toBe(false);
+  });
+
+  it("使用者自己改顯示名稱：立刻生效、登入資料帶新名字、不能空白、帳號不變", async () => {
+    const admin = await seedAdmin();
+    const { tempPassword } = await createUser(admin, { account: "amy", name: "Amy", perms: [PERM.MARKET] });
+    const s = await changePassword(await login("amy", tempPassword, info), tempPassword, "amy-new-pass");
+    await expect(updateOwnName(s, "   ")).rejects.toThrow("不能空白");
+    const next = await updateOwnName(s, "  艾咪  ");
+    expect(next.name).toBe("艾咪");
+    expect(next.uid).toBe(s.uid);
+    expect((await revalidate(next)).payload?.name).toBe("艾咪"); // 確認登入時也是新名字
+    expect((await login("amy", "amy-new-pass", info)).name).toBe("艾咪");
+    const longName = await updateOwnName(s, "名".repeat(60));
+    expect(longName.name.length).toBe(40);
+  });
+
+  it("管理員刪除帳號：連同登入狀態、紀錄、策略、模擬倉一起刪；不能刪自己與最高管理員；一般人不能刪", async () => {
+    const admin = await seedAdmin();
+    const { user: amy, tempPassword } = await createUser(admin, { account: "amy", name: "Amy", perms: [PERM.MARKET, PERM.STRATEGY_LAB] });
+    const { user: bob } = await createUser(admin, { account: "bob", name: "Bob", perms: [PERM.MARKET] });
+    const sess = await login("amy", tempPassword, info);
+    const store = getStore();
+    await store.batch([
+      { op: "append", table: "Strategies", row: { ID: "S1", UserId: amy.userId, Name: "策略" } },
+      { op: "append", table: "Strategies", row: { ID: "S2", UserId: bob.userId, Name: "別人的策略" } },
+      { op: "append", table: "Sims", row: { ID: "M1", UserId: amy.userId, Name: "倉" } },
+      { op: "append", table: "SimTrades", row: { ID: "T1", SimId: "M1" } },
+      { op: "append", table: "SimNav", row: { ID: "N1", SimId: "M1" } },
+      { op: "append", table: "Holdings", row: { ID: "H1", UserId: amy.userId, Symbol: "2330" } },
+      { op: "append", table: "Alerts", row: { ID: amy.userId, Symbols: "[]" } },
+    ]);
+    await expect(deleteUser(sess, bob.userId)).rejects.toThrow(AuthError); // 一般帳號不能刪
+    await expect(deleteUser(admin, admin.uid)).rejects.toThrow("不能刪除自己");
+    const { user: boss2 } = await createUser(admin, { account: "boss2", name: "第二位最高", perms: [PERM.SUPER_ADMIN, PERM.ADMIN, PERM.MARKET] });
+    await expect(deleteUser(admin, boss2.userId)).rejects.toThrow("不能刪除最高管理員");
+    await expect(deleteUser(admin, "nobody")).rejects.toThrow("查無帳號");
+
+    expect(await deleteUser(admin, amy.userId)).toEqual({ account: "amy", name: "Amy" });
+    const left = async (table: "Users" | "Sessions" | "LoginLog" | "Strategies" | "Sims" | "SimTrades" | "SimNav" | "Holdings" | "Alerts") =>
+      ((await store.batch([{ op: "read", table }])) as Array<Array<Record<string, string>>>)[0];
+    expect((await left("Users")).map((u) => u.Account).sort()).toEqual(["bob", "boss", "boss2"]);
+    expect((await left("Sessions")).filter((r) => r.UserId === amy.userId)).toEqual([]);
+    expect((await left("LoginLog")).filter((r) => r.UserId === amy.userId)).toEqual([]);
+    expect((await left("Strategies")).map((r) => r.ID)).toEqual(["S2"]); // 別人的還在
+    for (const t of ["Sims", "SimTrades", "SimNav", "Holdings", "Alerts"] as const) expect(await left(t)).toEqual([]);
+    expect((await revalidate(sess)).payload).toBeNull(); // 被刪的人原本的登入立刻失效
+    await expect(login("amy", tempPassword, info)).rejects.toThrow("帳號或密碼錯誤");
   });
 
   it("權限修改會在下一次確認登入時生效；停用帳號會讓登入失效", async () => {
