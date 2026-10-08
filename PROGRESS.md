@@ -492,6 +492,7 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 - 使用者原話：「幫我將資料庫改為之前的線上，試算表太久了」。理解為帳號與各資料表改回之前用的線上 Redis（Upstash）。前面的量測也支持：Google 轉址服務偶發 7～50 秒，Redis 每個指令約 10～30 毫秒。
 - 實作：`lib/auth/redisStore.ts`（`RedisTableStore`，與 GasStore／MemoryStore 同一個 TableStore 介面，每張表一個 hash `tbl:v1:<表名>`，列內帶 `__n` 寫入順序）；`getStore()` 在環境變數 `AUTH_STORE=redis` 時使用（Redis 連線沿用 KV_REST_API_URL／KV_REST_API_TOKEN 或 UPSTASH_REDIS_REST_URL／TOKEN）；沒設定維持試算表，**要換回試算表只要刪掉 AUTH_STORE**。同時設了 Redis 連線後，快取與永久紀錄（評等紀錄、AI 模擬組合等）也自動改用真的 Redis（kv.ts 原本的優先順序）。`scripts/migrate-sheet-to-redis.mjs`（預演／--apply／--force）把試算表資料搬進 Redis，含永久紀錄表還原成原本的鍵。
 - 驗證：`redisStore.test.ts` 用假的 Upstash（JSON 序列化行為一致）跟 MemoryStore 逐項比對 read／readKeys／append／update／delete／upsert／deleteWhere／replaceWhere／trim 結果完全一致；預演腳本對真實試算表跑過（資料量：帳號 3、各表合計數十列）。**尚未用真的 Redis 連線測過**，要等使用者提供 Upstash 連線資訊。
+- **10/8 晚進度**：使用者已在 Vercel 建好 Upstash Redis（`upstash-kv-green-ridge`，Free、美東 iad1、Eviction 關閉）並連結專案，連線值已寫入本機 `.env.local`（KV_REST_API_URL／KV_REST_API_TOKEN）。已執行 `migrate-sheet-to-redis.mjs --apply`：帳號 3、Sessions 19、LoginLog 19、Holdings 1、Indicators 6、Strategies 4、Sims 1、Alerts 3 與永久紀錄（RatingLog、RatingConfirm、BriefArchive、ModelStats、VolumeHistory）全部寫入。用真的 Redis 跑過臨時測試（讀、append／update／readKeys／delete、zzverify3 登入）全過後已刪除測試檔。**待使用者：在 Vercel 加環境變數 AUTH_STORE=redis 並重新部署**；切換後我驗證登入與各功能、觀察 Upstash 用量；要換回試算表刪掉 AUTH_STORE。
 - 注意：Upstash 免費額度有每月指令上限（使用者 10/8 中午就是因此改用試算表）；本站帳號與資料表讀取已做 2 秒記憶體暫存，但即時提醒每 5 秒輪詢仍會用掉不少指令，超過上限最壞是被限流（不會收費）。待使用者提供連線資訊後切換並觀察用量。
 
 ### 2026-10-08（深夜，續3）：資料庫慢的真正位置——Google 結果轉址服務；對沖請求
