@@ -89,7 +89,12 @@ class GasStore implements TableStore {
     if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`, res.status === 404 || res.status >= 500);
     const data = (await res.json().catch(() => null)) as { success?: boolean; data?: unknown[]; message?: string } | null;
     if (!data?.success || !Array.isArray(data.data)) {
-      throw new StoreUnavailableError(`帳號資料庫錯誤：${data?.message ?? "格式不正確"}`);
+      const msg = data?.message ?? "格式不正確";
+      // 新功能用到新資料表，但試算表那邊的 Apps Script 還是舊版
+      if (msg.includes("未知的資料表") || msg.includes("未知的操作")) {
+        throw new StoreUnavailableError(`試算表的 Apps Script 不是最新版（${msg}）：請把 gas/Code.gs 整份貼上，並「部署 → 管理部署作業 → 編輯 → 新版本」`);
+      }
+      throw new StoreUnavailableError(`帳號資料庫錯誤：${msg}`);
     }
     return data.data;
   }
