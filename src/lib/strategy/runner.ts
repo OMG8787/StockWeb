@@ -1,5 +1,5 @@
 import { getChartLive } from "@/lib/data/chartLive";
-import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQuote, normalizeSymbol, searchStocks } from "@/lib/data";
+import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQuote, normalizeSymbol } from "@/lib/data";
 import { getTwChipsHistory, type TwChipsDay } from "@/lib/data/chipsHistory";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { getStockRating } from "@/lib/ai/stockRating";
@@ -127,17 +127,20 @@ export function needsOf(cfg: StrategyConfig, indicators: UserIndicator[]): Set<I
   return out;
 }
 
-/** 全市場模式：台股成交量前 N 名（排除權證等沒有日K的會在抓資料時自然略過） */
-/** 依策略設定的股票篩選判斷產生名單（策略沒設定篩選時報錯，請使用者到策略庫設定或改用自選清單） */
-async function strategyScreenTargets(cfg: StrategyConfig, userId: string): Promise<Target[]> {
-  if (!cfg.screen) throw new StrategyError("這個策略沒有設定「股票篩選判斷」，請到策略庫設定，或把模擬倉改成自選清單");
-  const { runScreen } = await import("./screen");
-  return (await runScreen(cfg.screen, userId)).map((s) => ({ symbol: s.symbol, market: s.market, name: s.name }));
-}
-
-async function marketTopTargets(n: number): Promise<Target[]> {
-  const items = await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" });
-  return items.slice(0, n).map((i) => ({ symbol: i.symbol, market: "TW" as const, name: i.name }));
+/**
+ * 模擬倉的股票範圍（可複選）：每個來源各自產生名單再合併；「依策略選股」展開成策略本身的篩選。
+ * 單一來源失敗（例如成交量歷史還沒累積）不影響其他來源，失敗原因寫進執行紀錄。
+ */
+async function simTargets(sim: SimView, cfg: StrategyConfig): Promise<{ targets: Target[]; errors: string[] }> {
+  if (sim.sources.length === 0) return { targets: [], errors: [] };
+  const { runSources } = await import("./screen");
+  const r = await runSources(sim.sources, sim.sourceMode, sim.userId, {
+    strategySources: cfg.screens.length ? { sources: cfg.screens, mode: cfg.screenMode } : null,
+  });
+  return {
+    targets: r.items.map((s) => ({ symbol: s.symbol, market: s.market, name: s.name })),
+    errors: r.errors.map((e) => `${r.labels[e.index]}：${e.message}`),
+  };
 }
 
 /** 股票清單冷啟動可能要十幾秒：查名稱最多等 3 秒，查不到就先用代號（不影響判斷與交易） */
@@ -177,12 +180,7 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   const cache = opts.cache ?? new DataCache(new Set());
   cache.addNeeds(needsOf(cfg, indicators), rangeFor(cfg, indicators));
 
-  const universe =
-    sim.universe === "market"
-      ? await marketTopTargets(sim.marketTopN)
-      : sim.universe === "strategy"
-        ? await strategyScreenTargets(cfg, sim.userId)
-        : sim.symbols;
+  const { targets: universe, errors: sourceErrors } = await simTargets(sim, cfg);
   const heldTargets: Target[] = sim.positions.map((p) => ({ symbol: p.symbol, market: p.market, name: p.name }));
   const all = new Map<string, Target>();
   for (const t of [...heldTargets, ...universe]) all.set(`${t.market}:${t.symbol}`, t);
@@ -223,7 +221,8 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   const missing = universe.length - candidates.length;
   const note =
     `${day} 收盤：掃描 ${candidates.length} 檔，${result.trades.length ? `買進 ${buys} 筆、賣出 ${sells} 筆` : "沒有符合條件的交易"}` +
-    (missing > 0 ? `（${missing} 檔資料沒抓到${skipped ? "，時間不夠先略過" : ""}）` : "");
+    (missing > 0 ? `（${missing} 檔資料沒抓到${skipped ? "，時間不夠先略過" : ""}）` : "") +
+    (sourceErrors.length ? `；名單來源失敗：${sourceErrors.join("；")}` : "");
   await persistSimResult(
     sim,
     { cash: result.state.cash, positions: result.state.positions, equity },

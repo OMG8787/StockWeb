@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import { api, useList, type Indicator, type Strategy, type StrategyConfig } from "@/components/strategy/api";
-import ScreenEditor from "@/components/strategy/ScreenEditor";
+import SourcePicker from "@/components/strategy/SourcePicker";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 
 const EMPTY: StrategyConfig = {
@@ -19,7 +19,8 @@ const EMPTY: StrategyConfig = {
   maxHoldDays: 0,
   positionPct: 20,
   maxPositions: 5,
-  screen: null,
+  screens: [],
+  screenMode: "union",
 };
 
 type Draft = { id?: string; name: string; note: string; config: StrategyConfig };
@@ -157,7 +158,13 @@ export default function StrategiesClient() {
             <input placeholder="備註（選填）" value={draft.note} onChange={(e) => setDraft({ ...draft, note: e.target.value })} className={inputCls} />
           </div>
 
-          <ScreenEditor value={c.screen} onChange={(screen) => setCfg({ screen })} />
+          <SourcePicker
+            title="🔎 股票篩選判斷（可複選：先挑出股票名單，再用這個策略判斷買賣）"
+            sources={c.screens}
+            mode={c.screenMode}
+            onChange={(screens, screenMode) => setCfg({ screens, screenMode })}
+            emptyHint="目前沒有選：這個策略本身不挑股票。股票名單由使用它的地方決定——模擬倉在「策略要從哪些股票裡挑」自己選（例如自選清單、全市場），策略疊圖則是你自己輸入的股票。選了來源之後，模擬倉可以用「依策略選股」直接套用這裡的名單。"
+          />
 
           <div className="flex flex-wrap gap-4 text-sm">
             <label className="flex items-center gap-1">

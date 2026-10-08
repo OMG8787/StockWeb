@@ -10,6 +10,7 @@ vi.mock("@/lib/data/universe", () => ({
 const {
   deleteIndicator, deleteSim, deleteStrategy, getSim, listIndicators, listSimHistory, listSims, listStrategies,
   persistSimResult, saveIndicator, saveSim, saveStrategy,
+  toSim,
 } = await import("@/lib/strategy/store");
 
 const amy = { userId: "U1", account: "amy" };
@@ -38,8 +39,12 @@ describe("參考指標／策略庫／模擬倉儲存", () => {
     expect(st.summary).toContain("條件式");
     expect((await listStrategies("U1"))[0].config.buy.ids).toEqual([i1.id]);
     await expect(deleteIndicator(amy, i1.id)).rejects.toThrow("超賣反彈");
-    const sim = await saveSim(amy, { name: "我的倉", strategyId: st.id, symbols: [{ symbol: "2330" }, { symbol: "2330" }, { symbol: "bad!" }], initialCash: 1_000_000 });
+    const sim = await saveSim(amy, { name: "我的倉", strategyId: st.id, sources: [{ source: "list", symbols: ["2330", "2330", "bad!"] }, { source: "all" }], initialCash: 1_000_000 });
     expect(sim.symbols).toEqual([{ symbol: "2330", market: "TW", name: "台積電" }]);
+    expect(sim.sources).toEqual([{ source: "list", symbols: ["2330"] }, { source: "all" }]);
+    expect(sim.sourceMode).toBe("union");
+    // 策略沒設定股票篩選，不能選「依策略選股」
+    await expect(saveSim(amy, { name: "y", strategyId: st.id, sources: [{ source: "strategy" }], initialCash: 1_000_000 })).rejects.toThrow("股票篩選判斷");
     expect(sim).toMatchObject({ cash: 1_000_000, equity: 1_000_000, autoTrade: true });
     await expect(deleteStrategy(amy, st.id)).rejects.toThrow("我的倉");
     await deleteSim(amy, sim.id);
@@ -51,6 +56,7 @@ describe("參考指標／策略庫／模擬倉儲存", () => {
   it("模擬倉：資金範圍、自動交易要有策略與股票、別人的看不到", async () => {
     await expect(saveSim(amy, { name: "x", initialCash: 100, autoTrade: false })).rejects.toThrow("初始資金");
     await expect(saveSim(amy, { name: "x", initialCash: 100_000 })).rejects.toThrow("要先選擇策略");
+    await expect(saveSim(amy, { name: "x", initialCash: 100_000, autoTrade: false, sources: [{ source: "list", symbols: [] }] })).rejects.toThrow("至少要有一檔");
     const sim = await saveSim(amy, { name: "手動倉", initialCash: 100_000, autoTrade: false });
     await expect(getSim("U2", sim.id)).rejects.toThrow("找不到");
     expect(await listSims("U2")).toEqual([]);
@@ -69,5 +75,12 @@ describe("參考指標／策略庫／模擬倉儲存", () => {
     expect(h.trades[0]).toMatchObject({ side: "buy", symbol: "2330", shares: 100, fee: 71, pnl: null });
     expect(h.nav).toEqual([{ day: "2026-10-08", equity: 101_000, cash: 49_929, indexClose: 22100 }]);
     expect((await listSimHistory("U2", sim.id)).trades).toEqual([]);
+  });
+
+  it("舊的模擬倉（Universe／Symbols／MarketTopN）換算成股票來源", () => {
+    expect(toSim({ ID: "a", Universe: "market", MarketTopN: "50" }).sources).toEqual([{ source: "metric", metric: "volume_today", position: "top", count: 50 }]);
+    expect(toSim({ ID: "b", Universe: "strategy" }).sources).toEqual([{ source: "strategy" }]);
+    expect(toSim({ ID: "c", Universe: "list", Symbols: JSON.stringify([{ symbol: "2330" }]) }).sources).toEqual([{ source: "list", symbols: ["2330"] }]);
+    expect(toSim({ ID: "d", Universe: "list", Symbols: "[]" }).sources).toEqual([]);
   });
 });

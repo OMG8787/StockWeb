@@ -1,6 +1,6 @@
 import { buyFee as twBuyFee, sellFee as twSellFee } from "@/lib/simPortfolio/rules";
 import { evaluateIndicator, type EvalContext, type EvalResult } from "./indicatorCatalog";
-import { normalizeScreen, type ScreenConfig } from "./screenConfig";
+import { normalizeSources, type SourceMode, type StockSource } from "./screenConfig";
 
 /**
  * 策略判斷與模擬倉每日交易的純邏輯（不抓資料、不寫試算表；I/O 在 runner.ts）。
@@ -39,8 +39,13 @@ export interface StrategyConfig {
   /** 每檔投入「初始資金」的百分比 */
   positionPct: number;
   maxPositions: number;
-  /** 股票篩選判斷：先篩出名單再跑策略（模擬倉選「依策略的股票篩選」、策略疊圖帶入股票時用）；null＝不篩選 */
-  screen: ScreenConfig | null;
+  /**
+   * 股票篩選判斷（可複選）：先篩出名單再跑策略（模擬倉選「依策略選股」、策略疊圖帶入股票時用）；
+   * 空陣列＝策略本身不挑股票，名單由模擬倉或疊圖自己指定。
+   */
+  screens: StockSource[];
+  /** 多個篩選的組合方式：union＝符合任一、intersect＝同時符合 */
+  screenMode: SourceMode;
 }
 
 export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
@@ -55,7 +60,8 @@ export const DEFAULT_STRATEGY_CONFIG: StrategyConfig = {
   maxHoldDays: 0,
   positionPct: 20,
   maxPositions: 5,
-  screen: null,
+  screens: [],
+  screenMode: "union",
 };
 
 const clampNum = (v: unknown, min: number, max: number, d: number) => {
@@ -93,7 +99,9 @@ export function normalizeStrategyConfig(raw: unknown, validIds: Set<string>): St
     maxHoldDays: Math.round(clampNum(r.maxHoldDays, 0, 3650, d.maxHoldDays)),
     positionPct: clampNum(r.positionPct, 1, 100, d.positionPct),
     maxPositions: Math.round(clampNum(r.maxPositions, 1, 50, d.maxPositions)),
-    screen: normalizeScreen(r.screen),
+    // 舊資料只有單一 screen：轉成一個元素的 screens
+    screens: normalizeSources(r.screens ?? (r.screen ? [r.screen] : [])),
+    screenMode: r.screenMode === "intersect" ? "intersect" : "union",
   };
 }
 

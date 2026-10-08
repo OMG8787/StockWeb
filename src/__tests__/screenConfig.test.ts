@@ -29,7 +29,23 @@ describe("股票篩選判斷設定", () => {
     expect(describeScreen({ source: "metric", metric: "volume_5d", position: "middle", count: 20 })).toBe("成交量（5 日平均） 中間 20 名");
     expect(describeScreen(null)).toBe("未設定股票篩選");
     const cfg = normalizeStrategyConfig({ screen: { source: "watchlist" } }, new Set());
-    expect(cfg.screen).toEqual({ source: "watchlist" });
-    expect(normalizeStrategyConfig({}, new Set()).screen).toBeNull();
+    // 舊資料的單一 screen 轉成 screens
+    expect(cfg.screens).toEqual([{ source: "watchlist" }]);
+    expect(cfg.screenMode).toBe("union");
+    expect(normalizeStrategyConfig({}, new Set()).screens).toEqual([]);
+    const multi = normalizeStrategyConfig({ screens: [{ source: "watchlist" }, { source: "strategy" }, { source: "all" }], screenMode: "intersect" }, new Set());
+    // 策略本身不能「依策略選股」
+    expect(multi.screens).toEqual([{ source: "watchlist" }, { source: "all" }]);
+    expect(multi.screenMode).toBe("intersect");
+  });
+
+  it("多個來源合併：記下每檔來自哪些來源；聯集／交集", async () => {
+    const { combineSources, describeSources, normalizeSources } = await import("@/lib/strategy/screenConfig");
+    const a = [{ symbol: "2330", market: "TW" }, { symbol: "2317", market: "TW" }];
+    const b = [{ symbol: "2317", market: "TW" }, { symbol: "2454", market: "TW" }];
+    expect(combineSources([a, b], "union").map((x) => [x.symbol, x.tags])).toEqual([["2330", [0]], ["2317", [0, 1]], ["2454", [1]]]);
+    expect(combineSources([a, b], "intersect").map((x) => x.symbol)).toEqual(["2317"]);
+    expect(normalizeSources([{ source: "all" }, { source: "all" }, { source: "bad" }])).toEqual([{ source: "all" }]);
+    expect(describeSources([{ source: "all" }, { source: "watchlist" }], "intersect")).toContain("同時符合");
   });
 });

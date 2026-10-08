@@ -37,13 +37,19 @@ export interface StrategyConfig {
   maxHoldDays: number;
   positionPct: number;
   maxPositions: number;
-  screen: ScreenConfig | null;
+  screens: StockSource[];
+  screenMode: SourceMode;
 }
 
-export type ScreenConfig =
-  | { source: "metric"; metric: string; position: "top" | "middle" | "bottom"; count: number }
-  | { source: "ai"; mode: string; count: number }
-  | { source: "watchlist" };
+// 股票來源的型別與說明文字跟後端共用同一份（screenConfig.ts 是純資料與純函式）
+export type { StockSource, SourceMode } from "@/lib/strategy/screenConfig";
+import { describeSource as describeSourceBase, describeSources, type SourceMode, type StockSource } from "@/lib/strategy/screenConfig";
+
+/** 來源說明；「依策略選股」帶出策略名稱 */
+export function describeSource(s: StockSource, strategy?: Pick<Strategy, "name">): string {
+  if (s.source === "strategy" && strategy) return `依策略選股（策略「${strategy.name}」的股票篩選）`;
+  return describeSourceBase(s);
+}
 
 export interface Strategy {
   id: string;
@@ -66,9 +72,11 @@ export interface Sim {
   id: string;
   name: string;
   strategyId: string;
-  universe: "list" | "market" | "strategy";
+  universe: "list" | "market" | "strategy" | "sources";
   symbols: Array<{ symbol: string; market: "TW" | "US"; name: string }>;
   marketTopN: number;
+  sources: StockSource[];
+  sourceMode: SourceMode;
   initialCash: number;
   cash: number;
   equity: number;
@@ -112,10 +120,8 @@ export function useList<T>(url: string): { items: T[] | null; error: string; rel
 }
 
 /** 模擬倉股票範圍的顯示文字 */
-export function universeLabel(s: Pick<Sim, "universe" | "marketTopN" | "symbols">): string {
-  if (s.universe === "market") return `全市場前 ${s.marketTopN} 名`;
-  if (s.universe === "strategy") return "依策略的股票篩選";
-  return `自選 ${s.symbols.length} 檔`;
+export function universeLabel(s: Pick<Sim, "sources" | "sourceMode">): string {
+  return s.sources.length ? `股票：${describeSources(s.sources, s.sourceMode)}` : "股票：未設定（只手動下單）";
 }
 
 export const money = (v: number) => Math.round(v).toLocaleString("zh-TW");

@@ -4,7 +4,7 @@ import { taipeiNow } from "@/lib/auth/accounts";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { INDICATOR_TYPE_MAP, normalizeParams } from "./indicatorCatalog";
 import { normalizeStrategyConfig, type SimPosition, type StrategyConfig, type UserIndicator } from "./engine";
-import { describeScreen } from "./screenConfig";
+import { describeSources, normalizeSources, type SourceMode, type StockSource } from "./screenConfig";
 
 /**
  * 參考指標、策略庫、模擬倉的儲存（Google 試算表 Indicators／Strategies／Sims／SimTrades／SimNav，
@@ -144,7 +144,7 @@ function strategySummary(cfg: StrategyConfig): string {
     cfg.mode === "score"
       ? `加權計分（${Object.keys(cfg.weights).length} 個指標，≥${cfg.buyScore} 買、≤${cfg.sellScore} 賣）`
       : `條件式（買進 ${cfg.buy.ids.length} 個${cfg.buy.match ? `中 ${cfg.buy.match} 個` : "全部"}符合；賣出 ${cfg.sell.ids.length} 個）`;
-  return `${cfg.screen ? `股票：${describeScreen(cfg.screen)}；` : ""}${head}；${risk.join("、")}`;
+  return `${cfg.screens.length ? `股票：${describeSources(cfg.screens, cfg.screenMode)}；` : ""}${head}；${risk.join("、")}`;
 }
 
 function toStrategy(r: Row, validIds: Set<string>): StrategyView {
@@ -199,8 +199,11 @@ export interface SimView {
   account: string;
   name: string;
   strategyId: string;
-  /** list＝自選清單；market＝成交量前 N 名（舊設定）；strategy＝依策略的股票篩選 */
-  universe: "list" | "market" | "strategy";
+  /** 舊欄位（顯示相容用）；實際的股票範圍看 sources */
+  universe: "list" | "market" | "strategy" | "sources";
+  /** 股票範圍（可複選）：全市場、成交量前 N 名、自選清單、依策略選股、各種篩選… */
+  sources: StockSource[];
+  sourceMode: SourceMode;
   symbols: Array<{ symbol: string; market: "TW" | "US"; name: string }>;
   marketTopN: number;
   initialCash: number;
@@ -217,6 +220,16 @@ export interface SimView {
 export const MAX_LIST_SYMBOLS = 100;
 export const MAX_MARKET_TOP_N = 100;
 
+/** 舊的模擬倉沒有 Sources 欄：從 Universe／Symbols／MarketTopN 換算 */
+function simSourcesOf(r: Row): StockSource[] {
+  const saved = normalizeSources(parseJson<unknown[]>(r.Sources, []), { allowStrategy: true });
+  if (saved.length) return saved;
+  if (r.Universe === "market") return [{ source: "metric", metric: "volume_today", position: "top", count: Number(r.MarketTopN) || 30 }];
+  if (r.Universe === "strategy") return [{ source: "strategy" }];
+  const symbols = parseJson<Array<{ symbol: string }>>(r.Symbols, []).map((x) => x.symbol);
+  return symbols.length ? [{ source: "list", symbols }] : [];
+}
+
 export function toSim(r: Row): SimView {
   const initialCash = Number(r.InitialCash) || 0;
   const cash = Number(r.Cash);
@@ -226,7 +239,9 @@ export function toSim(r: Row): SimView {
     account: r.Account ?? "",
     name: r.Name ?? "",
     strategyId: r.StrategyId ?? "",
-    universe: r.Universe === "market" ? "market" : r.Universe === "strategy" ? "strategy" : "list",
+    universe: r.Universe === "market" ? "market" : r.Universe === "strategy" ? "strategy" : r.Universe === "sources" ? "sources" : "list",
+    sources: simSourcesOf(r),
+    sourceMode: r.SourceMode === "intersect" ? "intersect" : "union",
     symbols: parseJson(r.Symbols, []),
     marketTopN: Number(r.MarketTopN) || 30,
     initialCash,
@@ -283,27 +298,31 @@ async function withNames(list: SimView["symbols"]): Promise<SimView["symbols"]> 
 
 export async function saveSim(
   owner: Owner,
-  input: { id?: string; name?: unknown; strategyId?: unknown; universe?: unknown; symbols?: unknown; marketTopN?: unknown; initialCash?: unknown; autoTrade?: unknown },
+  input: { id?: string; name?: unknown; strategyId?: unknown; sources?: unknown; sourceMode?: unknown; initialCash?: unknown; autoTrade?: unknown },
 ): Promise<SimView> {
   const [mine, strategies] = await readMineMany(owner.userId, "Sims", "Strategies");
   const name = text(input.name, 40);
   if (!name) throw new StrategyError("請填寫模擬倉名稱");
   const strategyId = String(input.strategyId ?? "");
   if (strategyId && !strategies.some((s) => s.ID === strategyId)) throw new StrategyError("找不到選擇的策略");
-  const universe = input.universe === "market" ? "market" : input.universe === "strategy" ? "strategy" : "list";
-  const symbols = await withNames(cleanSymbols(input.symbols));
-  const topN = Math.round(Math.min(MAX_MARKET_TOP_N, Math.max(10, Number(input.marketTopN) || 30)));
+  const sources = normalizeSources(input.sources, { allowStrategy: true });
+  const sourceMode: SourceMode = input.sourceMode === "intersect" ? "intersect" : "union";
+  // 自選清單補上股票名稱（存進 Symbols 欄，舊畫面與交易紀錄用）
+  const listSymbols = sources.flatMap((x) => (x.source === "list" ? x.symbols : []));
+  const symbols = await withNames(cleanSymbols(listSymbols.map((symbol) => ({ symbol, market: /^[0-9]/.test(symbol) ? "TW" : "US" }))));
   const autoTrade = input.autoTrade !== false && input.autoTrade !== "false";
   if (autoTrade && !strategyId) throw new StrategyError("開啟自動交易要先選擇策略");
-  if (autoTrade && universe === "list" && symbols.length === 0) throw new StrategyError("自選清單模式至少要有一檔股票");
-  if (universe === "strategy") {
+  if (autoTrade && sources.length === 0) throw new StrategyError("開啟自動交易要至少選一個股票來源");
+  if (sources.some((x) => x.source === "list" && x.symbols.length === 0)) throw new StrategyError("自選清單至少要有一檔股票");
+  if (sources.some((x) => x.source === "strategy")) {
     const st = strategies.find((s) => s.ID === strategyId);
-    if (!st || !parseJson<{ screen?: unknown }>(st.Config, {}).screen) throw new StrategyError("選擇的策略沒有設定「股票篩選判斷」，請先到策略庫設定");
+    const cfg = parseJson<{ screens?: unknown[]; screen?: unknown }>(st?.Config, {});
+    if (!st || !(cfg.screens?.length || cfg.screen)) throw new StrategyError("選擇的策略沒有設定「股票篩選判斷」，請先到策略庫設定，或改選其他股票來源");
   }
   const now = taipeiNow();
   const patch: Row = {
-    Account: owner.account, Name: name, StrategyId: strategyId, Universe: universe, Symbols: JSON.stringify(symbols),
-    MarketTopN: String(topN), AutoTrade: autoTrade ? "TRUE" : "FALSE", UpdatedAt: now, UserId: owner.userId,
+    Account: owner.account, Name: name, StrategyId: strategyId, Universe: "sources", Symbols: JSON.stringify(symbols),
+    Sources: JSON.stringify(sources), SourceMode: sourceMode, AutoTrade: autoTrade ? "TRUE" : "FALSE", UpdatedAt: now, UserId: owner.userId,
   };
   if (input.id) {
     const old = mine.find((r) => r.ID === input.id);

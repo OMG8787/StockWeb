@@ -5,7 +5,8 @@ import { getStockRatings } from "@/lib/ai/stockRating";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getServerWatchlist } from "@/lib/watchlistStore";
 import type { SearchItem } from "@/lib/data/types";
-import { slicePosition, periodDays, type ScreenConfig, type ScreenMetric, type ScreenedStock } from "./screenConfig";
+import { combineSources, describeSource, slicePosition, periodDays, type ScreenConfig, type ScreenMetric, type ScreenedStock, type SourceMode, type StockSource } from "./screenConfig";
+import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { StrategyError } from "./store";
 
 export * from "./screenConfig";
@@ -79,3 +80,72 @@ export async function runScreen(cfg: ScreenConfig, userId: string): Promise<Scre
     .sort((a, b) => b.value - a.value);
   return slicePosition(ranked, cfg.position, cfg.count);
 }
+
+export interface SourceResult {
+  items: Array<ScreenedStock & { tags: number[] }>;
+  /** 每個來源各選出幾檔（-1＝這個來源失敗） */
+  counts: number[];
+  labels: string[];
+  errors: Array<{ index: number; message: string }>;
+}
+
+/**
+ * 執行多個股票來源並合併。單一來源失敗（例如成交量歷史還沒累積）不影響其他來源，錯誤另外回報。
+ * strategySources：遇到「依策略選股」時要展開成哪些來源（模擬倉傳入所選策略的篩選）。
+ */
+export async function runSources(
+  sources: StockSource[],
+  mode: SourceMode,
+  userId: string,
+  opts: { strategySources?: { sources: StockSource[]; mode: SourceMode } | null } = {},
+): Promise<SourceResult> {
+  const errors: SourceResult["errors"] = [];
+  const lists: ScreenedStock[][] = [];
+  for (let i = 0; i < sources.length; i++) {
+    try {
+      lists.push(await runOneSource(sources[i], userId, opts));
+    } catch (err) {
+      errors.push({ index: i, message: (err as Error).message });
+      lists.push([]);
+    }
+  }
+  const ok = lists.filter((_, i) => !errors.some((e) => e.index === i));
+  // 交集時，失敗的來源不參與（否則整個交集一定是空的）；聯集照常
+  const combined = mode === "intersect" ? combineSources(ok, "intersect") : combineSources(lists, "union");
+  // 交集用的是去掉失敗來源後的序號，要對回原本的序號
+  const okIndex = lists.map((_, i) => i).filter((i) => !errors.some((e) => e.index === i));
+  const items = mode === "intersect" ? combined.map((x) => ({ ...x, tags: x.tags.map((t) => okIndex[t]) })) : combined;
+  return {
+    items,
+    counts: lists.map((l, i) => (errors.some((e) => e.index === i) ? -1 : l.length)),
+    labels: sources.map(describeSource),
+    errors,
+  };
+}
+
+async function runOneSource(
+  src: StockSource,
+  userId: string,
+  opts: { strategySources?: { sources: StockSource[]; mode: SourceMode } | null },
+): Promise<ScreenedStock[]> {
+  if (src.source === "all") {
+    // 全市場：台股當天有成交的股票，依成交量排序（模擬倉掃描有時間上限，量大的先掃）
+    return (await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" }))
+      .filter((i) => i.volume > 0)
+      .map((i) => ({ symbol: i.symbol, market: "TW" as const, name: i.name }));
+  }
+  if (src.source === "list") {
+    await Promise.race([ensureTwUniverseWarm().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
+    return src.symbols.map((symbol) => {
+      const market = /^[0-9]/.test(symbol) ? ("TW" as const) : ("US" as const);
+      return { symbol, market, name: (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol };
+    });
+  }
+  if (src.source === "strategy") {
+    const st = opts.strategySources;
+    if (!st || st.sources.length === 0) throw new StrategyError("所選策略沒有設定股票篩選，「依策略選股」選不出股票");
+    return (await runSources(st.sources, st.mode, userId)).items.map(({ symbol, market, name }) => ({ symbol, market, name }));
+  }
+  return runScreen(src, userId);
+}
+

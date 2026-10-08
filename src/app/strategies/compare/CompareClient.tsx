@@ -145,11 +145,11 @@ export default function CompareClient() {
               帶入關注清單
             </button>
           </div>
-          {(strategies.items ?? []).some((s) => s.config.screen) && (
+          {(strategies.items ?? []).some((s) => s.config.screens.length) && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-(--text-muted)">用策略的股票篩選帶入：</span>
               {(strategies.items ?? [])
-                .filter((s) => s.config.screen)
+                .filter((s) => s.config.screens.length)
                 .map((s) => (
                   <button
                     key={s.id}
