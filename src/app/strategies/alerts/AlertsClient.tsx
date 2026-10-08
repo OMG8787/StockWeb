@@ -7,7 +7,8 @@ import { ALERT_CONFIG_EVENT, ALERT_TEST_EVENT } from "@/components/strategy/Aler
 import { api, useList, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 import { getWatchlist } from "@/lib/watchlist";
-import { lineLabel, MAX_ALARMS, signalText, type AlarmSetting, type AlertItem } from "@/lib/strategy/alertFormat";
+import { lineLabel, MAX_ALARMS, signalText, type AlarmSetting, type AlertItem, type NamedSymbol } from "@/lib/strategy/alertFormat";
+import { ALERT_EVENTS_CHANGED, clearEvents, readEvents, type AlertEvent } from "@/lib/strategy/alertEvents";
 
 interface Config {
   symbols: string[];
@@ -15,13 +16,21 @@ interface Config {
   intervalSec: number;
   enabled: boolean;
   notifySell: boolean;
+  trackWatchlist: boolean;
+  trackAiPicks: boolean;
+  notifyListChanges: boolean;
   alarms: AlarmSetting[];
 }
 interface Check {
   at: string;
   marketOpen: boolean;
+  truncated?: boolean;
+  lists?: { watchlist: NamedSymbol[] | null; ai: NamedSymbol[] | null };
   items: Array<AlertItem & { error?: string }>;
 }
+
+const FROM_LABEL = { manual: "✍ 手動", watchlist: "⭐ 關注", ai: "🤖 AI 建議" } as const;
+const TONE_DOT = { buy: "var(--price-up)", sell: "var(--price-down)", info: "var(--accent)" } as const;
 
 const AI = { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）" };
 const INTERVALS = [5, 10, 15, 20, 30];
@@ -48,6 +57,17 @@ export default function AlertsClient() {
   const [check, setCheck] = useState<Check | null>(null);
   const [perm, setPerm] = useState<string>("default");
   const [open, setOpen] = useState(false);
+  const [events, setEvents] = useState<AlertEvent[]>([]);
+
+  useEffect(() => {
+    const load = () => setEvents(readEvents());
+    const t = setTimeout(load, 0);
+    window.addEventListener(ALERT_EVENTS_CHANGED, load);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener(ALERT_EVENTS_CHANGED, load);
+    };
+  }, []);
 
   useEffect(() => {
     api<{ config: Config }>("/api/strategy/alerts")
@@ -113,8 +133,11 @@ export default function AlertsClient() {
     cfg.alarms.length < MAX_ALARMS &&
     setCfg({ ...cfg, alarms: [...cfg.alarms, { id: `A${time.replace(":", "")}x${cfg.alarms.length}`, time, label, days: "weekdays", withSignals: true, enabled: true }] });
 
+  const trackedSummary = cfg
+    ? [cfg.symbols.length ? `手動 ${cfg.symbols.length} 檔` : "", cfg.trackWatchlist ? "我的關注清單" : "", cfg.trackAiPicks ? "AI 今日建議名單" : ""].filter(Boolean).join("＋") || "未選追蹤名單"
+    : "";
   const summary = cfg
-    ? `策略訊號提醒：${cfg.enabled ? `開啟（${cfg.symbols.length} 檔 × ${cfg.strategyIds.length} 個策略，每 ${cfg.intervalSec} 秒）` : "關閉"}・定時提醒：${
+    ? `策略訊號提醒：${cfg.enabled ? `開啟（${trackedSummary}，${cfg.strategyIds.length} 個策略，每 ${cfg.intervalSec} 秒）` : "關閉"}・定時提醒：${
         cfg.alarms.filter((a) => a.enabled).map((a) => a.time).join("、") || "無"
       }`
     : "";
@@ -213,13 +236,30 @@ export default function AlertsClient() {
               {/* ③ 策略訊號提醒 */}
               <div className="space-y-3">
                 <h2 className="font-semibold">③ 📈 策略訊號提醒（有買點立即通知）</h2>
-                <div className="space-y-1">
-                  <div className="text-sm font-medium">追蹤名單（最多 20 檔）</div>
-                  <div className="flex flex-wrap gap-2">
-                    <input value={symbolsText} onChange={(e) => setSymbolsText(e.target.value)} placeholder="代號，例如 2330, 3370" className={`${inputCls} !w-auto flex-1`} />
-                    <button type="button" className={`${btnGhost} text-xs`} onClick={() => setSymbolsText(getWatchlist().slice(0, 20).map((w) => w.symbol).join(", "))}>
-                      帶入關注清單
-                    </button>
+                <div className="space-y-2">
+                  <div className="text-sm font-medium">追蹤哪些股票（可複選，合計最多 30 檔）</div>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-1" checked={cfg.trackWatchlist} onChange={(e) => setCfg({ ...cfg, trackWatchlist: e.target.checked })} />
+                    <span>
+                      ⭐ 我的關注清單
+                      <span className="block text-xs text-(--text-muted)">隨關注清單同步：新增關注就自動開始追蹤、移出關注就停止，並通知你</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-1" checked={cfg.trackAiPicks} onChange={(e) => setCfg({ ...cfg, trackAiPicks: e.target.checked })} />
+                    <span>
+                      🤖 AI 今日建議名單
+                      <span className="block text-xs text-(--text-muted)">本站每天挑出的建議買進名單：每天第一次通知今天有哪幾檔，之後 AI 新增或移出建議也會通知</span>
+                    </span>
+                  </label>
+                  <div className="space-y-1">
+                    <div className="text-sm">✍ 手動輸入（另外加）</div>
+                    <div className="flex flex-wrap gap-2">
+                      <input value={symbolsText} onChange={(e) => setSymbolsText(e.target.value)} placeholder="代號，例如 2330, 2317" className={`${inputCls} !w-auto flex-1`} />
+                      <button type="button" className={`${btnGhost} text-xs`} onClick={() => setSymbolsText(getWatchlist().slice(0, 30).map((w) => w.symbol).join(", "))} title="把目前關注清單複製成手動名單（之後不會跟著變；想隨時同步請勾上面的「我的關注清單」）">
+                        複製目前關注清單
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-1">
@@ -252,6 +292,10 @@ export default function AlertsClient() {
                     <input type="checkbox" checked={cfg.notifySell} onChange={(e) => setCfg({ ...cfg, notifySell: e.target.checked })} />
                     賣出訊號也通知
                   </label>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={cfg.notifyListChanges} onChange={(e) => setCfg({ ...cfg, notifyListChanges: e.target.checked })} />
+                    名單異動也通知（新增關注、AI 新增／移出建議）
+                  </label>
                   <label className="flex items-center gap-2 font-medium">
                     <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} />
                     開啟策略訊號提醒
@@ -269,9 +313,39 @@ export default function AlertsClient() {
         </>
       )}
 
-      {cfg && cfg.symbols.length > 0 && (
+      {/* 今日事件：通知被關掉或錯過也能回頭看（存在這台裝置的瀏覽器） */}
+      {cfg && (
+        <section className={`${cardCls} space-y-2`}>
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">📋 最近事件（{events.length}）</h2>
+            {events.length > 0 && (
+              <button type="button" className={`${btnGhost} text-xs`} onClick={clearEvents}>
+                清除
+              </button>
+            )}
+          </div>
+          {events.length === 0 ? (
+            <p className="text-xs text-(--text-muted)">還沒有事件。策略出現買賣訊號、關注清單或 AI 建議名單有異動、鬧鐘響起時，都會記在這裡（最近 3 天，只存在這台裝置）。</p>
+          ) : (
+            <ul className="max-h-72 space-y-1.5 overflow-y-auto text-sm">
+              {events.map((e, i) => (
+                <li key={`${e.at}-${i}`} className="flex gap-2 border-b border-(--gridline) pb-1.5 last:border-0">
+                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: TONE_DOT[e.tone] }} />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{e.title}</span>
+                    {e.body && <span className="block whitespace-pre-line text-xs text-(--text-secondary)">{e.body}</span>}
+                    <span className="block text-xs text-(--text-muted)">{new Date(e.at).toLocaleString("zh-TW", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
+      {(check?.items.length ?? cfg?.symbols.length ?? 0) > 0 && (
         <section className={cardCls}>
-          <OrderBookPanel symbols={cfg.symbols} title="📊 追蹤名單的即時五檔" />
+          <OrderBookPanel symbols={check?.items.length ? check.items.map((i) => i.symbol) : (cfg?.symbols ?? [])} title="📊 追蹤名單的即時五檔" />
         </section>
       )}
 
@@ -280,13 +354,16 @@ export default function AlertsClient() {
           <h2 className="font-semibold">
             目前訊號 <span className="text-xs font-normal text-(--text-muted)">（{new Date(check.at).toLocaleTimeString("zh-TW")} 檢查，{check.marketOpen ? "盤中" : "非交易時段，每 5 分鐘檢查"}）</span>
           </h2>
-          {check.items.length === 0 && <p className="text-sm text-(--text-muted)">追蹤名單或策略是空的。</p>}
+          {check.items.length === 0 && <p className="text-sm text-(--text-muted)">追蹤名單或策略是空的（沒選策略時只會通知名單異動）。</p>}
+          {check.truncated && <p className="text-xs text-(--price-up)">追蹤名單合計超過 30 檔，只檢查前 30 檔（手動輸入優先，其次關注清單、AI 建議）。</p>}
+          {check.lists?.ai === null && <p className="text-xs text-(--text-muted)">AI 今日建議名單暫時讀不到，這次略過（不會誤報成全部移出）。</p>}
           <div className="grid gap-2 sm:grid-cols-2">
             {check.items.map((it) => (
               <div key={it.symbol} className={`${cardCls} !p-3 text-sm ${it.allBuy ? "!border-(--price-up)" : ""}`}>
                 <div className="flex items-center justify-between">
                   <span className="font-medium">
                     {it.symbol} {it.name !== it.symbol && it.name}
+                    {it.from && it.from.length > 0 && <span className="ml-2 text-[11px] font-normal text-(--text-muted)">{it.from.map((f) => FROM_LABEL[f]).join("・")}</span>}
                   </span>
                   <span>{it.price ?? "—"}</span>
                 </div>

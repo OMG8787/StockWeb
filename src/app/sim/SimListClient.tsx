@@ -21,6 +21,7 @@ export default function SimListClient() {
       {creating ? (
         <SimForm
           strategies={strategies.items ?? []}
+          strategiesLoading={strategies.items === null && !strategies.error}
           onCancel={() => setCreating(false)}
           onSaved={async () => {
             setCreating(false);

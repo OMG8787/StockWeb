@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { diffAlerts, dueAlarms, formatAlert, hasSignal, taipeiClock, type AlarmSetting, type AlertItem, type AlertNotice } from "@/lib/strategy/alertFormat";
+import { diffAlerts, diffLists, dueAlarms, formatAlert, hasSignal, taipeiClock, type AlarmSetting, type AlertItem, type AlertNotice, type ListState, type NamedSymbol } from "@/lib/strategy/alertFormat";
+import { recordEvents } from "@/lib/strategy/alertEvents";
 
 /**
  * 即時提醒（2026-10-08 使用者要求「名單 10～30 秒追蹤一次，碰到策略買賣訊號就跳全站通知」，
@@ -20,6 +21,7 @@ export const ALERT_CONFIG_EVENT = "stockradar:alert-config-changed";
 export const ALERT_TEST_EVENT = "stockradar:alert-test";
 const STATE_KEY = "sw_alert_state";
 const FIRED_KEY = "sw_alarm_fired";
+const LISTS_KEY = "sw_alert_lists";
 const CLOSED_INTERVAL_SEC = 300;
 const ALARM_TICK_MS = 20_000;
 
@@ -27,6 +29,7 @@ interface CheckResult {
   at: string;
   marketOpen: boolean;
   items: AlertItem[];
+  lists?: { watchlist: NamedSymbol[] | null; ai: NamedSymbol[] | null };
 }
 interface Toast extends AlertNotice {
   id: string;
@@ -37,8 +40,14 @@ interface Config {
   symbols: string[];
   strategyIds: string[];
   notifySell: boolean;
+  trackWatchlist: boolean;
+  trackAiPicks: boolean;
+  notifyListChanges: boolean;
   alarms: AlarmSetting[];
 }
+
+/** 有沒有任何要追蹤的股票來源（手動輸入、關注清單、AI 建議名單） */
+const hasTargets = (c: Config) => c.symbols.length > 0 || c.trackWatchlist || c.trackAiPicks;
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -85,6 +94,7 @@ export default function AlertWatcher() {
 
     function notify(list: AlertNotice[]) {
       if (list.length === 0) return;
+      recordEvents(list);
       const withId = list.map((t, i) => ({ ...t, id: `${Date.now()}-${i}-${Math.random()}` }));
       setToasts((prev) => [...withId, ...prev].slice(0, 6));
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
@@ -101,11 +111,17 @@ export default function AlertWatcher() {
     async function tick() {
       if (stopped) return;
       let wait = 60;
-      if (cfg?.enabled && cfg.symbols.length && cfg.strategyIds.length) {
+      if (cfg?.enabled && hasTargets(cfg) && (cfg.strategyIds.length || cfg.notifyListChanges)) {
         const data = await fetchCheck();
         if (data) {
           const { next, notices } = diffAlerts(readJson(STATE_KEY, {}), data.items, cfg.notifySell);
           writeJson(STATE_KEY, next);
+          // 名單異動（新增／移出關注、AI 新增／移出建議）
+          if (cfg.notifyListChanges && data.lists) {
+            const r = diffLists(readJson<ListState>(LISTS_KEY, {}), data.lists, taipeiClock().day);
+            writeJson(LISTS_KEY, r.next);
+            notices.unshift(...r.notices);
+          }
           notify(notices);
           window.dispatchEvent(new CustomEvent("stockradar:alert-checked", { detail: data }));
           wait = data.marketOpen ? cfg.intervalSec : CLOSED_INTERVAL_SEC;
@@ -123,7 +139,7 @@ export default function AlertWatcher() {
         const day = taipeiClock().day;
         // 先記下「今天響過」再去抓訊號，避免抓資料期間下一輪又響一次；只留今天的紀錄
         writeJson(FIRED_KEY, [...[...fired].filter((k) => k.endsWith(day)), ...due.map((a) => `${a.id}|${day}`)]);
-        const needSignals = due.some((a) => a.withSignals) && cfg && cfg.symbols.length && cfg.strategyIds.length;
+        const needSignals = due.some((a) => a.withSignals) && cfg && hasTargets(cfg) && cfg.strategyIds.length;
         const data = needSignals ? await fetchCheck() : null;
         for (const a of due) {
           const list: AlertNotice[] = [{ title: `⏰ ${a.time} ${a.label || "定時提醒"}`, body: "", tone: "info" }];

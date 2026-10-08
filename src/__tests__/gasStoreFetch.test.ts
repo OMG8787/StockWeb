@@ -62,7 +62,7 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
   it("一直 404 就回報錯誤", async () => {
     const g = fakeGas({ fail404: 99 });
     vi.stubGlobal("fetch", g.fetchMock);
-    await expect(getStore().batch([{ op: "append", table: "Indicators", row: { ID: "I" } }])).rejects.toThrow("404");
+    await expect(getStore().batch([{ op: "append", table: "Indicators", row: { ID: "I" } }])).rejects.toThrow("重新整理");
   });
 
   /** 模擬 Apps Script 排不到鎖：前 n 次回「Lock timeout」，之後成功 */
@@ -96,7 +96,7 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     const err = await getStore().batch([{ op: "update", table: "Users", key: "1", patch: { Name: "x" } }]).catch((e: Error) => e);
     expect((err as Error).message).toContain("比較忙");
     expect((err as Error).message).not.toMatch(/Lock timeout|aborted/i);
-    expect(g.posts()).toBe(2);
+    expect(g.posts()).toBe(3); // 原本一次＋最多重送兩次（實際上每次等鎖要 20 秒，時間預算會讓第二次重送被略過）
   });
 
   it("讀取失敗但這台伺服器有舊資料：先用舊資料；寫入過的表不會拿到舊資料", async () => {
@@ -126,5 +126,57 @@ describe("GasStore：Google 轉址與 404 重取、讀取暫存", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /**
+   * 模擬「結果網址只能讀一次」：每個 POST 的第一次 GET 依 firstGet 決定（"ok" 回真結果、"404" 回 404），
+   * 之後再讀同一個網址一律回 doGet 的健康檢查文字（真實 Google 的行為，2026-10-08 實測）。
+   */
+  function singleUseGas(firstGets: Array<"ok" | "404">, opts: { v?: number } = {}) {
+    const posts: Array<{ reqId: string; ops: Array<{ op: string }> }> = [];
+    let consumed = false;
+    let post = -1;
+    const fetchMock = vi.fn(async (_url: string, init?: { method?: string; body?: string }) => {
+      if (init?.method === "POST") {
+        post++;
+        consumed = false;
+        posts.push(JSON.parse(init.body!));
+        return new Response(null, { status: 302, headers: { location: "https://script.googleusercontent.com/echo?x=1" } });
+      }
+      if (consumed) return new Response(JSON.stringify({ success: true, data: "StockRadar 帳號資料庫運作中" }), { status: 200 });
+      consumed = true;
+      if (firstGets[post] === "404") return new Response("Not Found", { status: 404 });
+      return new Response(JSON.stringify({ success: true, data: posts[post].ops.map(() => true), ...(opts.v ? { v: opts.v } : {}) }), { status: 200 });
+    });
+    return { fetchMock, posts };
+  }
+
+  it("結果遺失（取到健康檢查文字）：純讀取與重複執行也沒差的寫入會用同一個 reqId 重送", async () => {
+    const g = singleUseGas(["404", "ok"]);
+    vi.stubGlobal("fetch", g.fetchMock);
+    const r = await getStore().batch([{ op: "update", table: "Sims", key: "S1", patch: { Cash: "1" } }]);
+    expect(r).toEqual([true]);
+    expect(g.posts).toHaveLength(2);
+    expect(g.posts[1].reqId).toBe(g.posts[0].reqId);
+  });
+
+  it("結果遺失且批次含 append、Apps Script 是舊版：不重送（避免重複新增），回中文訊息", async () => {
+    const g = singleUseGas(["404", "ok"]);
+    vi.stubGlobal("fetch", g.fetchMock);
+    const err = await getStore().batch([{ op: "append", table: "SimTrades", row: { ID: "T1" } }]).catch((e: Error) => e);
+    expect(g.posts).toHaveLength(1);
+    expect((err as Error).message).toContain("可能已經完成");
+    expect((err as Error).message).not.toMatch(/StockRadar|aborted|Lock timeout/i);
+  });
+
+  it("Apps Script v2（有結果暫存）：含 append 的批次結果遺失也能用同 reqId 安全重送", async () => {
+    const g = singleUseGas(["ok", "404", "ok"], { v: 2 });
+    vi.stubGlobal("fetch", g.fetchMock);
+    const store = getStore();
+    await store.batch([{ op: "update", table: "Sims", key: "S1", patch: { Cash: "1" } }]); // 先學到 v2
+    const r = await store.batch([{ op: "append", table: "SimTrades", row: { ID: "T1" } }]);
+    expect(r).toEqual([true]);
+    expect(g.posts).toHaveLength(3);
+    expect(g.posts[2].reqId).toBe(g.posts[1].reqId);
   });
 });

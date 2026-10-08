@@ -97,6 +97,7 @@ class FakeSheet {
 function loadGas() {
   const sheets: FakeSheet[] = [new FakeSheet("工作表1")];
   const props = new Map<string, string>();
+  const cache = new Map<string, string>();
   const ss = {
     getSheetByName: (n: string) => sheets.find((s) => s.name === n) ?? null,
     insertSheet: (n: string) => {
@@ -116,6 +117,7 @@ function loadGas() {
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }), getDocumentLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     ContentService: { createTextOutput: (t: string) => ({ setMimeType: () => t }), MimeType: { JSON: "json" } },
     Utilities: { getUuid: () => crypto.randomUUID() },
+    CacheService: { getScriptCache: () => ({ get: (k: string) => cache.get(k) ?? null, put: (k: string, v: string) => void cache.set(k, v) }) },
   });
   vm.runInContext(fs.readFileSync(path.resolve(import.meta.dirname, "../../gas/Code.gs"), "utf8"), ctx);
   const gas = ctx as unknown as { setup(): void; doPost(e: unknown): string; doGet(): string };
@@ -157,7 +159,7 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
     expect(bad.success).toBe(false);
     // 符合命名規則的新表名稱會自動建立（之後加功能不必改 Apps Script）
     const ok = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "FutureTable" }] }) } }));
-    expect(ok).toEqual({ success: true, data: [[]] });
+    expect(ok).toMatchObject({ success: true, data: [[]] });
   });
 
   it("透過試算表跑完整流程：建管理員、開帳號、登入、改權限、停用、強制登出", async () => {
@@ -275,5 +277,20 @@ describe("gas/Code.gs ＋ GasStore 整合", () => {
     await store.batch([{ op: "deleteWhere", table: "RatingLog", col: "Key", values: ["k1"] }]);
     const [left] = (await store.batch([{ op: "read", table: "RatingLog" }])) as Array<Array<Record<string, string>>>;
     expect(left.map((r) => r.Key)).toEqual(["k2"]);
+  });
+
+  it("同一個 reqId 重送寫入：直接回上次的結果、不會重複新增（結果遺失後安全重送）", () => {
+    const send = (reqId: string) =>
+      JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, reqId, ops: [{ op: "append", table: "Indicators", row: { ID: "IN1", Name: "x" } }] }) } }));
+    const first = send("req-0000000001");
+    const again = send("req-0000000001");
+    expect(again).toEqual(first);
+    expect(first.v).toBeGreaterThanOrEqual(2);
+    const rows = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "Indicators" }] }) } }));
+    expect(rows.data[0]).toHaveLength(1); // 只有一列
+    // 不同 reqId 才是新請求
+    send("req-0000000002");
+    const rows2 = JSON.parse(env.gas.doPost({ postData: { contents: JSON.stringify({ secret: env.secret, ops: [{ op: "read", table: "Indicators" }] }) } }));
+    expect(rows2.data[0]).toHaveLength(2);
   });
 });

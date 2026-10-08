@@ -112,8 +112,37 @@ const COLUMN_NOTES = {
 // ============================================================
 // 進入點
 // ============================================================
+// 協定版本：2＝寫入結果會依 reqId 暫存 10 分鐘（見 doPost）。Next.js 看到 v>=2 才敢在結果遺失時重送寫入。
+const GAS_PROTOCOL = 2;
+const REPLAY_TTL_SEC = 600;
+const REPLAY_MAX_CHARS = 90000;
+
 function doGet() {
-    return json_({ success: true, data: 'StockRadar 帳號資料庫運作中' });
+    return json_({ success: true, data: 'StockRadar 帳號資料庫運作中', v: GAS_PROTOCOL });
+}
+
+/**
+ * 寫入結果暫存：Google 回傳結果的網址只能讀一次，讀失敗（404、逾時）後再讀只會拿到 doGet 的回應，
+ * 那筆寫入其實已經執行了。Next.js 每個請求帶一個 reqId，結果遺失時用同一個 reqId 重送，
+ * 這裡直接回上次的結果、不會重複執行（2026-10-08 使用者操作時看到「格式不正確（回應開頭：StockRadar 帳號資料庫運作中）」）。
+ */
+function replayKey_(reqId) {
+    return 'r:' + reqId;
+}
+function replayGet_(reqId) {
+    try {
+        return CacheService.getScriptCache().get(replayKey_(reqId));
+    } catch (err) {
+        return null;
+    }
+}
+function replayPut_(reqId, text) {
+    if (text.length > REPLAY_MAX_CHARS) return;
+    try {
+        CacheService.getScriptCache().put(replayKey_(reqId), text, REPLAY_TTL_SEC);
+    } catch (err) {
+        // 暫存失敗不影響這次寫入
+    }
 }
 
 function doPost(e) {
@@ -135,13 +164,21 @@ function doPost(e) {
     // 背景紀錄（評等紀錄、模型統計…）用「文件鎖」，帳號／登入／策略等用「程式鎖」：兩把鎖互相獨立，
     // 背景紀錄一次湧入很多寫入時，不會讓登入排不到鎖（2026-10-08 實際發生 Lock timeout）。
     const readOnly = ops.every(op => op.op === 'read' || op.op === 'readKeys');
+    const reqId = /^[A-Za-z0-9_-]{8,64}$/.test(String(req.reqId || '')) ? String(req.reqId) : '';
     const background = ops.every(op => BACKGROUND_TABLES[String(op.table)]);
     const lock = readOnly ? null : background ? LockService.getDocumentLock() : LockService.getScriptLock();
     try {
         if (lock) lock.waitLock(20000);
+        // 拿到鎖之後才查暫存：原本那次還在執行時，重送的請求會排在它後面，之後直接拿到它的結果
+        if (reqId && !readOnly) {
+            const hit = replayGet_(reqId);
+            if (hit) return raw_(hit);
+        }
         const results = ops.map(runOp_);
         if (!readOnly) SpreadsheetApp.flush();
-        return json_({ success: true, data: results });
+        const out = JSON.stringify({ success: true, data: results, v: GAS_PROTOCOL });
+        if (reqId && !readOnly) replayPut_(reqId, out);
+        return raw_(out);
     } catch (err) {
         console.error(err && err.stack ? err.stack : err);
         return json_({ success: false, message: '系統錯誤：' + (err && err.message ? err.message : err) });
@@ -335,6 +372,10 @@ function writeRow_(sheet, rowNum, patch) {
         if (Object.prototype.hasOwnProperty.call(patch, h)) values[i] = patch[h] == null ? '' : String(patch[h]);
     });
     range.setValues([values]);
+}
+
+function raw_(text) {
+    return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
 }
 
 function json_(obj) {

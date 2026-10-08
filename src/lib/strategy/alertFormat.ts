@@ -21,6 +21,8 @@ export interface AlertItem {
   name: string;
   price: number | null;
   allBuy: boolean;
+  /** 這檔來自哪些追蹤名單（手動／關注清單／AI 建議） */
+  from?: Array<"manual" | "watchlist" | "ai">;
   lines: AlertLine[];
 }
 
@@ -83,6 +85,63 @@ export function diffAlerts(
       else if (l.current === "sell" && notifySell && key in prev && fresh !== "buy") fresh = "sell";
     }
     if (fresh) notices.push({ ...formatAlert(it), tone: fresh });
+  }
+  return { next, notices };
+}
+
+// ============================================================
+// 名單異動（關注清單、AI 今日建議名單）
+// ============================================================
+
+export interface NamedSymbol {
+  symbol: string;
+  name: string;
+}
+
+/** 上一次看到的名單（存在瀏覽器；沒有就是第一次） */
+export interface ListState {
+  watchlist?: string[];
+  ai?: string[];
+  /** 已經發過「今日 AI 建議名單」摘要的日期（台北） */
+  aiSummaryDay?: string;
+}
+
+const label = (x: NamedSymbol) => (x.name && x.name !== x.symbol ? `${x.symbol} ${x.name}` : x.symbol);
+
+/**
+ * 比對名單異動。lists 的某一邊是 null＝這次沒勾選或暫時讀不到：略過、不更新（不能誤報成全部被移出）。
+ * - 關注清單：第一次只記錄；之後新增／移出各通知一則。
+ * - AI 今日建議名單：每天第一次有名單時發一則摘要（今天有哪幾檔）；之後有新增／移出各通知一則。
+ */
+export function diffLists(
+  prev: ListState,
+  lists: { watchlist: NamedSymbol[] | null; ai: NamedSymbol[] | null },
+  day: string,
+): { next: ListState; notices: AlertNotice[] } {
+  const next: ListState = { ...prev };
+  const notices: AlertNotice[] = [];
+  const changes = (before: string[], now: NamedSymbol[]) => ({
+    added: now.filter((x) => !before.includes(x.symbol)),
+    removed: before.filter((s) => !now.some((x) => x.symbol === s)),
+  });
+  if (lists.watchlist) {
+    if (prev.watchlist) {
+      const { added, removed } = changes(prev.watchlist, lists.watchlist);
+      for (const x of added) notices.push({ title: `⭐ 新增關注：${label(x)}`, body: "已加入追蹤名單，開始檢查這檔的策略訊號", tone: "info" });
+      for (const s of removed) notices.push({ title: `⭐ 移出關注：${s}`, body: "已從追蹤名單移除", tone: "info" });
+    }
+    next.watchlist = lists.watchlist.map((x) => x.symbol);
+  }
+  if (lists.ai) {
+    if (lists.ai.length > 0 && prev.aiSummaryDay !== day) {
+      notices.push({ title: `🤖 今日 AI 建議名單（${lists.ai.length} 檔）`, body: lists.ai.map(label).join(String.fromCharCode(10)), tone: "info" });
+      next.aiSummaryDay = day;
+    } else if (prev.ai) {
+      const { added, removed } = changes(prev.ai, lists.ai);
+      for (const x of added) notices.push({ title: `🤖 AI 新增建議：${label(x)}`, body: "本站今日建議名單新增這檔，已加入追蹤名單", tone: "info" });
+      for (const s of removed) notices.push({ title: `🤖 AI 移出建議：${s}`, body: "不在本站今日建議名單內了", tone: "info" });
+    }
+    next.ai = lists.ai.map((x) => x.symbol);
   }
   return { next, notices };
 }

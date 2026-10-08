@@ -304,6 +304,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 - **登入或儲存回「Lock timeout: another process was holding the lock for too long」**：大量背景紀錄寫入跟登入搶同一把 Apps Script 程式鎖；背景紀錄表要用文件鎖（Code.gs BACKGROUND_TABLES）、背景寫入要合併。新增背景紀錄表時記得加進 BACKGROUND_TABLES。→ 工作日誌 2026-10-08（下午，續），搜尋「Lock timeout」。
 
+- **「帳號資料庫錯誤：格式不正確（回應開頭：StockRadar 帳號資料庫運作中）」、儲存／下單偶發失敗**：Google 回傳 Apps Script 結果的轉址網址**只能讀一次**，第一次讀失敗（404、逾時）後再讀只會拿到 doGet 的健康檢查文字，但那筆寫入其實已執行。修法：Code.gs v2 依 reqId 暫存寫入結果 10 分鐘，GasStore 結果遺失時用同 reqId 重送（純讀取與無 append 的寫入對舊版 Apps Script 也安全重送；含 append 的批次只有學到 v2 才重送）。**需使用者重新部署 Apps Script**。→ 工作日誌 2026-10-08（深夜），搜尋「只能讀一次」。
 - **「帳號資料庫回應 404」（儲存時偶發）**：Apps Script 已執行，是 Google 轉址取結果那步偶發 404；GasStore 用 redirect: manual 自己取結果並重試，不可重送 POST（會重複寫入）。→ 工作日誌 2026-10-08（上午），搜尋「帳號資料庫回應 404」。
 - **Vercel 上的記憶體快取幾乎沒效果、第二次請求一樣慢**：每個請求常落在不同實例；要跨請求共用只能靠 Redis。→ 同上。
 
@@ -486,6 +487,18 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-08（深夜，續）：資料庫「結果只能讀一次」根因與結果暫存重送
+- 補驗 agent 下單時看到「格式不正確（回應開頭：{"success":true,"data":"StockRadar 帳號資料庫運作中"}）」，那是 doGet 的回應。實測（`scratchpad
+edirprobe.py`）：POST 後的結果轉址網址第一次 GET 回真結果，第二次起一律回 doGet 的健康檢查文字（結果網址單次有效）。所以先前「取結果 404 → 重取」的重試設計不成立：重取只會拿到假結果，寫入其實已執行、結果遺失，上層看到格式不正確（這也是 15:30 起一堆 503／逾時的可能成因之一）。
+- 修：Code.gs 加 reqId 結果暫存（CacheService 10 分鐘，拿到鎖後才查，v2）；`GasStore` 每個請求帶 reqId，讀到健康檢查文字視為「結果遺失」，在安全時用同 reqId 重送（最多 2 次、70 秒預算）；舊版 Apps Script 的含 append 批次不重送，回中文訊息。測試：單次有效網址模擬、v2 重送、Code.gs replay（718 測試通過）。
+- 補驗第二輪（agent，帳號 zzverify3）：修正複驗全過（手機點名詞停留、分頁標籤與新聞區無底線、錯誤訊息在按鈕旁）；策略新增編輯刪除、模擬倉建立／下單／賣出／刪除、疊圖十字線／手機點圖／五檔皆正確；未驗到提醒測試通知與指標頁（時限到）。抓到：下單時英文「格式不正確（回應開頭：…運作中）」＝上述根因；新增策略後列表不刷新＝各台伺服器的記憶體暫存沒被別台的寫入作廢（有共用暫存的表改為記憶體暫存只留 3 秒）；寫入逾時時訊息改成「可能已完成，請先重新整理確認再重按」避免重複新增；手機疊圖太小改為最小寬 620 可左右滑；新增模擬倉的策略下拉載入中顯示提示。
+- **待使用者：把新版 gas/Code.gs 整份貼進 Apps Script 並重新部署新版本**（沒部署前，行為等同「只對沒有 append 的寫入重送」，已比以前好）。部署後我再用正式站驗證。
+
+### 2026-10-08（深夜）：即時提醒可追蹤關注清單與 AI 建議名單、名單異動通知、最近事件
+- 使用者要求：追蹤名單不只手動輸入，也要能選「我的關注清單」與「AI 推薦清單」，新增關注、AI 新增追蹤都要跳通知，能隨時看到動向。
+- 實作：Alerts 表加 TrackWatchlist／TrackAiPicks／NotifyListChanges；`alertTargets.ts`（手動優先、關注、AI 合併去重，最多 30 檔；某名單讀不到回 null，前端不會誤報全部移出）；`alertFormat.diffLists`（關注清單新增／移出、AI 名單每天第一次發摘要、之後新增／移出）；`alertEvents.ts`＋提醒頁「最近事件」（localStorage 3 天 100 筆，通知被關掉也能回頭看）；每檔卡片標來源。順手修舊 bug：提醒頁寫最多 20 檔但 compareStrategies 只處理前 10 檔（現傳 maxSymbols）。
+- 驗證：714 測試（含 diffLists、resolveTracked、設定驗證）、build 通過；正式站驗證待補驗 agent 完成後再派。
 
 ### 2026-10-08（晚）：名詞說明、導覽下拉選單、資料庫錯誤訊息
 - 使用者要求：①更直覺、名詞滑鼠移過去看說明；②導覽列某列移過去顯示底下的頁面（例如模擬倉）；③查兩個錯誤訊息（「連線逾時：The operation was aborted due to timeout」「Lock timeout: another process was holding the lock」）；④全部做完逐個操作檢查。

@@ -7,7 +7,8 @@ import { getMarketStatus } from "@/lib/marketStatus";
 import { AI_STRATEGY_ID, AI_STRATEGY_NAME, consensusBuy, ratingSignal, strategySignalSeries, type Signal } from "./history";
 import { INDICATOR_TYPE_MAP, type IndicatorNeed } from "./indicatorCatalog";
 import { DataCache, needsOf, rangeFor, warmUniverseBriefly, type Target } from "./runner";
-import { listIndicators, listStrategies, prefetchStrategyTables, StrategyError } from "./store";
+import { ALERT_LIMITS, listIndicators, listStrategies, prefetchStrategyTables, StrategyError } from "./store";
+import { resolveTracked, type AlertTrackConfig, type TrackSource } from "./alertTargets";
 
 /**
  * 策略疊圖（2026-10-08 使用者要求）：選 1～10 檔股票、疊多個策略（含 AI 建議策略），
@@ -52,7 +53,7 @@ export async function compareStrategies(
   userId: string,
   rawSymbols: string[],
   strategyIds: string[],
-  opts: { days?: number; live?: boolean } = {},
+  opts: { days?: number; live?: boolean; maxSymbols?: number } = {},
 ): Promise<CompareRow[]> {
   const days = Math.min(COMPARE_DAYS, Math.max(5, opts.days ?? COMPARE_DAYS));
   await prefetchStrategyTables(userId);
@@ -63,7 +64,7 @@ export async function compareStrategies(
 
   await warmUniverseBriefly();
   const targets = [...new Set(rawSymbols.map((s) => s.trim()).filter(Boolean))]
-    .slice(0, MAX_COMPARE_SYMBOLS)
+    .slice(0, opts.maxSymbols ?? MAX_COMPARE_SYMBOLS)
     .map(toTarget)
     .filter((t): t is Target => !!t);
   if (targets.length === 0) throw new StrategyError("請輸入至少一檔股票代號");
@@ -140,22 +141,33 @@ export async function compareStrategies(
   return rows;
 }
 
-/** 即時提醒的一次檢查：名單裡每檔股票、每個策略「現在」的訊號（盤中用即時價補今天的日K） */
-export async function checkAlerts(userId: string, cfg: { symbols: string[]; strategyIds: string[] }) {
+/** 即時提醒的一次檢查：追蹤名單裡每檔股票、每個策略「現在」的訊號（盤中用即時價補今天的日K），並回傳名單來源與清單內容 */
+export async function checkAlerts(userId: string, cfg: AlertTrackConfig) {
   const marketOpen = getMarketStatus("TW") === "open" || getMarketStatus("US") === "open";
-  if (cfg.symbols.length === 0 || cfg.strategyIds.length === 0) return { at: new Date().toISOString(), marketOpen, items: [] };
-  const rows = await compareStrategies(userId, cfg.symbols, cfg.strategyIds, { days: 2, live: true });
+  const tracked = await resolveTracked(userId, cfg);
+  const base = { at: new Date().toISOString(), marketOpen, lists: tracked.lists, truncated: tracked.truncated, items: [] as AlertCheckItem[] };
+  if (tracked.symbols.length === 0 || cfg.strategyIds.length === 0) return base;
+  const rows = await compareStrategies(userId, tracked.symbols, cfg.strategyIds, { days: 2, live: true, maxSymbols: ALERT_LIMITS.maxSymbols });
   return {
-    at: new Date().toISOString(),
-    marketOpen,
+    ...base,
     items: rows.map((r) => ({
       symbol: r.symbol,
       name: r.name,
       price: r.closes.at(-1) ?? null,
       error: r.error,
       allBuy: r.lines.length > 0 && r.lines.every((l) => l.current === "buy"),
+      from: tracked.sources[r.symbol] ?? [],
       lines: r.lines.map((l) => ({ id: l.id, name: l.name, current: l.current, summary: l.summary })),
     })),
   };
 }
 
+export interface AlertCheckItem {
+  symbol: string;
+  name: string;
+  price: number | null;
+  error?: string;
+  allBuy: boolean;
+  from: TrackSource[];
+  lines: Array<{ id: string; name: string; current: Signal; summary: string }>;
+}

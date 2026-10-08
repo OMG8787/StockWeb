@@ -437,7 +437,7 @@ export async function persistSimResult(
 // 即時提醒設定（每個帳號一列，ID＝UserId）
 // ============================================================
 
-export const ALERT_LIMITS = { maxSymbols: 20, maxStrategies: 8, intervals: [5, 10, 15, 20, 30] as const };
+export const ALERT_LIMITS = { maxSymbols: 30, maxStrategies: 8, intervals: [5, 10, 15, 20, 30] as const };
 
 export interface AlertConfig {
   symbols: string[];
@@ -447,11 +447,16 @@ export interface AlertConfig {
   enabled: boolean;
   /** 賣出（AI 策略是「先不要買」）訊號也通知 */
   notifySell: boolean;
+  /** 追蹤名單另外包含：我的關注清單（隨關注清單變動）、AI 今日建議名單（本站每天挑出的建議買進） */
+  trackWatchlist: boolean;
+  trackAiPicks: boolean;
+  /** 名單異動也通知：新增／移出關注、AI 新增／移出建議 */
+  notifyListChanges: boolean;
   /** 定時提醒（鬧鐘） */
   alarms: AlarmSetting[];
 }
 
-const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, alarms: [] };
+const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, trackWatchlist: false, trackAiPicks: false, notifyListChanges: true, alarms: [] };
 
 export async function getAlertConfig(userId: string): Promise<AlertConfig> {
   const [rows] = (await getStore().batch([{ op: "read", table: "Alerts" }])) as Row[][];
@@ -463,6 +468,9 @@ export async function getAlertConfig(userId: string): Promise<AlertConfig> {
     intervalSec: (ALERT_LIMITS.intervals as readonly number[]).includes(Number(r.IntervalSec)) ? Number(r.IntervalSec) : 30,
     enabled: String(r.Enabled).toUpperCase() === "TRUE",
     notifySell: String(r.NotifySell ?? "TRUE").toUpperCase() !== "FALSE",
+    trackWatchlist: String(r.TrackWatchlist).toUpperCase() === "TRUE",
+    trackAiPicks: String(r.TrackAiPicks).toUpperCase() === "TRUE",
+    notifyListChanges: String(r.NotifyListChanges ?? "TRUE").toUpperCase() !== "FALSE",
     alarms: normalizeAlarms(parseJson<unknown[]>(r.Alarms, [])),
   };
 }
@@ -471,8 +479,13 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
   const symbols = [...new Set((Array.isArray(input.symbols) ? input.symbols : []).map((s) => text(s, 12).toUpperCase()).filter((s) => /^[A-Z0-9.]{1,12}$/.test(s)))].slice(0, ALERT_LIMITS.maxSymbols);
   const strategyIds = [...new Set((Array.isArray(input.strategyIds) ? input.strategyIds : []).map((s) => text(s, 40)).filter(Boolean))].slice(0, ALERT_LIMITS.maxStrategies);
   const intervalSec = (ALERT_LIMITS.intervals as readonly number[]).includes(Number(input.intervalSec)) ? Number(input.intervalSec) : 30;
-  const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true, notifySell: input.notifySell !== false, alarms: normalizeAlarms(input.alarms) };
-  if (cfg.enabled && (symbols.length === 0 || strategyIds.length === 0)) throw new StrategyError("開啟提醒前，請至少設定一檔股票和一個策略");
+  const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true, notifySell: input.notifySell !== false,
+    trackWatchlist: input.trackWatchlist === true, trackAiPicks: input.trackAiPicks === true, notifyListChanges: input.notifyListChanges !== false,
+    alarms: normalizeAlarms(input.alarms),
+  };
+  const hasTargets = symbols.length > 0 || cfg.trackWatchlist || cfg.trackAiPicks;
+  if (cfg.enabled && !hasTargets) throw new StrategyError("開啟提醒前，請至少選一種追蹤名單（手動輸入股票、我的關注清單，或 AI 今日建議名單）");
+  if (cfg.enabled && strategyIds.length === 0 && !cfg.notifyListChanges) throw new StrategyError("開啟提醒前，請至少選一個策略，或勾選「名單異動也通知」");
   await getStore().batch([
     {
       op: "upsert",
@@ -481,7 +494,8 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
         {
           ID: owner.userId, Account: owner.account, Symbols: JSON.stringify(symbols), StrategyIds: JSON.stringify(strategyIds),
           IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE",
-          NotifySell: cfg.notifySell ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), UpdatedAt: taipeiNow(),
+          NotifySell: cfg.notifySell ? "TRUE" : "FALSE", TrackWatchlist: cfg.trackWatchlist ? "TRUE" : "FALSE",
+          TrackAiPicks: cfg.trackAiPicks ? "TRUE" : "FALSE", NotifyListChanges: cfg.notifyListChanges ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), UpdatedAt: taipeiNow(),
         },
       ],
     },

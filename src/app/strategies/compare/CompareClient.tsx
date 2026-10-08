@@ -125,9 +125,11 @@ function OverlayChart({ row }: { row: Row }) {
         ))}
         {showConsensus && row.consensus[at] && <span className="font-semibold text-(--price-up)">✅ 全部同時買進</span>}
       </div>
+      {/* 手機上整張圖縮到 390 寬會小到看不清：圖至少 620 寬，窄螢幕可左右滑動看（觸控點一下仍可換日期） */}
+      <div className="overflow-x-auto">
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="w-full touch-pan-y select-none"
+        className="w-full min-w-[620px] touch-pan-x touch-pan-y select-none"
         role="img"
         aria-label={`${row.name} 策略訊號疊圖`}
         onPointerMove={pick}
@@ -175,6 +177,7 @@ function OverlayChart({ row }: { row: Row }) {
           </g>
         )}
       </svg>
+      </div>
       <div className="space-y-0.5 text-xs text-(--text-muted)">
         <div>
           每一排是一個策略每天的訊號：紅＝買進、綠＝賣出（AI 策略為「先不要買」）、淡灰＝不動作。

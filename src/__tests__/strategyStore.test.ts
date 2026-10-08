@@ -10,7 +10,7 @@ vi.mock("@/lib/data/universe", () => ({
 const {
   deleteIndicator, deleteSim, deleteStrategy, getSim, listIndicators, listSimHistory, listSims, listStrategies,
   persistSimResult, saveIndicator, saveSim, saveStrategy,
-  toSim,
+  toSim, getAlertConfig, saveAlertConfig,
 } = await import("@/lib/strategy/store");
 
 const amy = { userId: "U1", account: "amy" };
@@ -82,5 +82,14 @@ describe("參考指標／策略庫／模擬倉儲存", () => {
     expect(toSim({ ID: "b", Universe: "strategy" }).sources).toEqual([{ source: "strategy" }]);
     expect(toSim({ ID: "c", Universe: "list", Symbols: JSON.stringify([{ symbol: "2330" }]) }).sources).toEqual([{ source: "list", symbols: ["2330"] }]);
     expect(toSim({ ID: "d", Universe: "list", Symbols: "[]" }).sources).toEqual([]);
+  });
+
+  it("即時提醒設定：可只追蹤關注清單／AI 名單；沒有任何名單不能開啟；舊資料預設值", async () => {
+    expect(await getAlertConfig("U1")).toMatchObject({ trackWatchlist: false, trackAiPicks: false, notifyListChanges: true });
+    await expect(saveAlertConfig(amy, { enabled: true, strategyIds: ["ai"] })).rejects.toThrow("至少選一種追蹤名單");
+    await expect(saveAlertConfig(amy, { enabled: true, trackAiPicks: true, strategyIds: [], notifyListChanges: false })).rejects.toThrow("至少選一個策略");
+    const ok = await saveAlertConfig(amy, { enabled: true, trackWatchlist: true, trackAiPicks: true, strategyIds: [], symbols: [] });
+    expect(ok).toMatchObject({ enabled: true, trackWatchlist: true, trackAiPicks: true, notifyListChanges: true });
+    expect(await getAlertConfig("U1")).toMatchObject({ trackWatchlist: true, trackAiPicks: true, strategyIds: [] });
   });
 });

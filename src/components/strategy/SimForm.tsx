@@ -9,11 +9,14 @@ import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 export default function SimForm({
   sim,
   strategies,
+  strategiesLoading = false,
   onSaved,
   onCancel,
 }: {
   sim?: Sim;
   strategies: Strategy[];
+  /** 策略清單還在載入（下拉選單先顯示載入中，避免以為自己沒有策略） */
+  strategiesLoading?: boolean;
   onSaved: (s: Sim) => void;
   onCancel: () => void;
 }) {
@@ -53,7 +56,7 @@ export default function SimForm({
         <label className="block space-y-1 text-sm">
           <span>使用策略</span>
           <select value={strategyId} onChange={(e) => setStrategyId(e.target.value)} className={inputCls}>
-            <option value="">（不使用策略，只手動下單）</option>
+            <option value="">{strategiesLoading ? "（策略載入中…）" : "（不使用策略，只手動下單）"}</option>
             {strategies.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}

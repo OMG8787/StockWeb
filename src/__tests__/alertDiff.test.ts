@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffAlerts, dueAlarms, formatAlert, normalizeAlarms } from "@/lib/strategy/alertFormat";
+import { diffAlerts, diffLists, dueAlarms, formatAlert, normalizeAlarms } from "@/lib/strategy/alertFormat";
 
 const item = (a: "buy" | "sell" | null, b: "buy" | "sell" | null) => ({
   symbol: "2330",
@@ -62,5 +62,42 @@ describe("定時提醒（鬧鐘）", () => {
     expect(dueAlarms(alarms, new Set(), new Date("2026-10-08T00:40:00Z"))).toEqual([]); // 還沒到
     expect(dueAlarms(alarms, new Set(), new Date("2026-10-08T01:00:00Z"))).toEqual([]); // 超過 10 分鐘
     expect(dueAlarms(alarms, new Set(), new Date("2026-10-10T00:47:00Z"))).toEqual([]); // 週六
+  });
+});
+
+describe("名單異動（關注清單、AI 今日建議名單）", () => {
+  const n = (symbol: string, name = symbol) => ({ symbol, name });
+  const day = "2026-10-08";
+
+  it("關注清單：第一次只記錄；之後新增、移出各通知；讀不到（null）不動", () => {
+    let r = diffLists({}, { watchlist: [n("2330", "台積電")], ai: null }, day);
+    expect(r.notices).toEqual([]);
+    expect(r.next.watchlist).toEqual(["2330"]);
+    r = diffLists(r.next, { watchlist: [n("2330", "台積電"), n("2317", "鴻海")], ai: null }, day);
+    expect(r.notices.map((x) => x.title)).toEqual(["⭐ 新增關注：2317 鴻海"]);
+    r = diffLists(r.next, { watchlist: [n("2317", "鴻海")], ai: null }, day);
+    expect(r.notices.map((x) => x.title)).toEqual(["⭐ 移出關注：2330"]);
+    const kept = diffLists(r.next, { watchlist: null, ai: null }, day); // 暫時讀不到：不誤報全部移出
+    expect(kept.notices).toEqual([]);
+    expect(kept.next.watchlist).toEqual(["2317"]);
+  });
+
+  it("AI 建議名單：每天第一次發摘要，之後新增／移出各通知；隔天再發一次摘要", () => {
+    let r = diffLists({}, { watchlist: null, ai: [n("6285", "啟碁"), n("2313", "華通")] }, day);
+    expect(r.notices.map((x) => x.title)).toEqual(["🤖 今日 AI 建議名單（2 檔）"]);
+    expect(r.notices[0].body).toBe(["6285 啟碁", "2313 華通"].join(String.fromCharCode(10)));
+    r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁"), n("2313", "華通")] }, day);
+    expect(r.notices).toEqual([]); // 沒變化不重複通知
+    r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁"), n("4720", "德淵")] }, day);
+    expect(r.notices.map((x) => x.title)).toEqual(["🤖 AI 新增建議：4720 德淵", "🤖 AI 移出建議：2313"]);
+    r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁")] }, "2026-10-09");
+    expect(r.notices.map((x) => x.title)).toEqual(["🤖 今日 AI 建議名單（1 檔）"]); // 隔天重新摘要
+  });
+
+  it("AI 名單還是空的（今天還沒產生）不發摘要，等有名單才發", () => {
+    const r = diffLists({}, { watchlist: null, ai: [] }, day);
+    expect(r.notices).toEqual([]);
+    expect(r.next.aiSummaryDay).toBeUndefined();
+    expect(diffLists(r.next, { watchlist: null, ai: [n("2330")] }, day).notices.length).toBe(1);
   });
 });

@@ -76,12 +76,13 @@ export interface TableStore {
 }
 
 export class StoreUnavailableError extends Error {
-  constructor(message: string, readonly retryable = false, readonly lockTimeout = false) {
+  constructor(message: string, readonly retryable = false, readonly lockTimeout = false, readonly uncertain = false) {
     super(message);
   }
 }
 
 /** Apps Script 回的技術訊息 → 使用者看得懂的說明（原始訊息只留在伺服器紀錄） */
+const WRITE_UNCERTAIN_HINT = "試算表資料庫回應太慢，這個動作可能已經完成了——請先重新整理頁面確認；真的沒有成功再按一次（直接重按可能會重複新增）。";
 const BUSY_HINT = "試算表資料庫目前比較忙，請等幾秒再按一次（資料沒有遺失）";
 function friendlyStoreMessage(raw: string): string {
   if (/Lock timeout|另一個|holding the lock/i.test(raw)) return `${BUSY_HINT}。`;
@@ -100,15 +101,22 @@ const STALE_OK_MS = 10 * 60_000;
  * 只靠記憶體幾乎命中不了）。大表（登入紀錄、交易紀錄、回饋、每日淨值）不放，避免超過單筆大小上限。
  */
 const SHARED_CACHE_TABLES = new Set<TableName>(["Users", "Sessions", "Holdings", "Indicators", "Strategies", "Sims", "Alerts"]);
+/** 有共用暫存的表，各台伺服器自己的記憶體暫存最多留多久 */
+const LOCAL_SHARED_TTL_MS = 3_000;
 const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
 
 /** 取結果（Google 轉址後的網址）失敗時重試幾次 */
 const FETCH_RESULT_ATTEMPTS = 4;
 /** 排不到鎖時重送一次：第一次失敗得在這段時間內發生（Apps Script 等鎖最久 20 秒）才重送，避免整體拖太久 */
 const LOCK_RETRY_WITHIN_MS = 25_000;
-/** 重送那次最多等多久（整體最壞約 25＋1.5＋25 秒，不再拖到 70 秒以上） */
-const LOCK_RETRY_TIMEOUT_MS = 25_000;
 const LOCK_RETRY_GAP_MS = 1_500;
+/** 最多重送幾次、每次重送最多等多久、整體重送預算（第一次送出不算） */
+const MAX_RETRIES = 2;
+const RETRY_TIMEOUT_MS = 25_000;
+const RETRY_BUDGET_MS = 70_000;
+/** doGet 的健康檢查文字（Apps Script 的 doGet 回應；結果網址被讀第二次時就會拿到它） */
+const GAS_BANNER = "StockRadar 帳號資料庫運作中";
+const newReqId = () => crypto.randomUUID().replace(/-/g, "");
 
 /**
  * Google Apps Script 的回應流程：POST 執行程式 → 302 轉址到 script.googleusercontent.com 取結果。
@@ -122,13 +130,19 @@ const LOCK_RETRY_GAP_MS = 1_500;
 class GasStore implements TableStore {
   readonly kind = "gas" as const;
   private cache = new Map<TableName, { rows: Row[]; at: number }>();
+  /** 從 Apps Script 回應學到的協定版本（0＝還不知道／舊版） */
+  private protocol = 0;
   constructor(private url: string, private secret: string) {}
 
   async batch(ops: StoreOp[]): Promise<unknown[]> {
     const now = Date.now();
     const fresh = (t: TableName) => {
       const c = this.cache.get(t);
-      return c && now - c.at < READ_CACHE_MS ? c : null;
+      // 共用暫存的表：寫入只能作廢「這台」的記憶體暫存與共用暫存，別台伺服器的記憶體暫存沒辦法通知，
+      // 所以那些表的記憶體暫存只留幾秒、之後走共用暫存（寫入時已作廢）——否則新增完馬上重讀，
+      // 可能落在另一台拿到最多 60 秒前的舊列表（2026-10-08 驗證：新增策略後列表沒出現、要重整）。
+      const ttl = redis && SHARED_CACHE_TABLES.has(t) ? LOCAL_SHARED_TTL_MS : READ_CACHE_MS;
+      return c && now - c.at < ttl ? c : null;
     };
     if (ops.every((o) => o.op === "readKeys")) return this.sendWithRetry(ops, true);
     if (ops.every(isReadOp) && ops.some((o) => o.op === "readKeys")) {
@@ -204,26 +218,40 @@ class GasStore implements TableStore {
     if (redis && shared.length) await redis.del(...shared.map(sharedKey)).catch(() => {});
   }
 
+  /**
+   * 送出並在「安全的情況」下重送：
+   * - 排不到鎖（Lock timeout）：這批完全沒執行，直接重送。
+   * - 結果遺失（網路錯誤、取結果 404／5xx、取到 doGet 健康檢查文字）：Google 回結果的網址只能讀一次，
+   *   寫入其實可能已經執行。純讀取、或內容都是重複執行也沒差的寫入（沒有 append）、或 Apps Script 是 v2
+   *   （依 reqId 暫存結果，重送只會拿到上次結果、不會重複執行）才重送；否則回報錯誤，不冒重複新增的險。
+   */
   private async sendWithRetry(ops: StoreOp[], readOnly: boolean): Promise<unknown[]> {
+    const reqId = newReqId();
     const startedAt = Date.now();
-    try {
-      return await this.send(ops);
-    } catch (err) {
-      if (err instanceof StoreUnavailableError) {
-        // 純讀取在 POST 這一步就失敗（網路錯誤）可以整個重送；寫入不重送，避免重複寫入
-        if (readOnly && err.retryable) return this.send(ops);
-        // 「排不到鎖」＝這批寫入完全沒有執行，重送不會重複寫入；等一下別人寫完就排得到了
-        // （2026-10-08 使用者看到 Lock timeout：Apps Script 寫入實際上一筆接一筆處理，短時間湧入就會排隊超過 20 秒）
-        if (err.lockTimeout && Date.now() - startedAt < LOCK_RETRY_WITHIN_MS) {
-          await new Promise((r) => setTimeout(r, LOCK_RETRY_GAP_MS));
-          return this.send(ops, LOCK_RETRY_TIMEOUT_MS);
+    for (let attempt = 0; ; attempt++) {
+      const elapsed = Date.now() - startedAt;
+      try {
+        return await this.send(ops, attempt === 0 ? GAS_TIMEOUT_MS : Math.min(RETRY_TIMEOUT_MS, Math.max(8_000, RETRY_BUDGET_MS - elapsed)), reqId);
+      } catch (err) {
+        if (!(err instanceof StoreUnavailableError) || attempt >= MAX_RETRIES) throw err;
+        const lockRetry = err.lockTimeout && elapsed < LOCK_RETRY_WITHIN_MS;
+        const lostRetry = err.retryable && (readOnly || this.replaySafe(ops)) && elapsed < RETRY_BUDGET_MS - 8_000;
+        if (!lockRetry && !lostRetry) {
+          // 寫入「可能已經完成但沒收到確認」：請使用者先重新整理確認，不要直接再按（會重複新增）
+          if (!readOnly && (err.uncertain || err.retryable)) throw new StoreUnavailableError(WRITE_UNCERTAIN_HINT);
+          throw err;
         }
+        await new Promise((r) => setTimeout(r, LOCK_RETRY_GAP_MS));
       }
-      throw err;
     }
   }
 
-  private async send(ops: StoreOp[], timeoutMs = GAS_TIMEOUT_MS): Promise<unknown[]> {
+  /** 結果遺失時重送這批寫入會不會造成重複：Apps Script v2 有結果暫存；舊版只有沒有 append 才安全 */
+  private replaySafe(ops: StoreOp[]): boolean {
+    return this.protocol >= 2 || ops.every((o) => o.op !== "append");
+  }
+
+  private async send(ops: StoreOp[], timeoutMs = GAS_TIMEOUT_MS, reqId = newReqId()): Promise<unknown[]> {
     const signal = AbortSignal.timeout(timeoutMs);
     let res: Response;
     try {
@@ -231,13 +259,13 @@ class GasStore implements TableStore {
         method: "POST",
         // text/plain：Apps Script 網頁應用程式收 JSON 字串最穩定的方式
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ secret: this.secret, ops }),
+        body: JSON.stringify({ secret: this.secret, ops, reqId }),
         redirect: "manual",
         cache: "no-store",
         signal,
       });
     } catch (err) {
-      if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`);
+      if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`, false, false, true);
       console.error("[gas]", (err as Error).message);
       throw new StoreUnavailableError("連不上帳號資料庫（網路暫時有問題），請稍後再試一次。", true);
     }
@@ -248,11 +276,17 @@ class GasStore implements TableStore {
     }
     if (!res.ok) throw new StoreUnavailableError(`帳號資料庫回應 ${res.status}`, res.status === 404 || res.status >= 500);
     const bodyText = await res.text().catch(() => "");
-    let data: { success?: boolean; data?: unknown[]; message?: string } | null = null;
+    let data: { success?: boolean; data?: unknown; message?: string; v?: number } | null = null;
     try {
       data = JSON.parse(bodyText);
     } catch {
       data = null;
+    }
+    if (typeof data?.v === "number") this.protocol = Math.max(this.protocol, data.v);
+    // 讀到的是 doGet 的健康檢查文字：真正的結果網址已經被讀過（只能讀一次），這次的結果遺失了
+    if (data?.success && data.data === GAS_BANNER) {
+      console.error("[gas] 結果網址已被讀過，取到健康檢查回應，結果遺失");
+      throw new StoreUnavailableError(`${BUSY_HINT}（沒收到確認）。`, true, false, true);
     }
     if (!data?.success || !Array.isArray(data.data)) {
       // 回的不是 JSON（例如 Google 的錯誤網頁：同時執行太多、配額用完）：把開頭記下來才查得到原因
@@ -265,7 +299,7 @@ class GasStore implements TableStore {
       console.error("[gas]", msg);
       throw new StoreUnavailableError(friendlyStoreMessage(msg), false, /Lock timeout|holding the lock/i.test(msg));
     }
-    return data.data;
+    return data.data as unknown[];
   }
 
   private async fetchResult(url: string, signal: AbortSignal): Promise<Response> {
@@ -275,7 +309,7 @@ class GasStore implements TableStore {
         last = await fetch(url, { cache: "no-store", redirect: "follow", signal });
         if (last.ok || (last.status !== 404 && last.status < 500)) return last;
       } catch (err) {
-        if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`);
+        if (signal.aborted) throw new StoreUnavailableError(`${BUSY_HINT}（連線逾時）。`, false, false, true);
       }
       await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
     }
