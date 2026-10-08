@@ -39,7 +39,8 @@ const SEP = "§";
 /** 單一儲存格上限 50,000 字，留點餘裕 */
 const CHUNK = 45_000;
 const LOADED_MARK_SEC = 6 * 3600;
-const FLUSH_DELAY_MS = 50;
+/** 背景寫入合併的時間窗（評等一次算幾十檔時，合併成少數幾次請求，避免試算表寫入排隊塞車） */
+const FLUSH_DELAY_MS = 1500;
 
 type Kind = "s" | "h" | "l";
 
@@ -104,6 +105,31 @@ function background(p: Promise<unknown>) {
   }
 }
 
+/**
+ * 合併同一批裡的寫入：同一張表的 upsert 併成一個、同一 ID 只留最後一次的值；
+ * 遇到刪除就切段（刪除前後的順序不能顛倒）。
+ */
+export function compactOps(ops: StoreOp[]): StoreOp[] {
+  const out: StoreOp[] = [];
+  let upserts = new Map<TableName, Map<string, Row>>();
+  const flushUpserts = () => {
+    for (const [table, byId] of upserts) out.push({ op: "upsert", table, rows: [...byId.values()] });
+    upserts = new Map();
+  };
+  for (const op of ops) {
+    if (op.op === "upsert") {
+      const byId = upserts.get(op.table) ?? new Map<string, Row>();
+      for (const r of op.rows) byId.set(r.ID, r);
+      upserts.set(op.table, byId);
+    } else {
+      flushUpserts();
+      out.push(op);
+    }
+  }
+  flushUpserts();
+  return out;
+}
+
 let seq = 0;
 const listField = () => `${Date.now().toString().padStart(14, "0")}-${(seq++ % 1e6).toString().padStart(6, "0")}`;
 
@@ -156,7 +182,7 @@ export class DurableKv extends RuntimeKv {
     background(this.flushDone);
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
-      const batch = this.pending;
+      const batch = compactOps(this.pending);
       this.pending = [];
       // 照寫入順序送出（Apps Script 依序執行），「先寫再刪」不會被顛倒
       getStore()

@@ -113,7 +113,7 @@ function loadGas() {
     PropertiesService: {
       getScriptProperties: () => ({ getProperty: (k: string) => props.get(k) ?? null, setProperty: (k: string, v: string) => props.set(k, v) }),
     },
-    LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
+    LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }), getDocumentLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
     ContentService: { createTextOutput: (t: string) => ({ setMimeType: () => t }), MimeType: { JSON: "json" } },
     Utilities: { getUuid: () => crypto.randomUUID() },
   });

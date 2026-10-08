@@ -57,6 +57,9 @@ const TABLES = {
     SimNav: { key: 'ID', cols: ['ID', 'SimId', 'Day', 'Equity', 'Cash', 'IndexClose', 'UserId'] }
 };
 
+// 背景紀錄類的表（寫入用獨立的文件鎖，不跟登入搶）
+const BACKGROUND_TABLES = { RatingLog: 1, RatingConfirm: 1, Learning: 1, SimPortfolio: 1, BriefArchive: 1, ModelStats: 1, VolumeHistory: 1 };
+
 // 之後新增的資料表不必再改這支程式：名稱符合規則就接受，主鍵一律 ID、欄位依寫入資料自動建立
 const GENERIC_TABLE_NAME = /^[A-Z][A-Za-z0-9]{2,40}$/;
 
@@ -128,9 +131,12 @@ function doPost(e) {
     const ops = Array.isArray(req.ops) ? req.ops : [];
     if (!ops.length || ops.length > 300) return json_({ success: false, message: '操作數量錯誤' });
 
-    // 只有寫入需要排隊；純讀取不拿鎖，不必等別人的寫入完成
+    // 只有寫入需要排隊；純讀取不拿鎖，不必等別人的寫入完成。
+    // 背景紀錄（評等紀錄、模型統計…）用「文件鎖」，帳號／登入／策略等用「程式鎖」：兩把鎖互相獨立，
+    // 背景紀錄一次湧入很多寫入時，不會讓登入排不到鎖（2026-10-08 實際發生 Lock timeout）。
     const readOnly = ops.every(op => op.op === 'read' || op.op === 'readKeys');
-    const lock = readOnly ? null : LockService.getScriptLock();
+    const background = ops.every(op => BACKGROUND_TABLES[String(op.table)]);
+    const lock = readOnly ? null : background ? LockService.getDocumentLock() : LockService.getScriptLock();
     try {
         if (lock) lock.waitLock(20000);
         const results = ops.map(runOp_);

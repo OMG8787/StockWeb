@@ -94,3 +94,23 @@ describe("DurableKv：試算表壞掉時不影響功能", () => {
     expect(await kv.hget("rating-log:v1:2026-10-08", "x")).toBe(1);
   });
 });
+
+describe("背景寫入合併", async () => {
+  const { compactOps } = await import("@/lib/data/durableKv");
+  it("同一張表的 upsert 合併、同 ID 留最後一次；刪除不跟前後的寫入顛倒", () => {
+    const r = (id: string, v: string) => ({ ID: id, Key: id, Value: v });
+    const out = compactOps([
+      { op: "upsert", table: "RatingLog", rows: [r("a", "1")] },
+      { op: "upsert", table: "RatingLog", rows: [r("a", "2"), r("b", "1")] },
+      { op: "upsert", table: "ModelStats", rows: [r("m", "1")] },
+      { op: "deleteWhere", table: "RatingLog", col: "Key", values: ["a"] },
+      { op: "upsert", table: "RatingLog", rows: [r("a", "3")] },
+    ]);
+    expect(out).toEqual([
+      { op: "upsert", table: "RatingLog", rows: [r("a", "2"), r("b", "1")] },
+      { op: "upsert", table: "ModelStats", rows: [r("m", "1")] },
+      { op: "deleteWhere", table: "RatingLog", col: "Key", values: ["a"] },
+      { op: "upsert", table: "RatingLog", rows: [r("a", "3")] },
+    ]);
+  });
+});
