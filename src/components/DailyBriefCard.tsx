@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import BriefSkeleton from "./BriefSkeleton";
 import type { DailyBrief } from "@/lib/ai/brief";
 import { useFetchOnce } from "@/lib/useFetchOnce";
 import { clientRefreshMs } from "@/lib/autoRefresh";
@@ -62,7 +63,7 @@ export default function DailyBriefCard() {
           ) : brief ? (
             <MarkdownLite text={brief.text} />
           ) : (
-            <BriefSkeleton />
+            <BriefSkeleton lines={5} />
           )}
         </div>
         {brief && overflowing && !expanded && (
@@ -97,12 +98,3 @@ export default function DailyBriefCard() {
   );
 }
 
-function BriefSkeleton() {
-  return (
-    <div className="space-y-2 py-1">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="h-3.5 animate-pulse rounded bg-(--page-plane)" style={{ width: `${85 - i * 8}%` }} />
-      ))}
-    </div>
-  );
-}

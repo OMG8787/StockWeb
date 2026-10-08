@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BriefSkeleton from "./BriefSkeleton";
 import type { ActionBrief } from "@/lib/ai/actionBrief";
 import { formatLiveQuote, patchLiveQuotes } from "@/lib/ai/livePrice";
 import { getPollDecision, shouldRefreshSymbol } from "@/lib/pollingSchedule";
@@ -68,7 +69,7 @@ export default function ActionBriefCard() {
         ) : brief ? (
           <MarkdownLite text={shownText} />
         ) : (
-          <ActionBriefSkeleton />
+          <BriefSkeleton lines={4} />
         )}
       </div>
       <p className="mt-3 text-[13px] text-(--text-muted)">
@@ -85,12 +86,3 @@ export default function ActionBriefCard() {
   );
 }
 
-function ActionBriefSkeleton() {
-  return (
-    <div className="space-y-2 py-1">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <div key={i} className="h-3.5 animate-pulse rounded bg-(--page-plane)" style={{ width: `${85 - i * 8}%` }} />
-      ))}
-    </div>
-  );
-}
