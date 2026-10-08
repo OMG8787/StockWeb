@@ -16,6 +16,8 @@ import { recordEvents } from "@/lib/strategy/alertEvents";
  * 上一次的訊號與今天響過的鬧鐘記在 localStorage，重新整理不會重複通知。
  */
 
+/** 提醒頁「立即檢查一次」：叫全站的監看器馬上用同一套比對跑一次（訊號與名單異動都會通知、記進最近事件） */
+export const ALERT_CHECK_NOW_EVENT = "stockradar:alert-check-now";
 export const ALERT_CONFIG_EVENT = "stockradar:alert-config-changed";
 /** 提醒頁「送一則測試通知」用 */
 export const ALERT_TEST_EVENT = "stockradar:alert-test";
@@ -24,6 +26,7 @@ const FIRED_KEY = "sw_alarm_fired";
 const LISTS_KEY = "sw_alert_lists";
 const CLOSED_INTERVAL_SEC = 300;
 const ALARM_TICK_MS = 20_000;
+const TOAST_MS = 20_000;
 
 interface CheckResult {
   at: string;
@@ -97,6 +100,8 @@ export default function AlertWatcher() {
       recordEvents(list);
       const withId = list.map((t, i) => ({ ...t, id: `${Date.now()}-${i}-${Math.random()}` }));
       setToasts((prev) => [...withId, ...prev].slice(0, 6));
+      // 通知卡片 20 秒後自動收起（不然會一直蓋在畫面右側擋住按鈕）；事件仍留在提醒頁的「最近事件」，系統通知也已送出
+      setTimeout(() => setToasts((prev) => prev.filter((t) => !withId.some((w) => w.id === t.id))), TOAST_MS);
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
         for (const t of list) {
           try {
@@ -108,26 +113,37 @@ export default function AlertWatcher() {
       }
     }
 
+    /** 檢查一次並比對、通知（排程輪詢與「立即檢查」共用同一套） */
+    async function runCheck(c: Config): Promise<CheckResult | null> {
+      const data = await fetchCheck();
+      if (!data) return null;
+      const { next, notices } = diffAlerts(readJson(STATE_KEY, {}), data.items, c.notifySell);
+      writeJson(STATE_KEY, next);
+      // 名單異動（新增／移出關注、AI 新增／移出建議）
+      if (c.notifyListChanges && data.lists) {
+        const r = diffLists(readJson<ListState>(LISTS_KEY, {}), data.lists, taipeiClock().day);
+        writeJson(LISTS_KEY, r.next);
+        notices.unshift(...r.notices);
+      }
+      notify(notices);
+      window.dispatchEvent(new CustomEvent("stockradar:alert-checked", { detail: data }));
+      return data;
+    }
+
     async function tick() {
       if (stopped) return;
       let wait = 60;
       if (cfg?.enabled && hasTargets(cfg) && (cfg.strategyIds.length || cfg.notifyListChanges)) {
-        const data = await fetchCheck();
-        if (data) {
-          const { next, notices } = diffAlerts(readJson(STATE_KEY, {}), data.items, cfg.notifySell);
-          writeJson(STATE_KEY, next);
-          // 名單異動（新增／移出關注、AI 新增／移出建議）
-          if (cfg.notifyListChanges && data.lists) {
-            const r = diffLists(readJson<ListState>(LISTS_KEY, {}), data.lists, taipeiClock().day);
-            writeJson(LISTS_KEY, r.next);
-            notices.unshift(...r.notices);
-          }
-          notify(notices);
-          window.dispatchEvent(new CustomEvent("stockradar:alert-checked", { detail: data }));
-          wait = data.marketOpen ? cfg.intervalSec : CLOSED_INTERVAL_SEC;
-        }
+        const data = await runCheck(cfg);
+        if (data) wait = data.marketOpen ? cfg.intervalSec : CLOSED_INTERVAL_SEC;
       }
       if (!stopped) timer.current = setTimeout(tick, wait * 1000);
+    }
+
+    async function checkNow() {
+      await loadConfig();
+      if (cfg && hasTargets(cfg)) await runCheck(cfg);
+      else window.dispatchEvent(new CustomEvent("stockradar:alert-checked", { detail: null }));
     }
 
     /** 鬧鐘：時間到就響；勾了「附上訊號」時列出追蹤名單裡目前有訊號的股票 */
@@ -171,12 +187,14 @@ export default function AlertWatcher() {
 
     void restart();
     window.addEventListener(ALERT_CONFIG_EVENT, restart);
+    window.addEventListener(ALERT_CHECK_NOW_EVENT, checkNow);
     window.addEventListener(ALERT_TEST_EVENT, onTest);
     return () => {
       stopped = true;
       if (timer.current) clearTimeout(timer.current);
       if (alarmTimer.current) clearTimeout(alarmTimer.current);
       window.removeEventListener(ALERT_CONFIG_EVENT, restart);
+      window.removeEventListener(ALERT_CHECK_NOW_EVENT, checkNow);
       window.removeEventListener(ALERT_TEST_EVENT, onTest);
     };
   }, []);

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import OrderBookPanel from "@/components/strategy/OrderBookPanel";
-import { ALERT_CONFIG_EVENT, ALERT_TEST_EVENT } from "@/components/strategy/AlertWatcher";
+import { ALERT_CHECK_NOW_EVENT, ALERT_CONFIG_EVENT, ALERT_TEST_EVENT } from "@/components/strategy/AlertWatcher";
 import { api, useList, type Strategy } from "@/components/strategy/api";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 import { getWatchlist } from "@/lib/watchlist";
@@ -78,7 +78,10 @@ export default function AlertsClient() {
         if (!d.config.enabled && d.config.alarms.length === 0) setOpen(true);
       })
       .catch((e: Error) => setMsg({ ok: false, text: e.message }));
-    const onChecked = (e: Event) => setCheck((e as CustomEvent<Check>).detail);
+    const onChecked = (e: Event) => {
+      const d = (e as CustomEvent<Check | null>).detail;
+      if (d) setCheck(d);
+    };
     window.addEventListener("stockradar:alert-checked", onChecked);
     const t = setTimeout(() => setPerm(typeof Notification === "undefined" ? "unsupported" : Notification.permission), 0);
     return () => {
@@ -110,15 +113,25 @@ export default function AlertsClient() {
     }
   }
 
+  /** 交給全站監看器用同一套比對跑一次（訊號、名單異動都會通知並記進最近事件），結果從 alert-checked 事件回來 */
   async function checkNow() {
     setBusy(true);
-    try {
-      setCheck(await api<Check>("/api/strategy/alerts/check", { body: {} }));
-    } catch (err) {
-      setMsg({ ok: false, text: (err as Error).message });
-    } finally {
-      setBusy(false);
-    }
+    setMsg(null);
+    const done = new Promise<Check | null>((resolve) => {
+      const onChecked = (e: Event) => {
+        window.removeEventListener("stockradar:alert-checked", onChecked);
+        resolve((e as CustomEvent<Check | null>).detail);
+      };
+      window.addEventListener("stockradar:alert-checked", onChecked);
+      setTimeout(() => {
+        window.removeEventListener("stockradar:alert-checked", onChecked);
+        resolve(null);
+      }, 90_000);
+    });
+    window.dispatchEvent(new Event(ALERT_CHECK_NOW_EVENT));
+    const result = await done;
+    if (!result) setMsg({ ok: false, text: "沒有檢查到：請先在「設定通知」選好追蹤名單並儲存（或資料庫暫時比較忙，等幾秒再按一次）。" });
+    setBusy(false);
   }
 
   async function askPermission() {
