@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ensureTwUniverseWarm, searchUniverseByQuery } from "@/lib/data";
+import { privateCache } from "@/lib/apiCache";
 
 /**
  * 頂部搜尋框的「輸入名稱 → 列出所有比對到的股票」用的輕量端點。
@@ -24,5 +25,5 @@ export async function GET(req: NextRequest) {
     market: entry.market,
     exchange: entry.exchange,
   }));
-  return NextResponse.json({ results });
+  return NextResponse.json({ results }, { headers: privateCache(3600, 86400) }); // 代號／名稱字典一天才變一次
 }

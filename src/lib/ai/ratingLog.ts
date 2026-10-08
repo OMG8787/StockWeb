@@ -220,7 +220,22 @@ export function logRating(r: StockRatingResult, source: RatingSource): void {
 }
 
 /** 讀取區間內的紀錄（含頭尾，台北日期），舊到新。 */
+// 讀取結果的記憶體暫存 60 秒（過去的紀錄不會變、今天的只會慢慢增加）：即時提醒每次檢查都會讀，不必每次都打 Redis
+const READ_CACHE_MS = 60_000;
+const readCache = new Map<string, { at: number; rows: RatingLogEntry[] }>();
+
 export async function readRatingLog(from: string, to: string): Promise<RatingLogEntry[]> {
+  if (!kvEnabled || !redis) return [];
+  const ck = `${from}|${to}`;
+  const hit = readCache.get(ck);
+  if (hit && Date.now() - hit.at < READ_CACHE_MS) return hit.rows;
+  const rows = await readRatingLogUncached(from, to);
+  readCache.set(ck, { at: Date.now(), rows });
+  if (readCache.size > 12) readCache.delete(readCache.keys().next().value!);
+  return rows;
+}
+
+async function readRatingLogUncached(from: string, to: string): Promise<RatingLogEntry[]> {
   if (!kvEnabled || !redis) return [];
   const days: string[] = [];
   const start = new Date(`${from}T00:00:00Z`);

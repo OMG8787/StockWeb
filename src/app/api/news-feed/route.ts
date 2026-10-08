@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getNewsFeed, NEWS_FEED_PAGE_SIZE, summarizeItems } from "@/lib/ai/newsfeed";
+import { privateCache } from "@/lib/apiCache";
 
 // Building the pool fans out to a dozen+ Google News requests plus an AI
 // classification call on a cache-cold generation — same reasoning as
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
       items: page,
       hasMore: offset + limit < feed.items.length,
       generatedAt: feed.generatedAt,
-    });
+    }, { headers: forceRefresh ? undefined : privateCache(120, 600) }); // 新聞牆約每小時換一批；手動「重新整理」(refresh=1) 不快取
   } catch (err) {
     console.error("[api/news-feed] failed:", err);
     return NextResponse.json({ error: "新聞暫時無法取得" }, { status: 503 });

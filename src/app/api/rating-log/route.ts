@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { kvEnabled } from "@/lib/data/kv";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { readRatingLog } from "@/lib/ai/ratingLog";
+import { privateCache } from "@/lib/apiCache";
 
 /**
  * 本站綜合評等紀錄（src/proxy.ts 密碼閘內）：
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
       : null;
     const all = await readRatingLog(from, to);
     const items = wanted ? all.filter((e) => wanted.has(e.symbol.toUpperCase())) : all;
-    return NextResponse.json({ enabled: kvEnabled, from, to, count: items.length, items });
+    return NextResponse.json({ enabled: kvEnabled, from, to, count: items.length, items }, { headers: privateCache(300, 600) });
   } catch (err) {
     console.error("[rating-log] 讀取失敗:", err);
     return NextResponse.json({ error: "讀取評等紀錄失敗" }, { status: 500 });

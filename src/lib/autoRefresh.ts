@@ -21,26 +21,28 @@ export function isAnyMarketLive(now: Date = new Date()): boolean {
 }
 
 /**
- * 用戶端抓取的卡片（快報、今日建議、技術訊號共振、新聞牆）多久重抓一次：盤中 3 分鐘、其餘 10 分鐘。
+ * 用戶端抓取的卡片（快報、今日建議、技術訊號共振、新聞牆）多久重抓一次：盤中 5 分鐘、其餘 20 分鐘
+ * （2026-10-08 為節省 Redis 免費額度由 3／10 分鐘放寬：這些內容本來就是依固定時點才重寫，更頻繁只是白讀快取）。
  * 這些內容由伺服器依固定時點重寫（aiSchedule.ts）並快取，重抓只是讀快取（不會觸發 AI），
- * 3 分鐘足以在新時點寫好後（cron 每 5 分鐘暖一次）盡快換上。
+ * 5 分鐘足以在新時點寫好後（cron 每 5 分鐘暖一次）盡快換上。
  */
-export const CLIENT_REFRESH_LIVE_MS = 3 * 60_000;
-export const CLIENT_REFRESH_IDLE_MS = 10 * 60_000;
+export const CLIENT_REFRESH_LIVE_MS = 5 * 60_000;
+export const CLIENT_REFRESH_IDLE_MS = 20 * 60_000;
 export function clientRefreshMs(now: Date = new Date()): number {
   return isAnyMarketLive(now) ? CLIENT_REFRESH_LIVE_MS : CLIENT_REFRESH_IDLE_MS;
 }
 
 /** 伺服器渲染區塊（router.refresh）的節奏。 */
-export const SERVER_REFRESH_LIVE_MS = 60_000;
-export const SERVER_REFRESH_IDLE_MS = 10 * 60_000;
+export const SERVER_REFRESH_LIVE_MS = 3 * 60_000;
+export const SERVER_REFRESH_IDLE_MS = 15 * 60_000;
 /** 外殼大多是用戶端輪詢的頁面（首頁、焦點榜），伺服器渲染的只剩總經卡、市場狀態徽章：5 分鐘。 */
 export const SERVER_REFRESH_SHELL_MS = 5 * 60_000;
 
 /**
  * 這個路徑的伺服器渲染內容多久 router.refresh() 一次；null＝不需要。
- *  - /stock/*：基本面（本益比隨股價）、五檔、籌碼、財報、重大訊息——盤中 60 秒、其餘 10 分鐘。
- *  - /scoreboard：每日學習彙總，10 分鐘。
+ *  - /stock/*：基本面（本益比隨股價）、五檔、籌碼、財報、重大訊息——盤中 3 分鐘、其餘 15 分鐘（股價本身由用戶端 30 秒輪詢，
+ *    這些是每日或更慢才變的區塊，2026-10-08 由 60 秒放寬以省 Redis 指令）。
+ *  - /scoreboard：每日學習彙總，15 分鐘。
  *  - /、/highlights：5 分鐘（只剩總經卡與市場狀態徽章是伺服器渲染；報價與榜單由用戶端 30 秒輪詢）。
  *  - /search、/action、/news、/login 與其他：伺服器端只有外殼，內容全是用戶端抓取，不需要。
  */

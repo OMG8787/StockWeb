@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sectorsFor, ensureTwUniverseWarm } from "@/lib/data";
 import type { Market } from "@/lib/data";
+import { privateCache } from "@/lib/apiCache";
 
 export async function GET(req: NextRequest) {
   // An unrecognized value (a stale bookmark's `?market=BOGUS`) must default
@@ -9,5 +10,5 @@ export async function GET(req: NextRequest) {
   const marketParam = req.nextUrl.searchParams.get("market");
   const market: Market = marketParam === "US" ? "US" : "TW";
   if (market === "TW") await ensureTwUniverseWarm(); // sectorsFor() 需要完整清單，不能只有SEED
-  return NextResponse.json({ sectors: sectorsFor(market) });
+  return NextResponse.json({ sectors: sectorsFor(market) }, { headers: privateCache(3600, 86400) }); // 族群清單一天才變一次
 }

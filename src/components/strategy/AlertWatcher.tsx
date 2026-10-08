@@ -27,6 +27,7 @@ const LISTS_KEY = "sw_alert_lists";
 const CLOSED_INTERVAL_SEC = 300;
 const ALARM_TICK_MS = 20_000;
 const TOAST_MS = 20_000;
+const HIDDEN_MIN_SEC = 60;
 
 interface CheckResult {
   at: string;
@@ -137,6 +138,9 @@ export default function AlertWatcher() {
         const data = await runCheck(cfg);
         if (data) wait = data.marketOpen ? cfg.intervalSec : CLOSED_INTERVAL_SEC;
       }
+      // 分頁在背景時（切到別的視窗、最小化）最少 60 秒才檢查一次：瀏覽器本來就會把背景計時器壓到每分鐘一次左右，
+      // 這裡明確放慢，避免背景分頁整天用 5 秒輪詢把 Redis 免費額度燒光（切回前景會立刻重新用設定的間隔）
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") wait = Math.max(wait, HIDDEN_MIN_SEC);
       if (!stopped) timer.current = setTimeout(tick, wait * 1000);
     }
 
@@ -186,6 +190,13 @@ export default function AlertWatcher() {
       ]);
 
     void restart();
+    // 切回前景：立刻檢查一次並恢復設定的間隔（背景時被放慢到 60 秒）
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !cfg?.enabled) return;
+      if (timer.current) clearTimeout(timer.current);
+      void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     window.addEventListener(ALERT_CONFIG_EVENT, restart);
     window.addEventListener(ALERT_CHECK_NOW_EVENT, checkNow);
     window.addEventListener(ALERT_TEST_EVENT, onTest);
@@ -193,6 +204,7 @@ export default function AlertWatcher() {
       stopped = true;
       if (timer.current) clearTimeout(timer.current);
       if (alarmTimer.current) clearTimeout(alarmTimer.current);
+      document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener(ALERT_CONFIG_EVENT, restart);
       window.removeEventListener(ALERT_CHECK_NOW_EVENT, checkNow);
       window.removeEventListener(ALERT_TEST_EVENT, onTest);

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { kvEnabled } from "@/lib/data/kv";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { readBriefArchive } from "@/lib/ai/briefArchive";
+import { privateCache } from "@/lib/apiCache";
 
 /**
  * 今日市場快報存檔（src/proxy.ts 密碼閘內）：
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
   }
   try {
     const items = await readBriefArchive(from, to, req.nextUrl.searchParams.get("grounding") === "1");
-    return NextResponse.json({ enabled: kvEnabled, from, to, count: items.length, items });
+    return NextResponse.json({ enabled: kvEnabled, from, to, count: items.length, items }, { headers: privateCache(300, 600) });
   } catch (err) {
     console.error("[brief-archive] 讀取失敗:", err);
     return NextResponse.json({ error: "讀取快報存檔失敗" }, { status: 500 });
