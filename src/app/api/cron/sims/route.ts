@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { listAllAutoSims } from "@/lib/strategy/store";
 import { DataCache, runSim, type RunResult } from "@/lib/strategy/runner";
+import { searchStocks } from "@/lib/data";
 
 /**
  * 每個交易日收盤、法人資料公布後（vercel.json：台北 16:40）依策略自動交易所有開著自動交易的模擬倉。
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const started = Date.now();
+  // 順便觸發全市場報價表（收盤後會記一筆每日成交量，股票篩選的 5 日均量／當週／當月靠它累積），
+  // 不必依賴外部預熱排程
+  await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" }).catch(() => []);
   let sims;
   try {
     sims = await listAllAutoSims();
