@@ -393,7 +393,7 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 
 ## 接手狀態（CLAUDE.md 規則十；最後更新 2026-10-08 傍晚 台北）
 
-**進行中（10/8 傍晚）**：Sonnet 驗證 agent 在正式站測「股票來源複選（策略庫、模擬倉）」與「即時提醒設定通知／鬧鐘／通知格式」（帳號 zzverify3），測完要把該帳號提醒設定還原；若中斷就重派只驗未驗項。之後刪 zzverify3（UserId 在 scratchpaderify3.json）。
+**進行中（10/8 傍晚）**：第一輪驗證（來源複選、提醒鬧鐘）全過。第二輪 Sonnet 驗證「即時五檔＋疊圖十字線」（`e9c1409`，帳號 zzverify3）進行中；若中斷就重派只驗未驗項。之後刪 zzverify3（UserId 在 scratchpaderify3.json）。
 
 **待辦（2026-10-08 下午）**
 1. 使用者要再部署一次 Apps Script（readKeys／upsert／deleteWhere；即時提醒存設定與永久紀錄寫入都需要），部署後複查：即時提醒存設定、RatingLog 等分頁有寫入。
@@ -486,10 +486,15 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-08（傍晚，續）：即時五檔、策略疊圖十字線
+- 使用者要求：①新增「即時五檔」每 5 秒刷新（當沖用）；②疊圖滑鼠移到哪就有垂直線、看得出當下漲跌階段；第二排「全部買進」看不懂。
+- 實作（`e9c1409`）：`data/orderBook.ts`（MIS b/g/a/f，30ms 內請求合併、3 秒快取）、`/api/strategy/orderbook`、指標「即時五檔（委買委賣力道）」（只在 live 判斷抓，收盤後與歷史為資料不足）、提醒間隔加 5 秒、`OrderBookPanel`（盤中 5 秒、收盤 60 秒、背景分頁暫停）放在提醒頁與疊圖每檔按鈕；疊圖單一 SVG 加左側排名、十字線、資訊列（收盤／當日／近 5 日階段／區間位置／各策略訊號），只有 1 個策略時不顯示共識排。
+- 驗證：702 測試、build 通過；正式站第二輪驗證 agent 進行中。
+
 ### 2026-10-08（傍晚）：股票來源可複選、即時提醒加定時鬧鐘與新通知格式
 - 使用者要求：①策略的股票篩選可複選、預覽用顏色區分每檔來自哪個名單、名單來源要清楚（舊的「不篩選（由模擬倉自己指定股票）」看不懂）；②模擬倉股票範圍要有全市場／成交量前 N／自選／依策略選股等，像新增參考指標一樣用按鈕複選；③即時提醒加「設定通知」：定時提醒（鬧鐘）＋策略買點立即通知，通知格式「代號／AI 策略：買進／我的策略：觀察」，沒訊號不通知。
 - 實作（`ca8fbd0`、`3d36c16`）：`screenConfig.ts` 加 StockSource（含 all／list／strategy）、normalizeSources、combineSources（記 tags）；`screen.ts` runSources（單一來源失敗不影響其他）；策略設定 screen→screens＋screenMode（舊資料自動轉）；模擬倉加 Sources／SourceMode 欄（舊 Universe 自動換算）；共用 `SourcePicker` 取代 ScreenEditor。提醒：`alertFormat.ts`（純函式：通知格式、diffAlerts、鬧鐘 dueAlarms），Alerts 表加 Alarms／NotifySell；首次看到就是買進也通知、賣出只在狀態改變時通知；鬧鐘 10 分鐘內補響、每天只響一次（localStorage）。
-- 驗證：700 測試、tsc、eslint、build 通過；正式站驗證 agent 進行中。
+- 驗證：700 測試、tsc、eslint、build 通過；正式站 Sonnet 驗證 A 策略庫複選＋顏色預覽、B 模擬倉來源（含依策略選股展開）、C 測試通知格式／鬧鐘實際響鈴／重整保留／手機 390 寬全部通過，測試資料已清。
 - 限制：鬧鐘與提醒都要開著網站分頁才會響（沒有推播伺服器）；平日鬧鐘國定假日也會響。
 
 ### 2026-10-08（下午，續）：補測發現登入 Lock timeout
