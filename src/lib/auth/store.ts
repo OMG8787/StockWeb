@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { redis } from "@/lib/data/kv";
 import path from "node:path";
 
 /**
@@ -58,6 +59,13 @@ const GAS_TIMEOUT_MS = 45_000;
 
 /** 讀過的資料表在同一個伺服器實例暫存多久（有寫入會立即作廢；跨實例最多晚這麼久看到別人的修改） */
 const READ_CACHE_MS = 60_000;
+/**
+ * 有 Redis 時，小表的讀取暫存也放進 Redis，所有伺服器實例共用（Vercel 每個請求常落在不同實例，
+ * 只靠記憶體幾乎命中不了）。大表（登入紀錄、交易紀錄、回饋、每日淨值）不放，避免超過單筆大小上限。
+ */
+const SHARED_CACHE_TABLES = new Set<TableName>(["Users", "Sessions", "Holdings", "Indicators", "Strategies", "Sims"]);
+const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
+
 /** 取結果（Google 轉址後的網址）失敗時重試幾次 */
 const FETCH_RESULT_ATTEMPTS = 4;
 
@@ -82,22 +90,57 @@ class GasStore implements TableStore {
       return c && now - c.at < READ_CACHE_MS ? c : null;
     };
     if (ops.every((o) => o.op === "read")) {
-      const missing = [...new Set(ops.filter((o) => !fresh(o.table)).map((o) => o.table))];
+      let missing = [...new Set(ops.filter((o) => !fresh(o.table)).map((o) => o.table))];
+      if (missing.length) await this.fillFromShared(missing);
+      missing = missing.filter((t) => !fresh(t));
       if (missing.length) {
         const results = await this.sendWithRetry(missing.map((table) => ({ op: "read" as const, table })), true);
         missing.forEach((t, i) => this.cache.set(t, { rows: results[i] as Row[], at: Date.now() }));
+        await this.saveShared(missing, results as Row[][]);
       }
       return ops.map((o) => this.cache.get(o.table)!.rows.map((r) => ({ ...r })));
     }
     // 有寫入：先作廢（就算失敗，之後也重讀最新的），成功後再作廢一次（避免途中被別的請求填回舊資料）
     const written = new Set(ops.filter((o) => o.op !== "read").map((o) => o.table));
-    written.forEach((t) => this.cache.delete(t));
+    await this.invalidate(written);
     const results = await this.sendWithRetry(ops, false);
-    written.forEach((t) => this.cache.delete(t));
+    await this.invalidate(written);
     ops.forEach((o, i) => {
       if (o.op === "read" && !written.has(o.table)) this.cache.set(o.table, { rows: results[i] as Row[], at: Date.now() });
     });
     return results;
+  }
+
+  private async fillFromShared(tables: TableName[]): Promise<void> {
+    const shared = tables.filter((t) => SHARED_CACHE_TABLES.has(t));
+    if (!redis || shared.length === 0) return;
+    try {
+      const hits = await redis.mget<Array<{ rows: Row[]; at: number } | null>>(...shared.map(sharedKey));
+      shared.forEach((t, i) => {
+        const h = hits[i];
+        if (h && Array.isArray(h.rows) && Date.now() - h.at < READ_CACHE_MS) this.cache.set(t, h);
+      });
+    } catch {
+      // Redis 暫時不通就直接讀試算表
+    }
+  }
+
+  private async saveShared(tables: TableName[], results: Row[][]): Promise<void> {
+    if (!redis) return;
+    const p = redis.pipeline();
+    let n = 0;
+    tables.forEach((t, i) => {
+      if (!SHARED_CACHE_TABLES.has(t)) return;
+      p.set(sharedKey(t), { rows: results[i], at: Date.now() }, { px: READ_CACHE_MS });
+      n++;
+    });
+    if (n) await p.exec().catch(() => {});
+  }
+
+  private async invalidate(tables: Set<TableName>): Promise<void> {
+    tables.forEach((t) => this.cache.delete(t));
+    const shared = [...tables].filter((t) => SHARED_CACHE_TABLES.has(t));
+    if (redis && shared.length) await redis.del(...shared.map(sharedKey)).catch(() => {});
   }
 
   private async sendWithRetry(ops: StoreOp[], readOnly: boolean): Promise<unknown[]> {

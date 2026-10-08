@@ -174,3 +174,15 @@ describe("模擬倉", () => {
     expect(simEquity(s, new Map())).toBe(1500);
   });
 });
+
+describe("日K抓取長度", async () => {
+  const { rangeFor } = await import("@/lib/strategy/runner");
+  const ind = (id: string, typeId: string, params: Record<string, number | string>): UserIndicator => ({ id, name: id, typeId, params });
+  it("一般指標抓 6 個月；用到超過 100 天的均線才抓 1 年；沒用到的指標不算", () => {
+    const list = [ind("a", "rsi", { period: 14 }), ind("b", "ma_cross", { short: 5, long: 120 }), ind("c", "breakout", { days: 20 })];
+    const ids = new Set(["a", "b", "c"]);
+    expect(rangeFor(normalizeStrategyConfig({ buy: { ids: ["a", "c"] } }, ids), list)).toBe("6m");
+    expect(rangeFor(normalizeStrategyConfig({ buy: { ids: ["a", "b"] } }, ids), list)).toBe("1y");
+    expect(rangeFor(normalizeStrategyConfig({ mode: "score", weights: { b: 1 } }, ids), list)).toBe("1y");
+  });
+});

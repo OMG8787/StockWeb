@@ -24,7 +24,12 @@ import { listIndicators, listStrategies, persistSimResult, prefetchStrategyTable
  * 交易價一律用「當天收盤價」，所以自動交易排在收盤、法人資料公布後（vercel.json 的 cron）執行。
  */
 
-const CANDLE_RANGE = "1y" as const;
+/**
+ * 日K要抓多久：6 個月（約 125 根）夠多數指標用（RSI／KD／MACD／20 日線…），只有用到超過 100 天的
+ * 均線或區間才抓 1 年。上市日K一個月一個請求，6 個月 7 個、1 年 13 個，冷快取時差很多。
+ */
+type CandleRange = "6m" | "1y";
+const LONG_LOOKBACK_DAYS = 100;
 // 跟網站其他批次抓日K的地方一樣保守：每檔本身就會並行抓多個月份，檔數再並行太多會被證交所限流
 const CONCURRENCY = 2;
 const CHIPS_DAYS = 20;
@@ -54,25 +59,27 @@ export interface Target {
 /** 一次執行內共用的資料快取（排程一次跑很多模擬倉時，同一檔股票只抓一次） */
 export class DataCache {
   private ctx = new Map<string, Promise<EvalContext | null>>();
+  private range: CandleRange = "6m";
   constructor(private needs: Set<IndicatorNeed>) {}
 
-  addNeeds(needs: Iterable<IndicatorNeed>) {
+  addNeeds(needs: Iterable<IndicatorNeed>, range: CandleRange = "6m") {
     for (const n of needs) this.needs.add(n);
+    if (range === "1y") this.range = "1y";
   }
 
   get(t: Target): Promise<EvalContext | null> {
-    const key = `${t.market}:${t.symbol}:${[...this.needs].sort().join(",")}`;
+    const key = `${t.market}:${t.symbol}:${this.range}:${[...this.needs].sort().join(",")}`;
     let p = this.ctx.get(key);
     if (!p) {
-      p = buildContext(t, this.needs).catch(() => null);
+      p = buildContext(t, this.needs, this.range).catch(() => null);
       this.ctx.set(key, p);
     }
     return p;
   }
 }
 
-async function buildContext(t: Target, needs: Set<IndicatorNeed>): Promise<EvalContext | null> {
-  const chart = await getChart(t.symbol, CANDLE_RANGE, t.market);
+async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleRange): Promise<EvalContext | null> {
+  const chart = await getChart(t.symbol, range, t.market);
   const candles = (chart?.candles ?? []).filter((c) => !c.live);
   if (candles.length === 0) return null;
   const ctx: EvalContext = { symbol: t.symbol, market: t.market, candles };
@@ -93,6 +100,20 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>): Promise<EvalC
   }
   await Promise.all(jobs);
   return ctx;
+}
+
+/** 策略用到的參數裡最長的天數（均線、區間、N 日…）超過 100 天才需要 1 年日K */
+export function rangeFor(cfg: StrategyConfig, indicators: UserIndicator[]): CandleRange {
+  const ids = new Set(strategyIndicatorIds(cfg));
+  let longest = 0;
+  for (const i of indicators) {
+    if (!ids.has(i.id)) continue;
+    for (const k of ["period", "long", "short", "days"]) {
+      const v = Number(i.params[k]);
+      if (Number.isFinite(v)) longest = Math.max(longest, v);
+    }
+  }
+  return longest > LONG_LOOKBACK_DAYS ? "1y" : "6m";
 }
 
 function needsOf(cfg: StrategyConfig, indicators: UserIndicator[]): Set<IndicatorNeed> {
@@ -138,7 +159,7 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
 
   const cfg = strategy.config;
   const cache = opts.cache ?? new DataCache(new Set());
-  cache.addNeeds(needsOf(cfg, indicators));
+  cache.addNeeds(needsOf(cfg, indicators), rangeFor(cfg, indicators));
 
   const universe = sim.universe === "market" ? await marketTopTargets(sim.marketTopN) : sim.symbols;
   const heldTargets: Target[] = sim.positions.map((p) => ({ symbol: p.symbol, market: p.market, name: p.name }));
@@ -252,7 +273,9 @@ export async function previewStrategy(userId: string, strategyId: string, target
   const market = target.market ?? (detectMarket(symbol) === "US" ? "US" : "TW");
   if (market === "TW") await ensureTwUniverseWarm().catch(() => {});
   const t: Target = { symbol, market, name: (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol };
-  const ctx = await new DataCache(needsOf(strategy.config, indicators)).get(t);
+  const cache = new DataCache(new Set());
+  cache.addNeeds(needsOf(strategy.config, indicators), rangeFor(strategy.config, indicators));
+  const ctx = await cache.get(t);
   if (!ctx) throw new StrategyError(`抓不到 ${symbol} 的日K（代號不存在，或資料來源暫時忙碌，請稍後再試）`);
   return { symbol: t.symbol, name: t.name, lastDay: ctx.candles.at(-1)?.time ?? "", decision: evaluateStrategy(strategy.config, indicators, ctx) };
 }
