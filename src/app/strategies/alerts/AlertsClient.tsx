@@ -23,9 +23,9 @@ interface Check {
 const AI = { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）" };
 const INTERVALS = [10, 15, 20, 30];
 
-function chip(s: Signal) {
+function chip(s: Signal, lineId?: string) {
   const cls = s === "buy" ? "border-(--price-up) text-(--price-up)" : s === "sell" ? "border-(--price-down) text-(--price-down)" : "border-(--gridline) text-(--text-muted)";
-  return <span className={`rounded-full border px-2 py-0.5 text-xs ${cls}`}>{s === "buy" ? "買進" : s === "sell" ? "賣出" : "不動作"}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-xs ${cls}`}>{s === "buy" ? "買進" : s === "sell" ? (lineId === "ai" ? "先不要買" : "賣出") : "不動作"}</span>;
 }
 
 export default function AlertsClient() {
@@ -179,7 +179,7 @@ export default function AlertsClient() {
                 <ul className="mt-1 space-y-0.5">
                   {it.lines.map((l) => (
                     <li key={l.id} className="flex items-center gap-2 text-xs">
-                      {chip(l.current)} {l.name}
+                      {chip(l.current, l.id)} {l.name}
                     </li>
                   ))}
                 </ul>

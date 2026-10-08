@@ -32,13 +32,14 @@ const AI = { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）" };
 const MAX_SYMBOLS = 10;
 const MAX_STRATEGIES = 8;
 
-const signalText = (s: Signal) => (s === "buy" ? "買進" : s === "sell" ? "賣出" : "不動作");
+/** AI 建議策略（本站評等）的「賣出側」是「建議先不要買」，不是要你賣出 */
+const signalText = (s: Signal, lineId?: string) => (s === "buy" ? "買進" : s === "sell" ? (lineId === "ai" ? "先不要買" : "賣出") : "不動作");
 /** 台股慣例：紅＝買進（偏多）、綠＝賣出（偏空） */
 const signalColor = (s: Signal) => (s === "buy" ? "var(--price-up)" : s === "sell" ? "var(--price-down)" : "var(--gridline)");
 
-function SignalChip({ s }: { s: Signal }) {
+function SignalChip({ s, lineId }: { s: Signal; lineId?: string }) {
   const cls = s === "buy" ? "border-(--price-up) text-(--price-up)" : s === "sell" ? "border-(--price-down) text-(--price-down)" : "border-(--gridline) text-(--text-muted)";
-  return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{signalText(s)}</span>;
+  return <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>{signalText(s, lineId)}</span>;
 }
 
 /** 收盤價走勢＋每個策略一條訊號帶＋共識帶；全部策略都買進的日子在價格圖上標出 */
@@ -78,7 +79,7 @@ function OverlayChart({ row }: { row: Row }) {
             <g key={s.key}>
               {s.cells.map((c, i) => (
                 <rect key={i} x={i * cellW + 0.5} y={top} width={Math.max(1, cellW - 1)} height={STRIP_H} fill={signalColor(c)} opacity={c ? 0.9 : 0.35}>
-                  <title>{`${row.days[i]} ${s.name}：${s.key === "consensus" ? (c ? "全部策略都是買進" : "—") : signalText(c)}`}</title>
+                  <title>{`${row.days[i]} ${s.name}：${s.key === "consensus" ? (c ? "全部策略都是買進" : "—") : signalText(c, s.key)}`}</title>
                 </rect>
               ))}
             </g>
@@ -88,14 +89,17 @@ function OverlayChart({ row }: { row: Row }) {
       <div className="space-y-0.5 text-xs text-(--text-muted)">
         {strips.map((s, si) => (
           <div key={s.key} className="flex items-center gap-2">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: si === strips.length - 1 ? "var(--price-up)" : "var(--accent)" }} />
+            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: si === strips.length - 1 ? "var(--price-up)" : "var(--baseline)" }} />
             第 {si + 1} 條：{s.name}
           </div>
         ))}
         <div>
           {row.days[0]} ～ {row.days.at(-1)}
-          {row.live && "（最後一根為盤中即時價）"}・紅＝買進、綠＝賣出、淡色＝不動作・價格圖上的淡紅底＝全部策略都買進
+          {row.live && "（最後一根為盤中即時價）"}・紅＝買進、綠＝賣出（AI 建議策略為「先不要買」）、淡色＝不動作・價格圖上的淡紅底＝全部策略都買進
         </div>
+        {row.lines.some((l) => l.id === "ai" && l.signals.slice(0, -1).every((x) => x === null)) && (
+          <div>※ AI 建議策略的歷史取自本站的評等紀錄，紀錄從新系統上線後才開始累積，之前的日子顯示為不動作，「全部買進」也只會出現在有紀錄的日子。</div>
+        )}
       </div>
     </div>
   );
@@ -249,7 +253,7 @@ export default function CompareClient() {
                 <div className="grid gap-1 sm:grid-cols-2">
                   {row.lines.map((l, i) => (
                     <div key={l.id} className="flex items-start gap-2 text-sm">
-                      <SignalChip s={l.current} />
+                      <SignalChip s={l.current} lineId={l.id} />
                       <span>
                         {i + 1}. {l.name}
                         <span className="block text-xs text-(--text-muted)">

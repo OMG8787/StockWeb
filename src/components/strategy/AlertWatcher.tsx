@@ -63,7 +63,9 @@ export function diffAlerts(prev: Record<string, string>, items: CheckItem[]): { 
       const cur = l.current ?? "";
       next[key] = cur;
       if (key in prev && prev[key] !== cur && (l.current === "buy" || l.current === "sell")) {
-        toasts.push({ title: label, body: `${l.name}：出現${l.current === "buy" ? "買進" : "賣出"}訊號（${l.summary}）`, tone: l.current });
+        // AI 建議策略（本站評等）的賣出側是「建議先不要買」
+        const what = l.current === "buy" ? "出現買進訊號" : l.id === "ai" ? "轉為建議先不要買" : "出現賣出訊號";
+        toasts.push({ title: label, body: `${l.name}：${what}（${l.summary}）`, tone: l.current });
       }
     }
     const allKey = `${it.symbol}|__all__`;
