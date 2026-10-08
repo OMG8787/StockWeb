@@ -25,6 +25,11 @@ export class AuthError extends Error {
 }
 
 export const ONLINE_MINUTES = 15;
+
+/** 登入紀錄的筆數上限不必每次登入都整理（多一次寫入、多排一次隊），大約每 20 次整理一次 */
+function trimLoginLogSometimes(): StoreOp[] {
+  return Math.random() < 0.05 ? [{ op: "trim", table: "LoginLog", keep: LOGIN_LOG_KEEP }] : [];
+}
 const LOGIN_LOG_KEEP = 3000;
 const MAX_FAILS = 5;
 const FAIL_WINDOW_MIN = 15;
@@ -173,7 +178,7 @@ function newSessionOps(user: User, info: ClientInfo, token: string, sessionId: s
       },
     },
     { op: "update", table: "Users", key: user.userId, patch: { LastLoginAt: now } },
-    { op: "trim", table: "LoginLog", keep: LOGIN_LOG_KEEP },
+    ...trimLoginLogSometimes(),
   ];
 }
 
@@ -192,8 +197,11 @@ export async function login(accountRaw: string, password: string, info: ClientIn
   const account = cleanText(accountRaw, 60);
   if (!account || !password) throw new AuthError("請輸入帳號與密碼");
 
-  const [userRows, logRows] = await readTables("Users", "LoginLog");
+  const [userRows] = await readTables("Users");
   const row = userRows.find((r) => normAccount(r.Account ?? "") === normAccount(account));
+  // 只讀這個帳號自己的登入紀錄（在 Google 端篩選）：登入紀錄表會越來越大，整張讀回來很慢
+  const accountKeys = [...new Set([account, row?.Account ?? account, account.toLowerCase()])];
+  const [logRows] = (await getStore().batch([{ op: "readKeys", table: "LoginLog", col: "Account", values: accountKeys }])) as Row[][];
   const user = row ? toUser(row) : null;
   const now = taipeiNow();
 
@@ -213,7 +221,7 @@ export async function login(accountRaw: string, password: string, info: ClientIn
           Name: user?.name ?? "", Result: "失敗：" + message, Device: info.device, UserAgent: info.userAgent, Ip: info.ip,
         },
       },
-      { op: "trim", table: "LoginLog", keep: LOGIN_LOG_KEEP },
+      ...trimLoginLogSometimes(),
     ]);
     throw new AuthError(message === "帳號不存在" || message === "密碼錯誤" ? "帳號或密碼錯誤" : message, status);
   };
