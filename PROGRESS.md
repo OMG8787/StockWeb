@@ -391,7 +391,9 @@ Google 登入（選用）、全站密碼保護（`SITE_PASSWORD`）、全站 SEO
 - **環境變數裡有付費服務金鑰就被自動使用**：按量計費的供應商必須另有 opt-in 開關（Claude 需 `ALLOW_PAID_AI=true`）；新增服務前先確認免費。→ CLAUDE.md「專案最高原則：零花費」。
 - **GitHub Actions 預熱排程沒照「每5分鐘」跑**：免費排程常延遲數小時或丟棄，不能當主力；主力是 SWR（過期先回舊資料、背景重算），預熱改由 cron-job.org 觸發，回應期限 25 秒以配合其 30 秒逾時。→ PROGRESS-ARCHIVE.md 工作日誌 2026-10-04，搜尋「cron-job」。
 
-## 接手狀態（CLAUDE.md 規則十；最後更新 2026-10-07 17:40 台北）
+## 接手狀態（CLAUDE.md 規則十；最後更新 2026-10-08 傍晚 台北）
+
+**進行中（10/8 傍晚）**：Sonnet 驗證 agent 在正式站測「股票來源複選（策略庫、模擬倉）」與「即時提醒設定通知／鬧鐘／通知格式」（帳號 zzverify3），測完要把該帳號提醒設定還原；若中斷就重派只驗未驗項。之後刪 zzverify3（UserId 在 scratchpaderify3.json）。
 
 **待辦（2026-10-08 下午）**
 1. 使用者要再部署一次 Apps Script（readKeys／upsert／deleteWhere；即時提醒存設定與永久紀錄寫入都需要），部署後複查：即時提醒存設定、RatingLog 等分頁有寫入。
@@ -483,6 +485,12 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 6. **規則六**：只要在等待背景工作完成（部署、下載、agent 執行等）導致一段時間沒有新回應，每最多 5 分鐘要在對話視窗主動回報一次目前狀態，不能整段沉默、也不能只依賴「完成才通知」的機制悶著頭等。
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
+
+### 2026-10-08（傍晚）：股票來源可複選、即時提醒加定時鬧鐘與新通知格式
+- 使用者要求：①策略的股票篩選可複選、預覽用顏色區分每檔來自哪個名單、名單來源要清楚（舊的「不篩選（由模擬倉自己指定股票）」看不懂）；②模擬倉股票範圍要有全市場／成交量前 N／自選／依策略選股等，像新增參考指標一樣用按鈕複選；③即時提醒加「設定通知」：定時提醒（鬧鐘）＋策略買點立即通知，通知格式「代號／AI 策略：買進／我的策略：觀察」，沒訊號不通知。
+- 實作（`ca8fbd0`、`3d36c16`）：`screenConfig.ts` 加 StockSource（含 all／list／strategy）、normalizeSources、combineSources（記 tags）；`screen.ts` runSources（單一來源失敗不影響其他）；策略設定 screen→screens＋screenMode（舊資料自動轉）；模擬倉加 Sources／SourceMode 欄（舊 Universe 自動換算）；共用 `SourcePicker` 取代 ScreenEditor。提醒：`alertFormat.ts`（純函式：通知格式、diffAlerts、鬧鐘 dueAlarms），Alerts 表加 Alarms／NotifySell；首次看到就是買進也通知、賣出只在狀態改變時通知；鬧鐘 10 分鐘內補響、每天只響一次（localStorage）。
+- 驗證：700 測試、tsc、eslint、build 通過；正式站驗證 agent 進行中。
+- 限制：鬧鐘與提醒都要開著網站分頁才會響（沒有推播伺服器）；平日鬧鐘國定假日也會響。
 
 ### 2026-10-08（下午，續）：補測發現登入 Lock timeout
 - 使用者問「每項功能都測過了嗎」。補測：永久紀錄確實寫入試算表（問 AI 後 RatingLog／RatingConfirm／ModelStats 有列）。發現登入連續失敗「Lock timeout: another process was holding the lock for too long」：評等一次算幾十檔、多個實例同時背景寫試算表，全部搶同一把 Apps Script 程式鎖，登入排不到。修：背景紀錄類表改用獨立的文件鎖（Code.gs BACKGROUND_TABLES，需使用者再部署）、背景寫入 1.5 秒合併且同 ID 只送最後一次（compactOps）；登入改成帳號表＋該帳號登入紀錄一次請求讀（Google 端篩選），登入紀錄筆數約每 20 次才整理（登入 9～12 秒→約 6 秒）。
