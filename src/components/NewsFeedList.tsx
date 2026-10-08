@@ -53,8 +53,14 @@ export default function NewsFeedList() {
   // 2026-10-06 待在新聞頁不動也要自動更新：定期重抓第一頁，只把「還沒顯示過」的新項目補在最前面、
   // 置頂區整組換新；不動使用者已載入的後續頁與捲動位置。節奏同其他用戶端卡片（lib/autoRefresh.ts），
   // 背景分頁暫停、切回前景立刻補抓（useLivePolling）。重抓失敗就保持畫面不變。
+  // 第一次評估不抓：頁面剛由上面的初次載入抓過了，再抓一次是重複請求（2026-10-08 驗證抓到進頁就連發兩次）
+  const pollArmed = useRef(false);
   useLivePolling({
-    decide: (now) => ({ fetch: true, settle: false, nextCheckMs: clientRefreshMs(now) }),
+    decide: (now) => {
+      const fetch = pollArmed.current;
+      pollArmed.current = true;
+      return { fetch, settle: false, nextCheckMs: clientRefreshMs(now) };
+    },
     onFetch: async () => {
       try {
         const res = await fetch(`/api/news-feed?offset=0&limit=${PAGE_LIMIT}`);

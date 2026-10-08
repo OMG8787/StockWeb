@@ -238,7 +238,7 @@ export default function SiteHeader() {
               aria-controls="symbol-suggestions"
               aria-autocomplete="list"
               autoComplete="off"
-              placeholder="輸入代碼或名稱，例如 2330 或 台積電"
+              placeholder="搜尋 2330 或 台積電"
               className="w-full rounded-md border border-(--gridline) bg-(--surface-2) px-3 py-2 text-sm placeholder:text-(--text-muted) focus:outline-none focus:ring-2 focus:ring-(--accent)"
             />
           </form>

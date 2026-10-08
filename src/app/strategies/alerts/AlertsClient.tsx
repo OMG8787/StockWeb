@@ -128,9 +128,16 @@ export default function AlertsClient() {
         resolve(null);
       }, 90_000);
     });
+    const eventsBefore = readEvents().length;
     window.dispatchEvent(new Event(ALERT_CHECK_NOW_EVENT));
     const result = await runBusy("檢查追蹤名單的訊號中…", () => done);
     if (!result) setMsg({ ok: false, text: "沒有檢查到：請先在「設定通知」選好追蹤名單並儲存（或資料庫暫時比較忙，等幾秒再按一次）。" });
+    else {
+      // 每次都要有回饋：有新事件就說有幾則，沒有就說「已檢查、沒有新事件」，不要讓人以為按鈕沒反應
+      const added = readEvents().length - eventsBefore;
+      const time = new Date(result.at).toLocaleTimeString("zh-TW", { hour12: false });
+      setMsg({ ok: true, text: added > 0 ? `已檢查（${time}）：新增 ${added} 則事件，見下方「最近事件」` : `已檢查（${time}），追蹤 ${result.items.length} 檔，沒有新事件（同一個訊號或名單只會通知一次）` });
+    }
     setBusy(false);
   }
 
