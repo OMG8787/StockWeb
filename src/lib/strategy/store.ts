@@ -406,3 +406,52 @@ export async function persistSimResult(
       : []),
   ]);
 }
+
+// ============================================================
+// 即時提醒設定（每個帳號一列，ID＝UserId）
+// ============================================================
+
+export const ALERT_LIMITS = { maxSymbols: 20, maxStrategies: 8, intervals: [10, 15, 20, 30] as const };
+
+export interface AlertConfig {
+  symbols: string[];
+  strategyIds: string[];
+  intervalSec: number;
+  enabled: boolean;
+}
+
+const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false };
+
+export async function getAlertConfig(userId: string): Promise<AlertConfig> {
+  const [rows] = (await getStore().batch([{ op: "read", table: "Alerts" }])) as Row[][];
+  const r = rows.find((x) => x.ID === userId);
+  if (!r) return { ...DEFAULT_ALERT };
+  return {
+    symbols: parseJson<string[]>(r.Symbols, []),
+    strategyIds: parseJson<string[]>(r.StrategyIds, ["ai"]),
+    intervalSec: (ALERT_LIMITS.intervals as readonly number[]).includes(Number(r.IntervalSec)) ? Number(r.IntervalSec) : 30,
+    enabled: String(r.Enabled).toUpperCase() === "TRUE",
+  };
+}
+
+export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>): Promise<AlertConfig> {
+  const symbols = [...new Set((Array.isArray(input.symbols) ? input.symbols : []).map((s) => text(s, 12).toUpperCase()).filter((s) => /^[A-Z0-9.]{1,12}$/.test(s)))].slice(0, ALERT_LIMITS.maxSymbols);
+  const strategyIds = [...new Set((Array.isArray(input.strategyIds) ? input.strategyIds : []).map((s) => text(s, 40)).filter(Boolean))].slice(0, ALERT_LIMITS.maxStrategies);
+  const intervalSec = (ALERT_LIMITS.intervals as readonly number[]).includes(Number(input.intervalSec)) ? Number(input.intervalSec) : 30;
+  const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true };
+  if (cfg.enabled && (symbols.length === 0 || strategyIds.length === 0)) throw new StrategyError("開啟提醒前，請至少設定一檔股票和一個策略");
+  await getStore().batch([
+    {
+      op: "upsert",
+      table: "Alerts",
+      rows: [
+        {
+          ID: owner.userId, Account: owner.account, Symbols: JSON.stringify(symbols), StrategyIds: JSON.stringify(strategyIds),
+          IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE", UpdatedAt: taipeiNow(),
+        },
+      ],
+    },
+  ]);
+  return cfg;
+}
+

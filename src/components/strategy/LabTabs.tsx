@@ -4,6 +4,8 @@ import Link from "next/link";
 const TABS = [
   { href: "/sim", label: "📈 模擬倉" },
   { href: "/strategies", label: "🧠 策略庫" },
+  { href: "/strategies/compare", label: "📊 策略疊圖" },
+  { href: "/strategies/alerts", label: "🔔 即時提醒" },
   { href: "/indicators", label: "📐 參考指標" },
 ];
 

@@ -8,6 +8,7 @@ import RequirePerm from "@/components/RequirePerm";
 import { PERM } from "@/lib/auth/permissions";
 import WatchlistSync from "@/components/WatchlistSync";
 import NavigationOverlay from "@/components/NavigationOverlay";
+import AlertWatcher from "@/components/strategy/AlertWatcher";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { THEME_STORAGE_KEY } from "@/lib/theme";
 
@@ -55,6 +56,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ChatWidget />
       </RequirePerm>
       <PriceAlertWatcher />
+      {/* 策略即時提醒：有權限的帳號在任何頁面都會背景追蹤（設定在 /strategies/alerts） */}
+      <RequirePerm need={[PERM.STRATEGY_LAB]}>
+        <AlertWatcher />
+      </RequirePerm>
       <PageAutoRefresh />
       {/* 關注清單與庫存一律綁定帳號（未登入時 WatchlistSync 不做事） */}
       <WatchlistSync />

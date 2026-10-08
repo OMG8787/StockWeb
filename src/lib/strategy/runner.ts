@@ -1,3 +1,4 @@
+import { getChartLive } from "@/lib/data/chartLive";
 import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQuote, normalizeSymbol, searchStocks } from "@/lib/data";
 import { getTwChipsHistory, type TwChipsDay } from "@/lib/data/chipsHistory";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
@@ -60,7 +61,8 @@ export interface Target {
 export class DataCache {
   private ctx = new Map<string, Promise<EvalContext | null>>();
   private range: CandleRange = "6m";
-  constructor(private needs: Set<IndicatorNeed>) {}
+  /** live＝盤中用即時價補今天這根日K（即時提醒、策略疊圖用；自動交易用收盤，不開） */
+  constructor(private needs: Set<IndicatorNeed>, private live = false) {}
 
   addNeeds(needs: Iterable<IndicatorNeed>, range: CandleRange = "6m") {
     for (const n of needs) this.needs.add(n);
@@ -68,19 +70,20 @@ export class DataCache {
   }
 
   get(t: Target): Promise<EvalContext | null> {
-    const key = `${t.market}:${t.symbol}:${this.range}:${[...this.needs].sort().join(",")}`;
+    const key = `${t.market}:${t.symbol}:${this.range}:${this.live ? "live" : "close"}:${[...this.needs].sort().join(",")}`;
     let p = this.ctx.get(key);
     if (!p) {
-      p = buildContext(t, this.needs, this.range).catch(() => null);
+      p = buildContext(t, this.needs, this.range, this.live).catch(() => null);
       this.ctx.set(key, p);
     }
     return p;
   }
 }
 
-async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleRange): Promise<EvalContext | null> {
-  const chart = await getChart(t.symbol, range, t.market);
-  const candles = (chart?.candles ?? []).filter((c) => !c.live);
+async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleRange, live = false): Promise<EvalContext | null> {
+  const chart = live ? await getChartLive(t.symbol, range, t.market) : await getChart(t.symbol, range, t.market);
+  // 自動交易只用官方收盤日K；即時模式保留盤中補上的今天這根
+  const candles = (chart?.candles ?? []).filter((c) => live || !c.live);
   if (candles.length === 0) return null;
   const ctx: EvalContext = { symbol: t.symbol, market: t.market, candles };
   const jobs: Promise<unknown>[] = [];
@@ -103,6 +106,7 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleR
 }
 
 /** 策略用到的參數裡最長的天數（均線、區間、N 日…）超過 100 天才需要 1 年日K */
+export type { CandleRange };
 export function rangeFor(cfg: StrategyConfig, indicators: UserIndicator[]): CandleRange {
   const ids = new Set(strategyIndicatorIds(cfg));
   let longest = 0;
@@ -116,7 +120,7 @@ export function rangeFor(cfg: StrategyConfig, indicators: UserIndicator[]): Cand
   return longest > LONG_LOOKBACK_DAYS ? "1y" : "6m";
 }
 
-function needsOf(cfg: StrategyConfig, indicators: UserIndicator[]): Set<IndicatorNeed> {
+export function needsOf(cfg: StrategyConfig, indicators: UserIndicator[]): Set<IndicatorNeed> {
   const ids = new Set(strategyIndicatorIds(cfg));
   const out = new Set<IndicatorNeed>(["candles"]);
   for (const i of indicators) if (ids.has(i.id)) INDICATOR_TYPE_MAP.get(i.typeId)?.needs.forEach((n) => out.add(n));
@@ -130,7 +134,7 @@ async function marketTopTargets(n: number): Promise<Target[]> {
 }
 
 /** 股票清單冷啟動可能要十幾秒：查名稱最多等 3 秒，查不到就先用代號（不影響判斷與交易） */
-async function warmUniverseBriefly(): Promise<void> {
+export async function warmUniverseBriefly(): Promise<void> {
   await Promise.race([ensureTwUniverseWarm().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
 }
 

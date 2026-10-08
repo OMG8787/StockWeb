@@ -25,7 +25,9 @@ export type TableName =
   | "Learning"
   | "SimPortfolio"
   | "BriefArchive"
-  | "ModelStats";
+  | "ModelStats"
+  // 即時提醒設定（每個帳號一列）
+  | "Alerts";
 export type Row = Record<string, string>;
 
 export const TABLE_KEYS: Record<TableName, string> = {
@@ -45,6 +47,7 @@ export const TABLE_KEYS: Record<TableName, string> = {
   SimPortfolio: "ID",
   BriefArchive: "ID",
   ModelStats: "ID",
+  Alerts: "ID",
 };
 
 export type StoreOp =
@@ -85,7 +88,7 @@ const READ_CACHE_MS = 60_000;
  * 有 Redis 時，小表的讀取暫存也放進 Redis，所有伺服器實例共用（Vercel 每個請求常落在不同實例，
  * 只靠記憶體幾乎命中不了）。大表（登入紀錄、交易紀錄、回饋、每日淨值）不放，避免超過單筆大小上限。
  */
-const SHARED_CACHE_TABLES = new Set<TableName>(["Users", "Sessions", "Holdings", "Indicators", "Strategies", "Sims"]);
+const SHARED_CACHE_TABLES = new Set<TableName>(["Users", "Sessions", "Holdings", "Indicators", "Strategies", "Sims", "Alerts"]);
 const sharedKey = (t: TableName) => `gas-table:v1:${t}`;
 
 /** 取結果（Google 轉址後的網址）失敗時重試幾次 */
@@ -238,7 +241,7 @@ export class MemoryStore implements TableStore {
   private async load(): Promise<Record<TableName, Row[]>> {
     const empty: Record<TableName, Row[]> = {
       Users: [], Sessions: [], LoginLog: [], Feedback: [], Holdings: [], Indicators: [], Strategies: [], Sims: [], SimTrades: [], SimNav: [],
-      RatingLog: [], RatingConfirm: [], Learning: [], SimPortfolio: [], BriefArchive: [], ModelStats: [],
+      RatingLog: [], RatingConfirm: [], Learning: [], SimPortfolio: [], BriefArchive: [], ModelStats: [], Alerts: [],
     };
     // 檔案模式每次都重讀：proxy 與 API 在 next dev 裡是不同的模組實例，不能各自快取
     if (!this.file) return (this.data ??= empty);
