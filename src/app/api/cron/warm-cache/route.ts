@@ -20,6 +20,7 @@ import { getNewsFeed } from "@/lib/ai/newsfeed";
 import { runLearningUpdate } from "@/lib/ai/learning/learningStore";
 import { runSimPortfolio } from "@/lib/simPortfolio/run";
 import { getMarketStatus } from "@/lib/marketStatus";
+import { redis } from "@/lib/data/kv";
 
 // Triggered every few minutes by an external scheduler (see
 // .github/workflows/warm-cache.yml — Vercel's own Cron is limited to once a
@@ -58,6 +59,22 @@ const RESPOND_DEADLINE_MS = 25_000;
 // other symbol's lookups too. 2330 is always listed on TWSE, so it's a safe
 // constant to warm with regardless of TPEx upstream health.
 const WARM_PROBE_SYMBOL = "2330";
+
+/**
+ * 記下最近 20 次呼叫（時間、來源 user-agent、跑了哪些項目）：確認外部排程（cron-job.org）真的有在打、
+ * 以及每次實際做了多少事。只多 2 個 Redis 指令；記錄失敗不影響預熱。
+ */
+const CALL_LOG_KEY = "warm-cache:log:v1";
+async function recordCall(req: NextRequest, info: { full: boolean; ran: string[] }) {
+  if (!redis) return;
+  try {
+    const prev = (await redis.get<unknown[]>(CALL_LOG_KEY)) ?? [];
+    const entry = { at: new Date().toISOString(), ua: (req.headers.get("user-agent") ?? "").slice(0, 60), full: info.full, ran: info.ran.length };
+    await redis.set(CALL_LOG_KEY, [entry, ...(Array.isArray(prev) ? prev : [])].slice(0, 20), { ex: 7 * 86400 });
+  } catch {
+    // 記錄失敗就算了
+  }
+}
 
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -157,6 +174,7 @@ export async function GET(req: NextRequest) {
         if (!(label in outcomes)) outcomes[label] = `仍在背景執行（>${RESPOND_DEADLINE_MS / 1000}s）`;
       }
     }
+    await recordCall(req, { full, ran: due.map((e) => e.label) });
     return NextResponse.json({
       ok: true,
       warmedAt: new Date().toISOString(),
