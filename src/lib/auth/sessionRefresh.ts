@@ -88,7 +88,7 @@ export async function refreshSession(
 }
 
 /** 把 Upstash Redis 包成 MiniKv（Upstash 的 set 選項型別是嚴格的聯集，不能直接傳） */
-export function kvFromRedis(r: import("@upstash/redis").Redis | null): MiniKv | null {
+export function kvFromRedis(r: import("@/lib/data/kv").KvClient | null): MiniKv | null {
   if (!r) return null;
   return {
     get: <T>(key: string) => r.get<T>(key),
