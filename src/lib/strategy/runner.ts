@@ -129,6 +129,11 @@ async function marketTopTargets(n: number): Promise<Target[]> {
   return items.slice(0, n).map((i) => ({ symbol: i.symbol, market: "TW" as const, name: i.name }));
 }
 
+/** 股票清單冷啟動可能要十幾秒：查名稱最多等 3 秒，查不到就先用代號（不影響判斷與交易） */
+async function warmUniverseBriefly(): Promise<void> {
+  await Promise.race([ensureTwUniverseWarm().catch(() => {}), new Promise((r) => setTimeout(r, 3000))]);
+}
+
 export function taipeiToday(): string {
   return taipeiNow().slice(0, 10);
 }
@@ -256,7 +261,7 @@ async function resolveTradePrice(
   const chart = await getChart(symbol, "1m", market).catch(() => null);
   const last = chart?.candles.filter((c) => !c.live).at(-1);
   if (!last) throw new StrategyError("抓不到這檔股票的報價（代號不存在，或資料來源暫時忙碌）");
-  if (market === "TW") await ensureTwUniverseWarm().catch(() => {});
+  if (market === "TW") await warmUniverseBriefly();
   const name = (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol;
   return { symbol, market, name, price: last.close, note: `即時報價暫時抓不到，以 ${last.time} 收盤價成交` };
 }
@@ -271,7 +276,7 @@ export async function previewStrategy(userId: string, strategyId: string, target
   const symbol = normalizeSymbol(target.symbol);
   if (!symbol) throw new StrategyError("請輸入股票代號");
   const market = target.market ?? (detectMarket(symbol) === "US" ? "US" : "TW");
-  if (market === "TW") await ensureTwUniverseWarm().catch(() => {});
+  if (market === "TW") await warmUniverseBriefly();
   const t: Target = { symbol, market, name: (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol };
   const cache = new DataCache(new Set());
   cache.addNeeds(needsOf(strategy.config, indicators), rangeFor(strategy.config, indicators));
