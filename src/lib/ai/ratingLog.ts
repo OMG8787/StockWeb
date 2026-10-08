@@ -33,6 +33,57 @@ export function ratingLogField(symbol: string, code: RatingCode): string {
 }
 const RATING_LOG_TTL_SECONDS = 400 * 86_400;
 
+/**
+ * 「哪些日期有評等紀錄」的索引（Redis set）。2026-10-08 量到：一次即時提醒檢查要 1000 個 Redis 指令，
+ * 主因是讀評等紀錄／確認狀態時「不管有沒有資料，往回逐日各讀一次」（200 天＝201 個指令），
+ * 5 秒輪詢一小時就能用掉 72 萬次、把免費額度（每月 50 萬）一次燒光。有了索引只讀真的有資料的日子。
+ * 索引第一次使用時用舊辦法掃描一次建立（往回 400 天，一次性），之後每次寫入評等紀錄就順手加進去；
+ * 最近 3 天不管索引有沒有都一定會查（別的實例剛寫的日子，索引暫存最多慢 15 秒才看到也不會漏）。
+ */
+const DAYS_INDEX_KEY = "rating-days:v1";
+const DAYS_BUILT_KEY = "rating-days:v1:built";
+const DAYS_CACHE_MS = 15_000;
+const SCAN_BACK_DAYS = 400;
+let daysCache: { at: number; days: Set<string> } | null = null;
+
+async function loadDaysIndex(now: Date): Promise<Set<string>> {
+  if (daysCache && Date.now() - daysCache.at < DAYS_CACHE_MS) return daysCache.days;
+  if (!redis) throw new Error("no redis");
+  if (!(await redis.get(DAYS_BUILT_KEY))) {
+    // 一次性建索引：用舊辦法逐日看哪天有資料
+    const all: string[] = [];
+    for (let i = 0; i <= SCAN_BACK_DAYS; i++) all.push(taipeiDayKey(new Date(now.getTime() - i * 86_400_000)));
+    const p = redis.pipeline();
+    for (const d of all) p.hgetall(ratingLogKey(d));
+    const results = (await p.exec()) as Array<Record<string, unknown> | null>;
+    const found = all.filter((_, i) => results[i] && Object.keys(results[i]!).length > 0);
+    if (found.length) await redis.sadd(DAYS_INDEX_KEY, found[0], ...found.slice(1));
+    await redis.set(DAYS_BUILT_KEY, 1);
+  }
+  const members = ((await redis.smembers(DAYS_INDEX_KEY)) ?? []) as string[];
+  daysCache = { at: Date.now(), days: new Set(members) };
+  return daysCache.days;
+}
+
+/** 從候選日期裡留下「有評等紀錄」的日子（加上最近 3 天一定保留）；索引讀不到時原樣回傳（退回舊辦法，只是指令多） */
+export async function existingRatingLogDays(candidates: string[], now: Date = new Date()): Promise<string[]> {
+  if (!kvEnabled || !redis || candidates.length === 0) return candidates;
+  try {
+    const idx = await loadDaysIndex(now);
+    const recentFrom = taipeiDayKey(new Date(now.getTime() - 3 * 86_400_000));
+    return candidates.filter((d) => idx.has(d) || d >= recentFrom);
+  } catch (err) {
+    console.warn("[rating-log] 日期索引讀取失敗，改逐日掃描：", err);
+    return candidates;
+  }
+}
+
+/** 寫入評等紀錄的日子時，同步把日期加進索引 */
+export function noteRatingLogDay(p: { sadd: (key: string, ...members: string[]) => unknown }, day: string): void {
+  p.sadd(DAYS_INDEX_KEY, day);
+  daysCache?.days.add(day);
+}
+
 export type RatingSource = "today-brief" | "ai-ask" | "stock-button" | "tech-screen" | "sim-portfolio" | "other";
 
 export const RATING_SOURCE_LABEL: Record<RatingSource, string> = {
@@ -143,6 +194,7 @@ async function writeEntry(entry: RatingLogEntry): Promise<void> {
     const p = redis.pipeline();
     p.hsetnx(key, field, JSON.stringify(entry));
     p.expire(key, RATING_LOG_TTL_SECONDS);
+    noteRatingLogDay(p, entry.day);
     await p.exec();
   } catch (err) {
     seen.delete(memo);
@@ -177,8 +229,10 @@ export async function readRatingLog(from: string, to: string): Promise<RatingLog
     days.push(d.toISOString().slice(0, 10));
   }
   if (days.length === 0) return [];
+  const present = await existingRatingLogDays(days);
+  if (present.length === 0) return [];
   const p = redis.pipeline();
-  for (const day of days) p.hgetall(ratingLogKey(day));
+  for (const day of present) p.hgetall(ratingLogKey(day));
   const results = (await p.exec()) as Array<Record<string, unknown> | null>;
   const out: RatingLogEntry[] = [];
   for (const h of results) {

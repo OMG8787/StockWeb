@@ -1,6 +1,6 @@
 import { kvEnabled, redis } from "@/lib/data/kv";
 import type { ConfirmState } from "./ratingStability";
-import { ratingLogField, ratingLogKey, type RatingLogEntry } from "./ratingLog";
+import { existingRatingLogDays, ratingLogField, ratingLogKey, type RatingLogEntry } from "./ratingLog";
 import type { HoldingCode, RatingCode } from "./siteRating";
 
 /**
@@ -78,9 +78,11 @@ export function stateFromRatingLog(entries: RatingLogEntry[], day: string): Conf
 
 async function bootstrapFromRatingLog(symbol: string, day: string): Promise<ConfirmState | null> {
   if (!redis) return null;
-  const days: string[] = [];
+  const candidates: string[] = [];
   const base = Date.parse(`${day}T00:00:00Z`);
-  for (let i = 1; i <= BOOTSTRAP_LOOKBACK_DAYS; i++) days.push(new Date(base - i * 86_400_000).toISOString().slice(0, 10));
+  for (let i = 1; i <= BOOTSTRAP_LOOKBACK_DAYS; i++) candidates.push(new Date(base - i * 86_400_000).toISOString().slice(0, 10));
+  const days = await existingRatingLogDays(candidates);
+  if (days.length === 0) return stateFromRatingLog([], day);
   const p = redis.pipeline();
   for (const d of days) p.hmget(ratingLogKey(d), ...LOG_CODES.map((c) => ratingLogField(symbol, c)));
   const results = (await p.exec()) as Array<Record<string, unknown> | null>;

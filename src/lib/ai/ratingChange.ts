@@ -1,6 +1,6 @@
 import { kvEnabled, redis } from "@/lib/data/kv";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
-import { ratingLogField, ratingLogKey, type RatingLogEntry } from "./ratingLog";
+import { existingRatingLogDays, ratingLogField, ratingLogKey, type RatingLogEntry } from "./ratingLog";
 import type { RatingCode, SiteRating } from "./siteRating";
 
 /**
@@ -89,9 +89,11 @@ export async function readPreviousRatings(symbols: string[], now: Date = new Dat
   const out = new Map<string, RatingLogEntry>();
   if (!kvEnabled || !redis || symbols.length === 0) return out;
   const today = taipeiDayKey(now);
-  const days: string[] = [];
-  for (let i = 1; i <= LOOKBACK_DAYS; i++) days.push(taipeiDayKey(new Date(now.getTime() - i * 86400_000)));
+  const candidates: string[] = [];
+  for (let i = 1; i <= LOOKBACK_DAYS; i++) candidates.push(taipeiDayKey(new Date(now.getTime() - i * 86400_000)));
   try {
+    const days = await existingRatingLogDays(candidates, now);
+    if (days.length === 0) return out;
     const syms = symbols.map((s) => s.toUpperCase());
     const fields = syms.flatMap((s) => CODES.map((c) => ratingLogField(s, c)));
     const p = redis.pipeline();

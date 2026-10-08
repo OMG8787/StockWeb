@@ -4,7 +4,7 @@ import { kvEnabled, redis } from "@/lib/data/kv";
 import { fetchNews } from "@/lib/data/news";
 import { taipeiDayKey } from "@/lib/pollingSchedule";
 import { callAiProviders } from "./provider";
-import { buildRatingLogEntry, ratingLogField, ratingLogKey, type RatingLogEntry, type RatingSource } from "./ratingLog";
+import { buildRatingLogEntry, noteRatingLogDay, ratingLogField, ratingLogKey, type RatingLogEntry, type RatingSource } from "./ratingLog";
 import { describeSiteRating, type RatingCode } from "./siteRating";
 import type { StockRatingResult } from "./stockRating";
 import { describeExperience } from "./learning/experienceText";
@@ -210,6 +210,7 @@ function attachAiToRatingLog(r: StockRatingResult, j: AiJudgment, source: Rating
     const field = ratingLogField(entry.symbol, entry.code);
     const ai = { code: j.code, delta: j.delta, reason: j.reason, confidence: j.confidence, ...(j.model ? { model: j.model } : {}) };
     try {
+      noteRatingLogDay(redis!, entry.day);
       const existing = (await redis!.hget(key, field)) as RatingLogEntry | string | null;
       if (existing == null) {
         await redis!.hsetnx(key, field, JSON.stringify({ ...entry, ai }));

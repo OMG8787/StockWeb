@@ -81,7 +81,7 @@ export default function AccountClient() {
 
       {profile && (
         <section className={cardCls}>
-          <dl className="grid grid-cols-[6rem_1fr] gap-y-2 text-sm">
+          <dl className="grid grid-cols-[6rem_minmax(0,1fr)] gap-y-2 text-sm">
             <dt className="text-(--text-muted)">顯示名稱</dt>
             <dd>
               <form onSubmit={saveName} className="flex flex-wrap items-center gap-2">
@@ -90,7 +90,7 @@ export default function AccountClient() {
                   onChange={(e) => setNameEdit(e.target.value)}
                   maxLength={40}
                   aria-label="顯示名稱"
-                  className={`${inputCls} !w-auto min-w-40 flex-1 !py-1`}
+                  className={`${inputCls} !w-auto min-w-0 flex-1 basis-40 !py-1`}
                 />
                 <button type="submit" className={`${btnPrimary} !py-1 text-xs`} disabled={nameBusy || nameEdit === null || nameEdit.trim() === profile.name || !nameEdit.trim()}>
                   {nameBusy ? "儲存中…" : "儲存名稱"}
