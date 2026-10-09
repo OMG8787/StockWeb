@@ -54,7 +54,7 @@ export default function BusyOverlay() {
         </div>
         {elapsed > SLOW_MS && (
           <p className="text-xs text-(--text-secondary)">
-            {elapsed > VERY_SLOW_MS ? "試算表今天回應特別慢，還在處理中（已超過 30 秒），完成後畫面會自動更新。請不要重複按。" : "試算表有時要 10～30 秒，請稍等、不要重複按，完成後畫面會自動更新。"}
+            {elapsed > VERY_SLOW_MS ? "還在處理中（已超過 30 秒），完成後畫面會自動更新。請不要重複按。" : "這次花比較久（可能在即時抓行情或計算），請稍等、不要重複按，完成後畫面會自動更新。"}
           </p>
         )}
       </div>
