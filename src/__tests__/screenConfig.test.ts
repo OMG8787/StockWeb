@@ -5,7 +5,8 @@ import { normalizeStrategyConfig } from "@/lib/strategy/engine";
 describe("股票篩選判斷設定", () => {
   it("整理設定：不合法的值用預設、未知來源回 null", () => {
     expect(normalizeScreen({ source: "metric", metric: "nope", position: "xx", count: 7 })).toEqual({ source: "metric", metric: "volume_today", position: "top", count: 20 });
-    expect(normalizeScreen({ source: "ai", mode: "rating_buy", count: 30 })).toEqual({ source: "ai", mode: "rating_buy", count: 30 });
+    // 舊設定的 rating_buy 讀進來自動當成 AI 建議名單
+    expect(normalizeScreen({ source: "ai", mode: "rating_buy", count: 30 })).toEqual({ source: "ai", mode: "action_picks", count: 30 });
     expect(normalizeScreen({ source: "watchlist" })).toEqual({ source: "watchlist" });
     expect(normalizeScreen({ source: "x" })).toBeNull();
     expect(normalizeScreen(null)).toBeNull();

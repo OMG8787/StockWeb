@@ -1,13 +1,12 @@
 import { searchStocks } from "@/lib/data";
 import { getTwFundamentalsMap } from "@/lib/data/companyData";
 import { getVolumeHistory } from "@/lib/data/volumeHistory";
-import { getStockRatings } from "@/lib/ai/stockRating";
 import { getActionBrief } from "@/lib/ai/actionBrief";
 import { getServerWatchlist } from "@/lib/watchlistStore";
 import type { SearchItem } from "@/lib/data/types";
 import { combineSources, describeSource, slicePosition, periodDays, type ScreenConfig, type ScreenMetric, type ScreenedStock, type SourceMode, type StockSource } from "./screenConfig";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
-import { StrategyError } from "./store";
+import { StrategyError, getAlertConfig } from "./store";
 
 export * from "./screenConfig";
 
@@ -57,19 +56,9 @@ export async function runScreen(cfg: ScreenConfig, userId: string): Promise<Scre
     return (await getServerWatchlist(userId)).map((w) => ({ symbol: w.symbol, market: w.market, name: w.name }));
   }
   if (cfg.source === "ai") {
-    if (cfg.mode === "action_picks") {
-      const brief = await getActionBrief();
-      return (brief.listPicks ?? brief.picks).slice(0, cfg.count).map((p) => ({ symbol: p.symbol, market: "TW" as const, name: p.name }));
-    }
-    const pool = (await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" })).filter((i) => i.volume > 0).slice(0, 50);
-    const ratings = await getStockRatings(pool.map((p) => ({ symbol: p.symbol, market: "TW" as const })), 2);
-    return pool
-      .filter((p) => {
-        const code = ratings.get(p.symbol.toUpperCase())?.rating.code;
-        return code === "buy" || code === "buy-on-pullback";
-      })
-      .slice(0, cfg.count)
-      .map((p) => ({ symbol: p.symbol, market: "TW" as const, name: p.name }));
+    // AI 建議名單：整份（帳號設定的前 N 檔，跟「我的關注 → AI 建議清單」同一份）；count 欄位只為相容舊設定，不再使用
+    const [brief, alert] = await Promise.all([getActionBrief(), getAlertConfig(userId)]);
+    return (brief.listPicks ?? brief.picks).slice(0, alert.aiPickLimit).map((p) => ({ symbol: p.symbol, market: "TW" as const, name: p.name }));
   }
   // 依指標排名：只算當天有成交的台股
   const items = (await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" })).filter((i) => i.volume > 0);

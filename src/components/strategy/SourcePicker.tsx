@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MAX_SOURCES, SCREEN_AI_MODES, SCREEN_COUNTS, SCREEN_METRICS, SCREEN_POSITIONS, type ScreenAiMode, type ScreenMetric, type ScreenPosition } from "@/lib/strategy/screenConfig";
+import { MAX_SOURCES, SCREEN_AI_MODES, SCREEN_COUNTS, SCREEN_METRICS, SCREEN_POSITIONS, type ScreenMetric, type ScreenPosition } from "@/lib/strategy/screenConfig";
 import { getWatchlist } from "@/lib/watchlist";
 import { api, describeSource, type SourceMode, type StockSource, type Strategy } from "./api";
 import { btnGhost, inputCls } from "@/components/auth/ui";
@@ -237,20 +237,7 @@ export default function SourcePicker({
               )}
               {s.source === "ai" && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <select value={s.mode} onChange={(e) => patch(i, { ...s, mode: e.target.value as ScreenAiMode })} className={sel}>
-                    {opts.aiModes.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                  <select value={s.count} onChange={(e) => patch(i, { ...s, count: Number(e.target.value) })} className={sel}>
-                    {opts.counts.map((n) => (
-                      <option key={n} value={n}>
-                        最多 {n} 檔
-                      </option>
-                    ))}
-                  </select>
+                  <p className="text-xs text-(--text-muted)">每次執行時讀取 AI 建議名單（依本站評分排名，取你在「我的關注 → AI 建議清單」設定的前 N 檔），名單變動會跟著變。</p>
                 </div>
               )}
               {s.source === "list" && <ListEditor symbols={s.symbols} onChange={(symbols) => patch(i, { source: "list", symbols })} />}

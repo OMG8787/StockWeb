@@ -27,8 +27,8 @@ export type ScreenPosition = (typeof SCREEN_POSITIONS)[number]["id"];
 export const SCREEN_COUNTS = [10, 20, 30, 50, 100] as const;
 
 export const SCREEN_AI_MODES = [
-  { id: "action_picks", label: "今日建議名單（本站每天選出的建議買進）" },
-  { id: "rating_buy", label: "從當日成交量前 50 名中，挑本站評等「建議買進」的" },
+  // 2026-10-12 使用者：「AI 判斷應該是從 AI 建議名單中去跑使用者指定的策略」——只剩這一種；舊設定的 rating_buy 讀進來自動當成它
+  { id: "action_picks", label: "AI 建議名單（你在「我的關注 → AI 建議清單」設定的前 N 檔）" },
 ] as const;
 export type ScreenAiMode = (typeof SCREEN_AI_MODES)[number]["id"];
 
@@ -62,7 +62,7 @@ export function normalizeScreen(raw: unknown): ScreenConfig | null {
 export function describeScreen(s: ScreenConfig | null | undefined): string {
   if (!s) return "未設定股票篩選";
   if (s.source === "watchlist") return "全部關注名單";
-  if (s.source === "ai") return `${SCREEN_AI_MODES.find((m) => m.id === s.mode)?.label ?? "AI 判斷"}，最多 ${s.count} 檔`;
+  if (s.source === "ai") return "AI 建議名單（依帳號設定的檔數）";
   const metric = SCREEN_METRICS.find((m) => m.id === s.metric)?.label ?? s.metric;
   const pos = s.position === "top" ? "前" : s.position === "bottom" ? "後" : "中間";
   return `${metric} ${pos} ${s.count} 名`;

@@ -488,6 +488,10 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-12（續）：策略模擬器「AI 判斷」來源改成只讀 AI 建議名單
+
+使用者：「模擬器裡的 AI 判斷應該是要從 ai 建議名單中去跑使用者指定的策略，現在如果是 16 筆就應該從那 16 筆」。原本有兩種模式，其中「成交量前 50 名挑建議買進」（rating_buy）是另一套候選池，已移除，舊設定讀進來自動當 action_picks；`runScreen` 的 AI 來源改為讀 `listPicks` 並用帳號的 `aiPickLimit` 切（不再用來源列的 count，UI 的檔數下拉拿掉）。驗證：tsc、vitest 744 全過；未做正式站實測（改動小，邏輯是單一函式）。
+
 ### 2026-10-12（續）：AI 建議名單檔數改成帳號自己設定（5／10／15／20）
 
 使用者：「建議名單上限應該改成帳號自己設定，依照評分排名，有些使用者能預設10檔，有些20檔」。共用名單現在算到最多 20 檔（`AI_LIST_MAX`，評等池 RATED_PICK_LIMIT 8→24、候選池 22→30，快取鍵 `action-list:v8`），`ActionBrief.listPicks` 帶完整排名；今日建議文字／AI 解說／建議紀錄仍只用前 5 檔（`PICK_GROUP_LIMIT`）。檔數存在 Alerts 列的 `AiPickLimit`（`aiPickLimit`，預設 5，`src/lib/aiPickLimits.ts`），「我的關注 → AI 建議清單」分頁有「顯示前 N 檔」下拉（API `/api/action-brief/limit`），提醒追蹤 AI 名單（runScreen／resolveTracked）也用同一個設定。已驗證：tsc、vitest 744 全過、build 通過；尚未派獨立驗證（待測：評等池變大後 action-brief 的耗時與正式站下拉實際切換）。
