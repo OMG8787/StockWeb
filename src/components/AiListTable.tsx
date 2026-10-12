@@ -57,8 +57,8 @@ export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
             const q = quotes[r.symbol.toUpperCase()];
             const price = q?.price ?? r.price;
             const change = q?.changePercent ?? r.changePercent;
-            const pnlAmount = (price - r.avgCost) * r.shares;
-            const pnlPct = r.avgCost > 0 ? (price / r.avgCost - 1) * 100 : r.pnlPct;
+            // 損益用組合本身的數字（已扣假設賣出成本，跟首頁卡片、/portfolio 一致），不用即時價重算，避免三處數字對不上
+            const { pnl: pnlAmount, pnlPct } = r;
             return (
               <tr key={r.symbol} className="whitespace-nowrap border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
                 <td className="py-2 pr-1">
@@ -69,7 +69,7 @@ export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
                 <td className={`py-2 pr-2 text-right tabular-nums ${change != null ? priceDirectionClass(change) : "text-(--text-muted)"}`}>{change != null ? formatPercent(change) : "—"}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{r.shares.toLocaleString()}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(r.avgCost, "TWD")}</td>
-                <td className={`py-2 pr-2 text-right tabular-nums ${priceDirectionClass(pnlPct)}`} title="未實現損益：現價相對平均成本的漲跌（金額未扣賣出成本），不是今日漲跌幅">
+                <td className={`py-2 pr-2 text-right tabular-nums ${priceDirectionClass(pnlPct)}`} title="未實現損益：現價相對平均成本的漲跌（已扣假設賣出成本，與首頁卡片、完整持股頁相同），不是今日漲跌幅">
                   {pnlAmount > 0 ? "+" : ""}
                   {Math.round(pnlAmount).toLocaleString("en-US")} 元 <span className="text-xs">({formatPercent(pnlPct)})</span>
                 </td>

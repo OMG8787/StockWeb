@@ -35,6 +35,8 @@ export interface AiHoldRow {
   avgCost: number;
   price: number;
   changePercent: number | null;
+  /** 未實現損益金額與百分比（來自 AI 模擬組合，已扣假設賣出成本，跟首頁卡片、/portfolio 同一份） */
+  pnl: number;
   pnlPct: number;
   weightPct: number;
   buyDay: string;
@@ -89,6 +91,7 @@ export function AiListsProvider({ children }: { children: ReactNode }) {
             avgCost: h.avgCost,
             price: h.price,
             changePercent: h.changePercent,
+            pnl: h.pnl,
             pnlPct: h.pnlPct,
             weightPct: h.weightPct,
             buyDay: h.buyDay,
