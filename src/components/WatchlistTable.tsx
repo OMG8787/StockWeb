@@ -20,6 +20,7 @@ import IndustryCell from "./IndustryCell";
 import StickyTableScroll from "./StickyTableScroll";
 import WatchlistButton from "./WatchlistButton";
 import { AiTagBadges } from "./AiListsContext";
+import { AdviceBadge } from "./WatchAdviceContext";
 
 /**
  * 關注清單自己的列型別。跟 `SearchItem` 最大的差別是**報價欄位允許 null**：
@@ -57,6 +58,14 @@ export interface HoldingItem extends WatchlistQuote {
 /** 抓不到報價時那一列顯示的字樣，與全站「抓不到就誠實說沒有」的慣例一致。 */
 const NO_QUOTE_LABEL = "資料暫缺";
 const NO_QUOTE_HINT = "這一檔的即時報價暫時抓不到（資料來源逾時等），股票仍在你的關注清單裡，下一輪自動重抓就會恢復";
+
+/** 「操作建議」欄標題的說明（依本站綜合評等；每檔的詳細說明在儲存格上） */
+const ADVICE_HEADER_HINT = [
+  "操作建議：依本站綜合評等自動產生。",
+  "買／賣／續抱：有填持有股數與成本的用「持有中」建議，其餘用「還沒持有」建議（不買＝先不要買）。",
+  "加 * ＝需要觀察（結論還在確認期、有短線風險、大盤偏弱或把握程度低）。",
+  "滑鼠移到每檔的建議上看詳細說明。",
+].join(String.fromCharCode(10));
 
 function byOrder(a: HoldingItem, b: HoldingItem): number {
   return (a.order ?? 0) - (b.order ?? 0);
@@ -534,6 +543,12 @@ function DraggableGroup({
               <th className="w-6" />
               <th className="w-8" />
               <th className="sticky-name py-2 pr-1.5 font-medium whitespace-nowrap">代碼 / 名稱</th>
+              <th
+                className="py-2 pr-1.5 font-medium whitespace-nowrap"
+                title={ADVICE_HEADER_HINT}
+              >
+                操作建議
+              </th>
               <th className="py-2 pr-1.5 font-medium" title={FINE_INDUSTRY_HINT}>
                 產業
               </th>
@@ -785,6 +800,9 @@ function HoldingRow({
             <AiTagBadges symbol={item.symbol} market={item.market} />
           </span>
         </Link>
+      </td>
+      <td className="py-2 pr-1.5 whitespace-nowrap">
+        <AdviceBadge market={item.market} symbol={item.symbol} />
       </td>
       {/* 產業文字可能很長（例如「塑化中游（可塑劑／塑膠原料）」）：桌機限寬單行截斷、完整文字放 title；
           手機最多 2 行完整顯示，點一下展開全文（IndustryCell）。 */}

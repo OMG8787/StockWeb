@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ActionListLogEntry } from "@/lib/ai/actionListLog";
 import { clientRefreshMs } from "@/lib/autoRefresh";
 import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
@@ -60,6 +60,11 @@ export default function ActionListLog() {
   const { data, failed } = useFetchOnce<{ entries: ActionListLogEntry[] }>("/api/action-list-log", clientRefreshMs);
   const [shown, setShown] = useState(PAGE);
   const entries = data?.entries ?? null;
+  // 從別的頁面帶著 #action-list-log 進來：紀錄區是資料載入後才有高度，瀏覽器在那之前處理過錨點了，載入完成後補捲一次
+  const loaded = entries !== null;
+  useEffect(() => {
+    if (loaded && window.location.hash === "#action-list-log") document.getElementById("action-list-log")?.scrollIntoView({ block: "start" });
+  }, [loaded]);
   // 現價：只查「加入」過的股票（去重、最多 60 檔）
   const symbols = useMemo(() => [...new Set((entries ?? []).filter((e) => e.event === "add").map((e) => e.symbol))].slice(0, 60), [entries]);
   const quotes = useTwQuotes(symbols);

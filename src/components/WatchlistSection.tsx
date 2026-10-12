@@ -6,6 +6,7 @@ import MarketTabs from "@/components/MarketTabs";
 import WatchlistCsvControls from "@/components/WatchlistCsvControls";
 import { AiListsProvider, useAiLists } from "@/components/AiListsContext";
 import { AiHoldingsTable, AiPicksTable } from "@/components/AiListTable";
+import { WatchAdviceProvider } from "@/components/WatchAdviceContext";
 import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
@@ -317,10 +318,12 @@ function WatchlistSectionInner() {
           </ul>
         </div>
       ) : (
-        <MarketTabs
-          tw={<WatchlistTable items={displayItems.filter((i) => i.market === "TW")} emptyLabel="尚未關注任何台股" />}
-          us={<WatchlistTable items={displayItems.filter((i) => i.market === "US")} emptyLabel="尚未關注任何美股" />}
-        />
+        <WatchAdviceProvider list={list}>
+          <MarketTabs
+            tw={<WatchlistTable items={displayItems.filter((i) => i.market === "TW")} emptyLabel="尚未關注任何台股" />}
+            us={<WatchlistTable items={displayItems.filter((i) => i.market === "US")} emptyLabel="尚未關注任何美股" />}
+          />
+        </WatchAdviceProvider>
       )}
     </section>
   );
