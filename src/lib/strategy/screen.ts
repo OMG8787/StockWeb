@@ -59,7 +59,7 @@ export async function runScreen(cfg: ScreenConfig, userId: string): Promise<Scre
   if (cfg.source === "ai") {
     if (cfg.mode === "action_picks") {
       const brief = await getActionBrief();
-      return brief.picks.slice(0, cfg.count).map((p) => ({ symbol: p.symbol, market: "TW" as const, name: p.name }));
+      return (brief.listPicks ?? brief.picks).slice(0, cfg.count).map((p) => ({ symbol: p.symbol, market: "TW" as const, name: p.name }));
     }
     const pool = (await searchStocks({ market: "TW", sortBy: "volume", sortDir: "desc" })).filter((i) => i.volume > 0).slice(0, 50);
     const ratings = await getStockRatings(pool.map((p) => ({ symbol: p.symbol, market: "TW" as const })), 2);

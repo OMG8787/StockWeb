@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { AI_PICK_LIMIT_DEFAULT, normalizePickLimit } from "@/lib/aiPickLimits";
 import { getStore, type Row } from "@/lib/auth/store";
 import { taipeiNow } from "@/lib/auth/accounts";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
@@ -454,9 +455,11 @@ export interface AlertConfig {
   notifyListChanges: boolean;
   /** 定時提醒（鬧鐘） */
   alarms: AlarmSetting[];
+  /** AI 建議名單要看／追蹤前幾檔（依本站評分排名；帳號自己設定，見 ALERT_LIMITS.pickLimits） */
+  aiPickLimit: number;
 }
 
-const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, trackWatchlist: false, trackAiPicks: false, notifyListChanges: true, alarms: [] };
+const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, trackWatchlist: false, trackAiPicks: false, notifyListChanges: true, alarms: [], aiPickLimit: AI_PICK_LIMIT_DEFAULT };
 
 export async function getAlertConfig(userId: string): Promise<AlertConfig> {
   const [rows] = (await getStore().batch([{ op: "read", table: "Alerts" }])) as Row[][];
@@ -472,6 +475,7 @@ export async function getAlertConfig(userId: string): Promise<AlertConfig> {
     trackAiPicks: String(r.TrackAiPicks).toUpperCase() === "TRUE",
     notifyListChanges: String(r.NotifyListChanges ?? "TRUE").toUpperCase() !== "FALSE",
     alarms: normalizeAlarms(parseJson<unknown[]>(r.Alarms, [])),
+    aiPickLimit: normalizePickLimit(r.AiPickLimit),
   };
 }
 
@@ -482,6 +486,7 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
   const cfg: AlertConfig = { symbols, strategyIds, intervalSec, enabled: input.enabled === true, notifySell: input.notifySell !== false,
     trackWatchlist: input.trackWatchlist === true, trackAiPicks: input.trackAiPicks === true, notifyListChanges: input.notifyListChanges !== false,
     alarms: normalizeAlarms(input.alarms),
+    aiPickLimit: normalizePickLimit(input.aiPickLimit),
   };
   const hasTargets = symbols.length > 0 || cfg.trackWatchlist || cfg.trackAiPicks;
   if (cfg.enabled && !hasTargets) throw new StrategyError("開啟提醒前，請至少選一種追蹤名單（手動輸入股票、我的關注清單，或 AI 今日建議名單）");
@@ -495,7 +500,7 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
           ID: owner.userId, Account: owner.account, Symbols: JSON.stringify(symbols), StrategyIds: JSON.stringify(strategyIds),
           IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE",
           NotifySell: cfg.notifySell ? "TRUE" : "FALSE", TrackWatchlist: cfg.trackWatchlist ? "TRUE" : "FALSE",
-          TrackAiPicks: cfg.trackAiPicks ? "TRUE" : "FALSE", NotifyListChanges: cfg.notifyListChanges ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), UpdatedAt: taipeiNow(),
+          TrackAiPicks: cfg.trackAiPicks ? "TRUE" : "FALSE", NotifyListChanges: cfg.notifyListChanges ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), AiPickLimit: String(cfg.aiPickLimit), UpdatedAt: taipeiNow(),
         },
       ],
     },

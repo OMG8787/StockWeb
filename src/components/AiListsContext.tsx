@@ -1,12 +1,14 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ActionBrief } from "@/lib/ai/actionBrief";
 import type { SimPortfolioView } from "@/lib/simPortfolio/view";
 import { PERM } from "@/lib/auth/permissions";
 import { useHasPerm } from "@/lib/auth/useProfile";
 import { clientRefreshMs } from "@/lib/autoRefresh";
 import { useFetchOnce } from "@/lib/useFetchOnce";
+import { AI_PICK_LIMIT_DEFAULT, normalizePickLimit } from "@/lib/aiPickLimits";
+import { sendJson } from "@/components/auth/ui";
 
 /**
  * 「我的關注」旁邊的兩份 AI 名單（2026-10-09 使用者要求）：①AI 模擬持股（AI 模擬投資組合目前持有的）
@@ -49,9 +51,14 @@ export interface AiLists {
   holdingsFailed: boolean;
   /** 建議名單的標題（今日建議／明日操作建議） */
   picksTitle: string;
+  /** 這個帳號設定要看前幾檔（依本站評分排名） */
+  pickLimit: number;
+  /** 排名名單實際總檔數（設定檔數可能比它大） */
+  pickTotal: number;
+  setPickLimit: (n: number) => void;
 }
 
-const EMPTY: AiLists = { canPicks: false, canHoldings: false, picks: null, holdings: null, picksFailed: false, holdingsFailed: false, picksTitle: "AI 建議清單" };
+const EMPTY: AiLists = { canPicks: false, canHoldings: false, picks: null, holdings: null, picksFailed: false, holdingsFailed: false, picksTitle: "AI 建議清單", pickLimit: AI_PICK_LIMIT_DEFAULT, pickTotal: 0, setPickLimit: () => {} };
 const Ctx = createContext<AiLists>(EMPTY);
 
 export function AiListsProvider({ children }: { children: ReactNode }) {
@@ -60,13 +67,20 @@ export function AiListsProvider({ children }: { children: ReactNode }) {
   // trades=1：只要持股，不要整份交易紀錄（省流量）
   const briefState = useFetchOnce<{ actionBrief: ActionBrief }>(canPicks ? "/api/action-brief" : null, clientRefreshMs);
   const simState = useFetchOnce<SimPortfolioView>(canHoldings ? "/api/sim-portfolio?trades=1" : null, clientRefreshMs);
+  const limitState = useFetchOnce<{ limit: number }>(canPicks ? "/api/action-brief/limit" : null);
+  const [override, setOverride] = useState<number | null>(null);
+  const pickLimit = override ?? normalizePickLimit(limitState.data?.limit);
+  const setPickLimit = (n: number) => {
+    setOverride(n);
+    void sendJson("/api/action-brief/limit", { limit: n }).catch(() => {});
+  };
   const value = useMemo<AiLists>(() => {
     const brief = briefState.data?.actionBrief ?? null;
     const sim = simState.data;
     return {
       canPicks,
       canHoldings,
-      picks: brief ? brief.picks.map((p) => ({ symbol: p.symbol, name: p.name, label: p.label, plan: p.plan, confidence: p.confidence, riskNote: p.riskNote })) : null,
+      picks: brief ? (brief.listPicks ?? brief.picks).slice(0, pickLimit).map((p) => ({ symbol: p.symbol, name: p.name, label: p.label, plan: p.plan, confidence: p.confidence, riskNote: p.riskNote })) : null,
       holdings: sim
         ? (sim.holdings ?? []).map((h) => ({
             symbol: h.symbol,
@@ -84,8 +98,11 @@ export function AiListsProvider({ children }: { children: ReactNode }) {
       picksFailed: briefState.failed,
       holdingsFailed: simState.failed,
       picksTitle: brief?.title ?? "AI 建議清單",
+      pickLimit,
+      pickTotal: brief ? (brief.listPicks ?? brief.picks).length : 0,
+      setPickLimit,
     };
-  }, [canPicks, canHoldings, briefState.data, briefState.failed, simState.data, simState.failed]);
+  }, [canPicks, canHoldings, briefState.data, briefState.failed, simState.data, simState.failed, pickLimit]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

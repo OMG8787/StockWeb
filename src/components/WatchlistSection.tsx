@@ -6,6 +6,7 @@ import MarketTabs from "@/components/MarketTabs";
 import WatchlistCsvControls from "@/components/WatchlistCsvControls";
 import { AiListsProvider, useAiLists } from "@/components/AiListsContext";
 import { AiHoldingsTable, AiPicksTable } from "@/components/AiListTable";
+import { AI_PICK_LIMIT_OPTIONS } from "@/lib/aiPickLimits";
 import { WatchAdviceProvider } from "@/components/WatchAdviceContext";
 import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
@@ -275,9 +276,27 @@ function WatchlistSectionInner() {
               </button>
             ))}
           {view === "pick" && (
-            <a href="/action#action-list-log" className="self-center text-xs text-(--accent) underline">
-              📜 查看建議紀錄
-            </a>
+            <>
+              <label className="flex items-center gap-1 self-center text-xs text-(--text-muted)" title="依本站評分排名，取前幾檔；設定跟著你的帳號，也套用在提醒追蹤的 AI 建議名單">
+                顯示前
+                <select
+                  value={ai.pickLimit}
+                  onChange={(e) => ai.setPickLimit(Number(e.target.value))}
+                  className="rounded border border-(--gridline) bg-(--surface-2) px-1 py-0.5 text-xs"
+                  aria-label="AI 建議清單檔數"
+                >
+                  {AI_PICK_LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+                檔
+              </label>
+              <a href="/action#action-list-log" className="self-center text-xs text-(--accent) underline">
+                📜 查看建議紀錄
+              </a>
+            </>
           )}
         </div>
       )}

@@ -49,6 +49,8 @@ export interface ActionBrief {
   model?: ModelInfo;
   /** 名單（程式依本站綜合評等決定，AI 問答全市場推薦也讀這份） */
   picks: ActionBriefPick[];
+  /** 完整排名名單（含 picks，最多 AI_LIST_MAX 檔；各帳號依自己的設定取前 N 檔，沒有 AI 解說文字） */
+  listPicks?: ActionBriefPick[];
   /** 要用較強模型、但額度用完或暫時無法使用而改用其他模型（卡片標示用） */
   fellBackToLite?: boolean;
   /** 「先不要買／不建議追」那一檔的代號（前端輪詢現價用；沒有就 undefined） */
@@ -159,6 +161,7 @@ export const ACTION_LIST_DEGRADED_TTL_MS = 60_000;
 interface ActionListLayer {
   grounding: string;
   picks: ActionBriefPick[];
+  listPicks: ActionBriefPick[];
   ratings: StockRatingResult[];
   indexSummary: string;
   notChase: NotChasePick | null;
@@ -193,10 +196,10 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
   // 上游抓失敗不會讓整份名單重排（見 actionStability.ts；盤中與 14:30～22:00 資料在變，不套用）。
   const epoch = frozenListEpochKey(new Date());
   const last = epoch ? await peekCached<LastActionList>(lastActionListKey(epoch)).catch(() => undefined) : undefined;
-  const { text: grounding, picks: ratedPicks, indexSummary, notChase, gainersAvailable, marketNote, degradedReasons } =
+  const { text: grounding, picks: ratedPicks, listPicks: ratedListPicks, indexSummary, notChase, gainersAvailable, marketNote, degradedReasons } =
     await buildActionGrounding({ previousPicks: last?.picks });
   if (degradedReasons.length > 0) console.warn("[action-list] 輸入不完整：", degradedReasons.join("、"));
-  const picks: ActionBriefPick[] = ratedPicks.map((p) => ({
+  const toBriefPick = (p: (typeof ratedPicks)[number]): ActionBriefPick => ({
     symbol: p.rating.symbol,
     name: p.rating.name,
     label: p.rating.rating.label,
@@ -206,7 +209,10 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
     plan: buildPlan(p.rating.rating, stance),
     confidence: confidenceText(p.rating.rating) || undefined,
     riskNote: p.rating.rating.riskNote ?? undefined,
-  }));
+  });
+  const picks: ActionBriefPick[] = ratedPicks.map(toBriefPick);
+  // 完整排名名單（含 picks，最多 AI_LIST_MAX 檔）：各帳號依自己設定的檔數取前 N 檔（AI 建議清單分頁、提醒追蹤）
+  const listPicks: ActionBriefPick[] = ratedListPicks.map(toBriefPick);
   const ratings = ratedPicks.map((p) => p.rating);
   // 名單進出紀錄（使用者之後回頭複查 AI 建議準不準）：只記輸入完整的名單，沒有變動不寫（見 actionListLog.ts）
   if (degradedReasons.length === 0) {
@@ -219,7 +225,7 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
   if (epoch && degradedReasons.length === 0) {
     await writeCached<LastActionList>(lastActionListKey(epoch), { at: new Date().toISOString(), picks: ratings }, LAST_LIST_TTL_MS).catch(() => {});
   }
-  return { grounding, picks, ratings, indexSummary, notChase, gainersAvailable, marketNote, listAt: new Date().toISOString(), degradedReasons };
+  return { grounding, picks, listPicks, ratings, indexSummary, notChase, gainersAvailable, marketNote, listAt: new Date().toISOString(), degradedReasons };
 }
 
 async function getActionList(stance: TradingStance, forceRefresh: boolean): Promise<ActionListLayer> {
@@ -227,7 +233,7 @@ async function getActionList(stance: TradingStance, forceRefresh: boolean): Prom
   // v3：2026-10-06 名單依本站把握程度排序、每檔附程式把握程度（confidence）。
   // v4：2026-10-07 每檔附程式風險原句（riskNote，四入口比較）。
   // v5：2026-10-07 KD 改券商遞迴算法（舊 KD 算的名單不可沿用）。
-  const key = `action-list:v7:${taipeiDayKey()}:${stance.briefMode}`;
+  const key = `action-list:v8:${taipeiDayKey()}:${stance.briefMode}`;
   const isDegraded = (l: ActionListLayer) => (l.degradedReasons?.length ?? 0) > 0;
   if (forceRefresh) {
     const fresh = await computeActionList(stance);
@@ -313,6 +319,7 @@ ${list.grounding}` }], {
     title: stance.briefTitle,
     mode: stance.briefMode,
     picks: livePicks,
+    listPicks: list.listPicks,
     ...(list.notChase ? { notChaseSymbol: list.notChase.symbol } : {}),
     text: guarded.text,
     usedAi,

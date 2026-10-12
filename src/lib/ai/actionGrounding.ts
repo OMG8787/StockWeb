@@ -24,7 +24,7 @@ import { buildMarketOverviewText } from "./marketOverview";
 import { getStockRating, getStockRatings, type StockRatingResult } from "./stockRating";
 import { describeSiteRating, isRecommendable, WEAK_MARKET_RET60_PCT, weakMarketNote } from "./siteRating";
 import { getTaiexRet60Pct } from "./learning/regimeData";
-import { PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
+import { AI_LIST_MAX, PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
 import { stabilizeBuyPicks } from "./actionStability";
 import {
   pct,
@@ -69,7 +69,7 @@ const VALUE_CANDIDATE_LIMIT = 4;
 // announcements:TW:all，以及持股結構面的融資／外資持股／集保週快照），所以多一檔幾乎不花額外的網路成本，真正的限制是 prompt 長度
 // 跟 AI 一次能認真讀完的資訊量。從16調高到22，讓新增的估值類候選來源有實際空間，
 // 不會被動能類來源早早佔滿名額（見 buildCandidates 裡的加入順序）。
-const CANDIDATE_LIMIT = 22;
+const CANDIDATE_LIMIT = 30;
 // 流動性下限，跟 getValueScreen 的 VALUE_SCREEN_MIN_TURNOVER_TWD 同一個理由：漲幅榜
 // 前幾名常常被「一天只成交幾萬元的殭屍股」佔滿，那種股票就算列出來也買不到、賣不掉，
 // 拿來當建議或反例都沒有意義。
@@ -210,7 +210,7 @@ function listUsMomentum(
 }
 
 /** 今日建議名單最多對幾檔算本站綜合評等（每檔可能要抓日K，見 stockRating.ts）。 */
-const RATED_PICK_LIMIT = 8;
+const RATED_PICK_LIMIT = 24;
 /** 「不建議追」挑中的股票若本站評等其實是建議買進，最多換幾次（每次可能多算一檔評等）。 */
 const NOT_CHASE_VERIFY_ATTEMPTS = 3;
 
@@ -234,6 +234,8 @@ export interface ActionGrounding {
   qualified: ScoredCandidate[];
   /** qualified 再經本站綜合評等（stockRating.ts）後，評等為「建議買進／建議等回檔再買」的——今日建議只能列這些。 */
   picks: RatedPick[];
+  /** 完整排名名單（含 picks 在內，最多 AI_LIST_MAX 檔，順序＝排名） */
+  listPicks: RatedPick[];
   indexSummary: string;
   /** 「不建議追」程式選定的一檔（已排除建議名單；沒有合適的是 null） */
   notChase: NotChasePick | null;
@@ -335,11 +337,12 @@ export async function buildActionGrounding(opts: ActionGroundingOptions = {}): P
             [...ratings.values()].filter((r) => isRecommendable(r.rating)).map((r) => [r.symbol.toUpperCase(), toItem(r)] as const)
           ),
           rejected: new Set([...ratings.values()].filter((r) => !isRecommendable(r.rating)).map((r) => r.symbol.toUpperCase())),
-          limit: PICK_GROUP_LIMIT,
+          limit: AI_LIST_MAX,
         })
       : ranked;
-  const groups = selectPickGroups(members, PICK_GROUP_LIMIT);
-  const picks: RatedPick[] = groups.buy.map((g) => g.pick);
+  // 完整排名名單（最多 AI_LIST_MAX 檔，各帳號依自己設定的檔數取前 N 檔）；今日建議文字與 AI 解說只用前 PICK_GROUP_LIMIT 檔。
+  const listPicks: RatedPick[] = selectPickGroups(members, AI_LIST_MAX).buy.map((g) => g.pick);
+  const picks: RatedPick[] = listPicks.slice(0, PICK_GROUP_LIMIT);
   const ret60 = await getTaiexRet60Pct().catch(() => null);
   const marketNote = ret60 != null && ret60 < WEAK_MARKET_RET60_PCT ? weakMarketNote(ret60) : null;
   // 體檢表裡已有本站評等的候選股，五面向與支持數一律改用評等那份（2026-10-06 整合稽核：候選股原本用技術訊號共振清單／
@@ -444,5 +447,5 @@ export async function buildActionGrounding(opts: ActionGroundingOptions = {}): P
       : "（目前沒有夠格的重大消息）",
   ].join("\n");
 
-  return { text, qualified, picks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0, marketNote, degradedReasons };
+  return { text, qualified, picks, listPicks, indexSummary, notChase, gainersAvailable: liquidGainers.length > 0, marketNote, degradedReasons };
 }

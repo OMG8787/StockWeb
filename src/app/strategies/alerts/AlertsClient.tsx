@@ -20,6 +20,7 @@ interface Config {
   trackAiPicks: boolean;
   notifyListChanges: boolean;
   alarms: AlarmSetting[];
+  aiPickLimit: number;
 }
 interface Check {
   at: string;
@@ -269,7 +270,7 @@ export default function AlertsClient() {
                     <input type="checkbox" className="mt-1" checked={cfg.trackAiPicks} onChange={(e) => setCfg({ ...cfg, trackAiPicks: e.target.checked })} />
                     <span>
                       🤖 AI 今日建議名單
-                      <span className="block text-xs text-(--text-muted)">本站每天挑出的建議買進名單：每天第一次通知今天有哪幾檔，之後 AI 新增或移出建議也會通知</span>
+                      <span className="block text-xs text-(--text-muted)">本站每天挑出的建議買進名單：每天第一次通知今天有哪幾檔，之後 AI 新增或移出建議也會通知；追蹤前幾檔看你在「我的關注 → AI 建議清單」設定的檔數（目前 {cfg.aiPickLimit} 檔）</span>
                     </span>
                   </label>
                   <div className="space-y-1">

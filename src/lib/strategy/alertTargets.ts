@@ -16,6 +16,8 @@ export interface AlertTrackConfig {
   strategyIds: string[];
   trackWatchlist?: boolean;
   trackAiPicks?: boolean;
+  /** AI 建議名單追蹤前幾檔（帳號設定；沒給＝預設） */
+  aiPickLimit?: number;
 }
 
 export interface NamedSymbol {
@@ -43,7 +45,7 @@ async function withTimeout<T>(p: Promise<T>): Promise<T | null> {
 export async function resolveTracked(userId: string, cfg: AlertTrackConfig): Promise<TrackedResult> {
   const [watch, ai] = await Promise.all([
     cfg.trackWatchlist ? withTimeout(runScreen({ source: "watchlist" }, userId)) : null,
-    cfg.trackAiPicks ? withTimeout(runScreen({ source: "ai", mode: "action_picks", count: 10 }, userId)) : null,
+    cfg.trackAiPicks ? withTimeout(runScreen({ source: "ai", mode: "action_picks", count: cfg.aiPickLimit ?? 10 }, userId)) : null,
   ]);
   const lists = {
     watchlist: watch ? watch.map((w) => ({ symbol: w.symbol, name: w.name })) : null,

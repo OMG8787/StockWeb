@@ -15,6 +15,8 @@ import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT, SCORED_FACET_LABEL } from "./
  * 評等改為果斷二分（不再有等回檔組），建議買進最多列 5 檔、排序由程式決定（selectPickGroups）。
  */
 export const PICK_GROUP_LIMIT = 5;
+/** 完整排名名單的上限（各帳號可設定顯示前 5／10／15／20 檔，見 strategy/store.ts ALERT_LIMITS.pickLimits） */
+export const AI_LIST_MAX = 20;
 /** 「不建議追」只從面向支持數 ≤ 這個值的漲幅榜股票挑。 */
 export const NOT_CHASE_MAX_SUPPORT = 1;
 /** 「不建議追」只看漲幅榜前幾名。 */
