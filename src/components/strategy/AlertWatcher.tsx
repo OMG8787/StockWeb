@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { diffAlerts, diffLists, dueAlarms, formatAlert, hasSignal, taipeiClock, type AlarmSetting, type AlertItem, type AlertNotice, type ListState, type NamedSymbol } from "@/lib/strategy/alertFormat";
+import { diffAlerts, diffLists, dueAlarms, formatAlert, hasSignal, taipeiClock, type AlarmSetting, type AlertItem, type AiRemovalInfo, type AlertNotice, type ListState, type NamedSymbol } from "@/lib/strategy/alertFormat";
 import { recordEvents } from "@/lib/strategy/alertEvents";
 
 /**
@@ -34,6 +34,7 @@ interface CheckResult {
   marketOpen: boolean;
   items: AlertItem[];
   lists?: { watchlist: NamedSymbol[] | null; ai: NamedSymbol[] | null };
+  aiRemovals?: AiRemovalInfo[];
 }
 interface Toast extends AlertNotice {
   id: string;
@@ -122,7 +123,7 @@ export default function AlertWatcher() {
       writeJson(STATE_KEY, next);
       // 名單異動（新增／移出關注、AI 新增／移出建議）
       if (c.notifyListChanges && data.lists) {
-        const r = diffLists(readJson<ListState>(LISTS_KEY, {}), data.lists, taipeiClock().day);
+        const r = diffLists(readJson<ListState>(LISTS_KEY, {}), data.lists, taipeiClock().day, data.aiRemovals ?? []);
         writeJson(LISTS_KEY, r.next);
         notices.unshift(...r.notices);
       }

@@ -39,7 +39,9 @@ function EntryRow({ e, now }: { e: ActionListLogEntry; now: number | undefined }
         )}
       </div>
       <div className="mt-1 text-xs text-(--text-secondary)">{e.label}</div>
-      {(e.plan || e.reason || e.confidence) && (
+      {/* 移出一定要看得到原因（使用者複查用），不收在展開區裡 */}
+      {e.event === "remove" && e.reason && <div className="mt-0.5 text-xs leading-relaxed text-(--text-secondary)">原因：{e.reason}</div>}
+      {e.event === "add" && (e.plan || e.reason || e.confidence) && (
         <details className="mt-1 text-xs text-(--text-muted)">
           <summary className="cursor-pointer select-none">當時的理由與操作計畫</summary>
           <div className="mt-1 space-y-0.5 leading-relaxed text-(--text-secondary)">
@@ -104,7 +106,7 @@ export default function ActionListLog() {
     <section id="action-list-log" className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5">
       <h2 className="font-semibold">📜 建議清單紀錄</h2>
       <p className="mt-1 text-xs text-(--text-muted)">
-        AI 建議名單每次有股票加入或移出都會記下時間、當時價位、評等與理由，方便你之後回頭檢查 AI 的建議準不準。價位是記錄當下的評等計算價；紀錄只會新增、不會修改。
+        AI 建議名單每次有股票加入或移出都會記下時間、當時價位、評等與理由（移出會寫明原因），方便你之後回頭檢查 AI 的建議準不準。價位是記錄當下的評等計算價；紀錄只會新增、不會修改，保存 30 天。
       </p>
       {failed ? (
         <p className="mt-3 text-sm text-(--text-muted)">紀錄暫時無法取得，請稍後再試。</p>

@@ -9,6 +9,8 @@ import { INDICATOR_TYPE_MAP, type IndicatorNeed } from "./indicatorCatalog";
 import { DataCache, needsOf, rangeFor, warmUniverseBriefly, type Target } from "./runner";
 import { ALERT_LIMITS, listIndicators, listStrategies, prefetchStrategyTables, StrategyError } from "./store";
 import { resolveTracked, type AlertTrackConfig, type TrackSource } from "./alertTargets";
+import { readActionListLog } from "@/lib/ai/actionListLog";
+import type { AiRemovalInfo } from "./alertFormat";
 
 /**
  * 策略疊圖（2026-10-08 使用者要求）：選 1～10 檔股票、疊多個策略（含 AI 建議策略），
@@ -145,7 +147,18 @@ export async function compareStrategies(
 export async function checkAlerts(userId: string, cfg: AlertTrackConfig) {
   const marketOpen = getMarketStatus("TW") === "open" || getMarketStatus("US") === "open";
   const tracked = await resolveTracked(userId, cfg);
-  const base = { at: new Date().toISOString(), marketOpen, lists: tracked.lists, truncated: tracked.truncated, items: [] as AlertCheckItem[] };
+  // AI 建議名單的移出原因（通知用）：只有追蹤 AI 名單時才讀，取最近 24 小時、每檔最新一筆
+  const aiRemovals: AiRemovalInfo[] = [];
+  if (cfg.trackAiPicks) {
+    const since = Date.now() - 24 * 3_600_000;
+    const seen = new Set<string>();
+    for (const e of await readActionListLog().catch(() => [])) {
+      if (e.event !== "remove" || Date.parse(e.at) < since || seen.has(e.symbol)) continue;
+      seen.add(e.symbol);
+      aiRemovals.push({ symbol: e.symbol, name: e.name, label: e.label, reason: e.reason ?? "", price: e.price, time: e.time });
+    }
+  }
+  const base = { at: new Date().toISOString(), marketOpen, lists: tracked.lists, aiRemovals, truncated: tracked.truncated, items: [] as AlertCheckItem[] };
   if (tracked.symbols.length === 0 || cfg.strategyIds.length === 0) return base;
   const rows = await compareStrategies(userId, tracked.symbols, cfg.strategyIds, { days: 2, live: true, maxSymbols: ALERT_LIMITS.maxSymbols });
   return {

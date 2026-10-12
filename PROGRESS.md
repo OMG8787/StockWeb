@@ -488,6 +488,9 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-12（續）：移除通知帶名稱＋代碼與原因、建議紀錄只留 30 天
+- 使用者：AI 移出建議通知（「AI 移出建議：2542」）要加名稱＋代碼、紀錄要說明原因、紀錄保存一個月即可。改：`alertFormat.diffLists`（ListState 新增 names 記憶，移出通知＝「2542 興富發」；有伺服器移出紀錄就把評等結論＋原因＋移出價寫進內文）、`checkAlerts` 回應新增 `aiRemovals`（最近 24 小時每檔最新一筆移出紀錄，只有追蹤 AI 名單時才讀）、`actionListLog.removalExplanation`（評等轉為不建議買進／仍是買進但被名額上限擠出／抓不到評等，三種寫法）、保存 30 天（寫入時清掉過期、讀取不回傳；`pruneActionListLog` 只在有新紀錄時多 1 個指令）、/action 紀錄區移出原因直接顯示。測試 739→新增移出原因、保存期限、通知名稱各一。
+
 ### 2026-10-12：AI 建議清單加星號、我的關注加 AI 來源分頁與標記、建議清單進出紀錄
 - 使用者要求：①今日建議區每檔股票前面加 ☆（加入自己的關注）②首頁「我的關注」新增：我自己的關注／AI 模擬持股／AI 建議清單，我的關注裡的股票若 AI 也持有或建議，在後面標出來 ③建議清單要有紀錄（名單跳太快，之後才能複查 AI 對不對）。
 - 實作：`MarkdownLite` 新增 `stocks`／`stockPrefix`（只在已知「名稱(代號)」前插入，沒傳時輸出逐字不變）、`ActionBriefCard` 傳 ☆ 按鈕（含「不建議追」那檔）；`AiListsContext`（有權限才抓 /api/action-brief、/api/sim-portfolio?trades=1，`useFetchOnce` 的 url 可為 null＝不抓）、`AiTagBadges`（🤖 AI持有／🎯 AI建議，放在 WatchlistTable 名稱列與兩張 AI 表）、`AiListTable`（每列 ☆、批次即時報價 `useTwQuotes`）、`WatchlistSection` 分頁切換；紀錄：`lib/ai/actionListLog.ts`（名單重算且輸入完整時跟上一份比對，有進出才寫 Redis list `action-list-log:v1`，加入記價位／評等／把握程度／計畫／理由，移出記當時評等與價位；掛在 `computeActionList`）、`/api/action-list-log`（ACTION 權限）、`/action` 頁「📜 建議清單紀錄」（依日期列出、至今漲跌、統計上漲下跌檔數）。

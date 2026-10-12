@@ -76,7 +76,7 @@ describe("名單異動（關注清單、AI 今日建議名單）", () => {
     r = diffLists(r.next, { watchlist: [n("2330", "台積電"), n("2317", "鴻海")], ai: null }, day);
     expect(r.notices.map((x) => x.title)).toEqual(["⭐ 新增關注：2317 鴻海"]);
     r = diffLists(r.next, { watchlist: [n("2317", "鴻海")], ai: null }, day);
-    expect(r.notices.map((x) => x.title)).toEqual(["⭐ 移出關注：2330"]);
+    expect(r.notices.map((x) => x.title)).toEqual(["⭐ 移出關注：2330 台積電"]);
     const kept = diffLists(r.next, { watchlist: null, ai: null }, day); // 暫時讀不到：不誤報全部移出
     expect(kept.notices).toEqual([]);
     expect(kept.next.watchlist).toEqual(["2317"]);
@@ -89,7 +89,7 @@ describe("名單異動（關注清單、AI 今日建議名單）", () => {
     r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁"), n("2313", "華通")] }, day);
     expect(r.notices).toEqual([]); // 沒變化不重複通知
     r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁"), n("4720", "德淵")] }, day);
-    expect(r.notices.map((x) => x.title)).toEqual(["🤖 AI 新增建議：4720 德淵", "🤖 AI 移出建議：2313"]);
+    expect(r.notices.map((x) => x.title)).toEqual(["🤖 AI 新增建議：4720 德淵", "🤖 AI 移出建議：2313 華通"]);
     r = diffLists(r.next, { watchlist: null, ai: [n("6285", "啟碁")] }, "2026-10-09");
     expect(r.notices.map((x) => x.title)).toEqual(["🤖 今日 AI 建議名單（1 檔）"]); // 隔天重新摘要
   });
@@ -99,5 +99,21 @@ describe("名單異動（關注清單、AI 今日建議名單）", () => {
     expect(r.notices).toEqual([]);
     expect(r.next.aiSummaryDay).toBeUndefined();
     expect(diffLists(r.next, { watchlist: null, ai: [n("2330")] }, day).notices.length).toBe(1);
+  });
+
+  it("移出通知帶「名稱 代碼」；伺服器有移出原因就寫在內文；舊資料沒有名稱時只寫代碼", () => {
+    let r = diffLists({}, { watchlist: [n("2330", "台積電")], ai: [n("2542", "興富發"), n("6909", "創控")] }, day);
+    expect(r.next.names).toEqual({ "2330": "台積電", "2542": "興富發", "6909": "創控" });
+    r = diffLists(r.next, { watchlist: [], ai: [n("6909", "創控")] }, day, [
+      { symbol: "2542", name: "興富發", label: "評等轉為建議先不要買", reason: "本站評等轉為不建議買進：技術面破底", price: 40.3, time: "11:40" },
+    ]);
+    const titles = r.notices.map((x) => x.title);
+    expect(titles).toContain("🤖 AI 移出建議：2542 興富發");
+    expect(titles).toContain("⭐ 移出關注：2330 台積電");
+    const ai = r.notices.find((x) => x.title.startsWith("🤖 AI 移出"))!;
+    expect(ai.body).toBe("評等轉為建議先不要買。原因：本站評等轉為不建議買進：技術面破底（移出時價位 40.3）");
+    // 沒有伺服器紀錄：通用說明；舊的狀態（沒有 names）也不會壞
+    const old = diffLists({ ai: ["1101"], aiSummaryDay: day }, { watchlist: null, ai: [n("6909", "創控")] }, day);
+    expect(old.notices.find((x) => x.title.includes("1101"))).toMatchObject({ title: "🤖 AI 移出建議：1101", body: "不在本站今日建議名單內了" });
   });
 });

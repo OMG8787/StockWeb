@@ -99,9 +99,21 @@ export interface NamedSymbol {
 }
 
 /** 上一次看到的名單（存在瀏覽器；沒有就是第一次） */
+/** AI 建議名單近期的移出紀錄（伺服器的建議紀錄，通知用）：名稱、當時評等結論、原因與價位 */
+export interface AiRemovalInfo {
+  symbol: string;
+  name: string;
+  label: string;
+  reason: string;
+  price: number | null;
+  time: string;
+}
+
 export interface ListState {
   watchlist?: string[];
   ai?: string[];
+  /** 代號→名稱（名單變動的通知要寫「名稱＋代碼」，被移出的那檔現在不在名單裡，要靠這份記憶） */
+  names?: Record<string, string>;
   /** 已經發過「今日 AI 建議名單」摘要的日期（台北） */
   aiSummaryDay?: string;
 }
@@ -117,9 +129,15 @@ export function diffLists(
   prev: ListState,
   lists: { watchlist: NamedSymbol[] | null; ai: NamedSymbol[] | null },
   day: string,
+  aiRemovals: readonly AiRemovalInfo[] = [],
 ): { next: ListState; notices: AlertNotice[] } {
   const next: ListState = { ...prev };
   const notices: AlertNotice[] = [];
+  // 名稱記憶：這次看到的所有股票名稱（含舊的），移出通知用
+  const names: Record<string, string> = { ...(prev.names ?? {}) };
+  for (const x of [...(lists.watchlist ?? []), ...(lists.ai ?? [])]) if (x.name && x.name !== x.symbol) names[x.symbol] = x.name;
+  next.names = names;
+  const nameOf = (s: string, info?: AiRemovalInfo) => label({ symbol: s, name: info?.name || names[s] || s });
   const changes = (before: string[], now: NamedSymbol[]) => ({
     added: now.filter((x) => !before.includes(x.symbol)),
     removed: before.filter((s) => !now.some((x) => x.symbol === s)),
@@ -128,7 +146,7 @@ export function diffLists(
     if (prev.watchlist) {
       const { added, removed } = changes(prev.watchlist, lists.watchlist);
       for (const x of added) notices.push({ title: `⭐ 新增關注：${label(x)}`, body: "已加入追蹤名單，開始檢查這檔的策略訊號", tone: "info" });
-      for (const s of removed) notices.push({ title: `⭐ 移出關注：${s}`, body: "已從追蹤名單移除", tone: "info" });
+      for (const s of removed) notices.push({ title: `⭐ 移出關注：${nameOf(s)}`, body: "已從追蹤名單移除", tone: "info" });
     }
     next.watchlist = lists.watchlist.map((x) => x.symbol);
   }
@@ -139,7 +157,14 @@ export function diffLists(
     } else if (prev.ai) {
       const { added, removed } = changes(prev.ai, lists.ai);
       for (const x of added) notices.push({ title: `🤖 AI 新增建議：${label(x)}`, body: "本站今日建議名單新增這檔，已加入追蹤名單", tone: "info" });
-      for (const s of removed) notices.push({ title: `🤖 AI 移出建議：${s}`, body: "不在本站今日建議名單內了", tone: "info" });
+      for (const s of removed) {
+        // 伺服器有記這檔的移出原因就一併寫上（評等轉差／被擠出名單／資料暫缺），沒有才用通用說明
+        const info = aiRemovals.find((r) => r.symbol.toUpperCase() === s.toUpperCase());
+        const body = info
+          ? `${info.label}${info.reason ? `。原因：${info.reason}` : ""}${info.price != null ? `（移出時價位 ${info.price}）` : ""}`
+          : "不在本站今日建議名單內了";
+        notices.push({ title: `🤖 AI 移出建議：${nameOf(s, info)}`, body, tone: "info" });
+      }
     }
     next.ai = lists.ai.map((x) => x.symbol);
   }
