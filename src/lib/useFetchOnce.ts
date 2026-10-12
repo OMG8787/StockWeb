@@ -26,24 +26,27 @@ export interface FetchOnceState<T> {
  * 重抓失敗時保留畫面上已有的資料（不會把正常顯示的卡片換成「無法取得」）；沒傳＝行為跟以前逐字相同。
  * 節奏統一由 lib/autoRefresh.ts 的 clientRefreshMs 提供。
  */
-export function useFetchOnce<T>(url: string, refreshMs?: (now: Date) => number | null): FetchOnceState<T> {
+export function useFetchOnce<T>(url: string | null, refreshMs?: (now: Date) => number | null): FetchOnceState<T> {
   const [state, setState] = useState<FetchOnceState<T>>({ data: null, failed: false });
   const latestUrl = useRef(url);
   // 在 effect 裡更新（宣告在 useLivePolling 前面，所以先於輪詢的第一次抓取執行）。
   useEffect(() => {
-    latestUrl.current = url;
+    latestUrl.current = url ?? "";
   });
 
   useLivePolling({
-    restartKey: url,
-    fetchOnMount: true,
+    restartKey: url ?? "",
+    fetchOnMount: !!url,
     decide: (now) => {
+      // url 為 null＝這個帳號沒有這項資料的權限：完全不抓
+      if (!url) return { fetch: false, settle: false, nextCheckMs: 60 * 60_000 };
       const ms = refreshMs?.(now) ?? null;
       // 沒有重抓節奏：只在掛載時抓一次，之後 1 小時才醒來看一眼（不抓）。
       return ms === null ? { fetch: false, settle: false, nextCheckMs: 60 * 60_000 } : { fetch: true, settle: false, nextCheckMs: ms };
     },
     onFetch: async () => {
       const target = url;
+      if (!target) return;
       try {
         const r = await fetch(target);
         if (!r.ok) throw new Error(`fetch failed: ${r.status}`);

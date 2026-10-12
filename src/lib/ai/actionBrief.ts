@@ -12,6 +12,7 @@ import { premiumFellBack } from "./gemini";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { frozenListEpochKey, LAST_LIST_TTL_MS } from "./actionStability";
+import { recordActionListChange } from "./actionListLog";
 import {
   buildPlan,
   mergeAiExplanation,
@@ -207,6 +208,13 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
     riskNote: p.rating.rating.riskNote ?? undefined,
   }));
   const ratings = ratedPicks.map((p) => p.rating);
+  // 名單進出紀錄（使用者之後回頭複查 AI 建議準不準）：只記輸入完整的名單，沒有變動不寫（見 actionListLog.ts）
+  if (degradedReasons.length === 0) {
+    await recordActionListChange({
+      picks: ratedPicks.map((p, i) => ({ symbol: picks[i].symbol, name: picks[i].name, label: picks[i].label, confidence: picks[i].confidence, plan: picks[i].plan, reason: picks[i].reason, price: p.rating.price })),
+      mode: stance.briefMode,
+    }).catch(() => 0);
+  }
   // 只有輸入完整的這次才存檔當「上一份名單」（不完整的名單不能當之後的基準）。
   if (epoch && degradedReasons.length === 0) {
     await writeCached<LastActionList>(lastActionListKey(epoch), { at: new Date().toISOString(), picks: ratings }, LAST_LIST_TTL_MS).catch(() => {});

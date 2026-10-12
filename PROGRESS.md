@@ -488,6 +488,11 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-12：AI 建議清單加星號、我的關注加 AI 來源分頁與標記、建議清單進出紀錄
+- 使用者要求：①今日建議區每檔股票前面加 ☆（加入自己的關注）②首頁「我的關注」新增：我自己的關注／AI 模擬持股／AI 建議清單，我的關注裡的股票若 AI 也持有或建議，在後面標出來 ③建議清單要有紀錄（名單跳太快，之後才能複查 AI 對不對）。
+- 實作：`MarkdownLite` 新增 `stocks`／`stockPrefix`（只在已知「名稱(代號)」前插入，沒傳時輸出逐字不變）、`ActionBriefCard` 傳 ☆ 按鈕（含「不建議追」那檔）；`AiListsContext`（有權限才抓 /api/action-brief、/api/sim-portfolio?trades=1，`useFetchOnce` 的 url 可為 null＝不抓）、`AiTagBadges`（🤖 AI持有／🎯 AI建議，放在 WatchlistTable 名稱列與兩張 AI 表）、`AiListTable`（每列 ☆、批次即時報價 `useTwQuotes`）、`WatchlistSection` 分頁切換；紀錄：`lib/ai/actionListLog.ts`（名單重算且輸入完整時跟上一份比對，有進出才寫 Redis list `action-list-log:v1`，加入記價位／評等／把握程度／計畫／理由，移出記當時評等與價位；掛在 `computeActionList`）、`/api/action-list-log`（ACTION 權限）、`/action` 頁「📜 建議清單紀錄」（依日期列出、至今漲跌、統計上漲下跌檔數）。
+- 驗證：新增測試（名單比對、寫入／不寫入／移出、星號插入與未傳 stocks 時輸出不變）；正式站驗證待派。
+
 ### 2026-10-08（深夜，續10）：整體驗證（兩位 Sonnet agent）與收尾
 - 驗證 A（帳號、管理頁含刪除帳號與改顯示名稱、回饋、策略／指標／模擬倉、即時提醒含名單異動事件、背景分頁降頻、快取標頭）與驗證 B（10 個頁面桌機＋手機、個股頁、搜尋、新聞、AI 問答、4 分鐘自動更新只 1 次 RSC 重新整理、排程快慢層）全部通過，無 5xx。降頻實測：分頁隱藏 90 秒內提醒檢查 ≤2 次、切回前景 2 秒內補一次。
 - 抓到並修：/news 進頁連發兩次 news-feed（初次載入＋輪詢第一次評估，改成輪詢第一次不抓）、搜尋框提示文字被截成「輸入代碼或」（改短）、「立即檢查一次訊號」沒有新事件時毫無回饋（改成顯示「已檢查…沒有新事件」或「新增 N 則事件」）。誤報：個股頁本益比等「沒有 hover 說明」其實有底線，是 agent 點到標籤欄位空白處。

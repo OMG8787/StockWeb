@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import ActionBriefCard from "@/components/ActionBriefCard";
 import ActionBriefHeading from "@/components/ActionBriefHeading";
+import ActionListLog from "@/components/ActionListLog";
 
 export const metadata: Metadata = {
   // 14:30 後頁首與卡片會改成「明日操作建議」（見 ActionBriefHeading），metadata 是靜態的所以兩種都寫。
@@ -14,6 +15,7 @@ export default function ActionPage() {
     <div className="space-y-4">
       <ActionBriefHeading />
       <ActionBriefCard />
+      <ActionListLog />
     </div>
   );
 }

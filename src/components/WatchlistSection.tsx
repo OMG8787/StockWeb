@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import WatchlistTable, { type HoldingItem, type WatchlistQuote } from "@/components/WatchlistTable";
 import MarketTabs from "@/components/MarketTabs";
 import WatchlistCsvControls from "@/components/WatchlistCsvControls";
+import { AiListsProvider, useAiLists } from "@/components/AiListsContext";
+import { AiHoldingsTable, AiPicksTable } from "@/components/AiListTable";
 import type { Market } from "@/lib/data";
 import type { MarketScope } from "@/lib/marketStatus";
 import { getPollDecision, mergePollDecisions, shouldRefreshSymbol } from "@/lib/pollingSchedule";
@@ -65,6 +67,19 @@ async function fetchQuotesBatch(targets: WatchlistItem[], init?: RequestInit): P
 }
 
 export default function WatchlistSection() {
+  return (
+    <AiListsProvider>
+      <WatchlistSectionInner />
+    </AiListsProvider>
+  );
+}
+
+type SourceView = "mine" | "hold" | "pick";
+
+function WatchlistSectionInner() {
+  const ai = useAiLists();
+  // 「我的關注」旁的來源切換：我的關注／AI 模擬持股／AI 建議清單（有對應功能權限才顯示）
+  const [view, setView] = useState<SourceView>("mine");
   const list = useSyncExternalStore(
     subscribe,
     getWatchlist,
@@ -233,9 +248,54 @@ export default function WatchlistSection() {
             </span>
           )}
         </h2>
-        <WatchlistCsvControls items={displayItems} />
+        {view === "mine" && <WatchlistCsvControls items={displayItems} />}
       </div>
-      {list.length === 0 ? (
+      {(ai.canHoldings || ai.canPicks) && (
+        <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="關注來源">
+          {(
+            [
+              ["mine", `⭐ 我的關注（${list.length}）`, true],
+              ["hold", `🤖 AI 模擬持股${ai.holdings ? `（${ai.holdings.length}）` : ""}`, ai.canHoldings],
+              ["pick", `🎯 ${ai.picksTitle}${ai.picks ? `（${ai.picks.length}）` : ""}`, ai.canPicks],
+            ] as Array<[SourceView, string, boolean]>
+          )
+            .filter(([, , show]) => show)
+            .map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                onClick={() => setView(id)}
+                className={`rounded-full border px-3 py-1 text-sm ${view === id ? "border-(--accent) bg-(--accent)/10 font-semibold text-(--accent)" : "border-(--gridline) text-(--text-secondary) hover:bg-(--page-plane)"}`}
+              >
+                {label}
+              </button>
+            ))}
+          {view === "pick" && (
+            <a href="/action#action-list-log" className="self-center text-xs text-(--accent) underline">
+              📜 查看建議紀錄
+            </a>
+          )}
+        </div>
+      )}
+      {view === "hold" ? (
+        ai.holdings ? (
+          <AiHoldingsTable rows={ai.holdings} />
+        ) : ai.holdingsFailed ? (
+          <p className="py-6 text-center text-sm text-(--text-muted)">AI 模擬持股暫時無法取得，請稍後再試。</p>
+        ) : (
+          <div className="h-16 animate-pulse rounded bg-(--page-plane)" />
+        )
+      ) : view === "pick" ? (
+        ai.picks ? (
+          <AiPicksTable rows={ai.picks} />
+        ) : ai.picksFailed ? (
+          <p className="py-6 text-center text-sm text-(--text-muted)">AI 建議清單暫時無法取得，請稍後再試。</p>
+        ) : (
+          <div className="h-16 animate-pulse rounded bg-(--page-plane)" />
+        )
+      ) : list.length === 0 ? (
         <p className="py-6 text-center text-sm text-(--text-muted)">
           點股票列表或個股頁面的 ☆ 即可加入關注清單，方便下次快速查看
         </p>

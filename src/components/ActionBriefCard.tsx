@@ -12,6 +12,7 @@ import { useFetchOnce } from "@/lib/useFetchOnce";
 import { clientRefreshMs } from "@/lib/autoRefresh";
 import { useBriefStance } from "./ActionBriefHeading";
 import MarkdownLite from "./MarkdownLite";
+import WatchlistButton from "./WatchlistButton";
 import { actionBriefTimeLabel } from "@/lib/ai/aiSchedule";
 
 /**
@@ -51,6 +52,21 @@ export default function ActionBriefCard() {
     },
   });
   const shownText = brief ? patchLiveQuotes(brief.text, livePrices) : "";
+  // 文字裡每一檔股票前面放 ☆（加入我的關注）：名單 picks＋「不建議追」那一檔（名稱從文字裡「名稱(代號)」讀）
+  const starStocks = brief
+    ? [
+        ...brief.picks.map((p) => ({ symbol: p.symbol, name: p.name })),
+        ...(brief.notChaseSymbol
+          ? (() => {
+              const code = brief.notChaseSymbol;
+              const idx = brief.text.indexOf(`(${code})`);
+              // 往前取到分隔字元（空白、冒號、逗號、頓號、左括號）為止，最多 12 字，就是股票名稱
+              const m = idx > 0 ? brief.text.slice(Math.max(0, idx - 12), idx).match(/[^\s:：,，、(（]+$/) : null;
+              return m ? [{ symbol: brief.notChaseSymbol, name: m[0] }] : [];
+            })()
+          : []),
+      ]
+    : [];
   // 標題跟著內容走（14:30 後是「明日操作建議」，見 tradingStance.ts）；還沒載入時依現在時段先顯示。
   const stance = useBriefStance();
   const title = brief?.title ?? stance.briefTitle;
@@ -67,7 +83,7 @@ export default function ActionBriefCard() {
         {failed ? (
           <p className="text-(--text-muted)">{title}目前無法取得，請稍後再試。</p>
         ) : brief ? (
-          <MarkdownLite text={shownText} />
+          <MarkdownLite text={shownText} stocks={starStocks} stockPrefix={(s) => <WatchlistButton symbol={s.symbol} market="TW" name={s.name} />} />
         ) : (
           <BriefSkeleton lines={4} />
         )}

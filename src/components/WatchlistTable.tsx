@@ -19,6 +19,7 @@ import ChipsColumnsToggle from "./ChipsColumnsToggle";
 import IndustryCell from "./IndustryCell";
 import StickyTableScroll from "./StickyTableScroll";
 import WatchlistButton from "./WatchlistButton";
+import { AiTagBadges } from "./AiListsContext";
 
 /**
  * 關注清單自己的列型別。跟 `SearchItem` 最大的差別是**報價欄位允許 null**：
@@ -780,6 +781,8 @@ function HoldingRow({
           <span className="block text-xs font-normal text-(--text-muted) tabular-nums">
             {item.symbol}
             <span className="ml-1.5 rounded bg-(--page-plane) px-1 py-px text-[11px]">{item.market === "TW" ? "台股" : "美股"}</span>
+            {/* 這檔 AI 也持有／建議時在後面標出來（2026-10-12 使用者要求） */}
+            <AiTagBadges symbol={item.symbol} market={item.market} />
           </span>
         </Link>
       </td>
