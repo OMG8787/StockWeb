@@ -239,6 +239,7 @@ function WatchlistSectionInner() {
 
   // xl（>=1280px）時比主內容欄（max-w-6xl）更寬：關注清單欄位多，桌機要一次全部顯示、不用橫向捲動。
   return (
+    <WatchAdviceProvider list={list}>
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4 xl:ml-[calc((100%-min(100vw-2rem,1760px))/2)] xl:w-[min(calc(100vw-2rem),1760px)]">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">
@@ -318,13 +319,12 @@ function WatchlistSectionInner() {
           </ul>
         </div>
       ) : (
-        <WatchAdviceProvider list={list}>
-          <MarketTabs
-            tw={<WatchlistTable items={displayItems.filter((i) => i.market === "TW")} emptyLabel="尚未關注任何台股" />}
-            us={<WatchlistTable items={displayItems.filter((i) => i.market === "US")} emptyLabel="尚未關注任何美股" />}
-          />
-        </WatchAdviceProvider>
+        <MarketTabs
+          tw={<WatchlistTable items={displayItems.filter((i) => i.market === "TW")} emptyLabel="尚未關注任何台股" />}
+          us={<WatchlistTable items={displayItems.filter((i) => i.market === "US")} emptyLabel="尚未關注任何美股" />}
+        />
       )}
     </section>
+    </WatchAdviceProvider>
   );
 }
