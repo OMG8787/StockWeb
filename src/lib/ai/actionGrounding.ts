@@ -24,6 +24,7 @@ import { buildMarketOverviewText } from "./marketOverview";
 import { getStockRating, getStockRatings, type StockRatingResult } from "./stockRating";
 import { describeSiteRating, isRecommendable, WEAK_MARKET_RET60_PCT, weakMarketNote } from "./siteRating";
 import { getTaiexRet60Pct } from "./learning/regimeData";
+import { POOL_CANDIDATE_LIMIT, POOL_CHIP_LIMIT, POOL_GAINER_LIMIT, POOL_MIN_TURNOVER_TWD, POOL_MOMENTUM_LIMIT, POOL_RATED_LIMIT, POOL_TRUST_LIMIT, POOL_VALUE_LIMIT } from "./actionPoolInfo";
 import { AI_LIST_MAX, PICK_GROUP_LIMIT, selectNotChase, selectPickGroups, type NotChasePick } from "./actionPicks";
 import { stabilizeBuyPicks } from "./actionStability";
 import {
@@ -47,14 +48,14 @@ import {
 // 見 actionScoring.ts 開頭的說明，那份只管單一候選股怎麼打分數，這份負責「去哪裡
 // 湊出候選名單」跟「怎麼把整批資料排版成AI看得懂的參考資料文字」，兩者職責不同。
 
-const MOMENTUM_LIMIT = 8;
+const MOMENTUM_LIMIT = POOL_MOMENTUM_LIMIT;
 // 漲幅榜刻意也被納入「完整體檢」的候選名單，不是只拿來當背景資料：使用者明確要求
 // 「不是漲停的就推薦要買」，要示範這個判斷邏輯，AI 手上就必須有「今天漲最多的那幾檔
 // 在其他面向到底有沒有跟上」的完整資料，才有辦法具體講出「這檔漲 9% 但法人在賣、
 // 本益比 60 倍，不建議追」這種反例。只給它一份沒有體檢資料的漲幅榜，它只能含糊帶過。
-const GAINER_CANDIDATE_LIMIT = 6;
-const CHIP_CANDIDATE_LIMIT = 6;
-const TRUST_CANDIDATE_LIMIT = 4;
+const GAINER_CANDIDATE_LIMIT = POOL_GAINER_LIMIT;
+const CHIP_CANDIDATE_LIMIT = POOL_CHIP_LIMIT;
+const TRUST_CANDIDATE_LIMIT = POOL_TRUST_LIMIT;
 // 2026-09-21 使用者反映今日建議/AI問答推薦的幾乎全是當天漲停/大漲的標的，感覺
 // 只看動能、不是真的整合各方資訊——查證後確認候選名單原本只有「技術訊號共振
 // （本身也偏動能，見 momentum.ts 同日修正）／今日漲幅榜／法人籌碼」三種來源，
@@ -63,17 +64,17 @@ const TRUST_CANDIDATE_LIMIT = 4;
 // 納入候選名單、更不可能出現在「已篩過的結果」裡——不是 AI 選擇忽略，是候選池
 // 從一開始就沒放進去。新增這三份估值排行當作候選來源，跟其他來源一樣要通過
 // 下面的「面向支持數」門檻才會被列進合格名單，不是「便宜就直接推薦」。
-const VALUE_CANDIDATE_LIMIT = 4;
+const VALUE_CANDIDATE_LIMIT = POOL_VALUE_LIMIT;
 // 體檢表的總長度上限。每一檔的各個面向全部來自「整個市場一次抓回來再查表」的既有快取
 // （fundamentals:TW:all、chips:TW:institutional、earnings:TW:revenue、
 // announcements:TW:all，以及持股結構面的融資／外資持股／集保週快照），所以多一檔幾乎不花額外的網路成本，真正的限制是 prompt 長度
 // 跟 AI 一次能認真讀完的資訊量。從16調高到22，讓新增的估值類候選來源有實際空間，
 // 不會被動能類來源早早佔滿名額（見 buildCandidates 裡的加入順序）。
-const CANDIDATE_LIMIT = 30;
+const CANDIDATE_LIMIT = POOL_CANDIDATE_LIMIT;
 // 流動性下限，跟 getValueScreen 的 VALUE_SCREEN_MIN_TURNOVER_TWD 同一個理由：漲幅榜
 // 前幾名常常被「一天只成交幾萬元的殭屍股」佔滿，那種股票就算列出來也買不到、賣不掉，
 // 拿來當建議或反例都沒有意義。
-const CANDIDATE_MIN_TURNOVER_TWD = 30_000_000;
+const CANDIDATE_MIN_TURNOVER_TWD = POOL_MIN_TURNOVER_TWD;
 // 美股只補最前面幾檔的基本面/財報：美股沒有全市場批次端點，每一檔都是獨立一次 Yahoo
 // 請求，補太多會把整頁的延遲拖進 AI 呼叫的時間預算裡。美股也沒有公開的法人籌碼資料源，
 // 本來就湊不齊四個面向，所以這一頁的買進建議本質上以台股為主。
@@ -210,7 +211,7 @@ function listUsMomentum(
 }
 
 /** 今日建議名單最多對幾檔算本站綜合評等（每檔可能要抓日K，見 stockRating.ts）。 */
-const RATED_PICK_LIMIT = 24;
+const RATED_PICK_LIMIT = POOL_RATED_LIMIT;
 /** 「不建議追」挑中的股票若本站評等其實是建議買進，最多換幾次（每次可能多算一檔評等）。 */
 const NOT_CHASE_VERIFY_ATTEMPTS = 3;
 

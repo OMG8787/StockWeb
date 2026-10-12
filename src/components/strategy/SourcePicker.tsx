@@ -1,5 +1,7 @@
 "use client";
 
+import { AI_LIST_MAX, POOL_CANDIDATE_LIMIT, POOL_RATED_LIMIT, POOL_SOURCES } from "@/lib/ai/actionPoolInfo";
+import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT } from "@/lib/ai/actionScoring";
 import { useState } from "react";
 import { MAX_SOURCES, SCREEN_AI_MODES, SCREEN_COUNTS, SCREEN_METRICS, SCREEN_POSITIONS, type ScreenMetric, type ScreenPosition } from "@/lib/strategy/screenConfig";
 import { getWatchlist } from "@/lib/watchlist";
@@ -22,6 +24,36 @@ interface PreviewResult {
 /** 每個來源的顏色（避開紅綠，紅綠在本站代表漲跌） */
 export const SOURCE_COLORS = ["#3b82f6", "#f59e0b", "#a855f7", "#14b8a6", "#ec4899", "#84cc16", "#06b6d4", "#a16207"];
 const opts = { metrics: SCREEN_METRICS, positions: SCREEN_POSITIONS, counts: SCREEN_COUNTS, aiModes: SCREEN_AI_MODES };
+
+/** AI 建議名單的資料池說明（數字讀 actionPoolInfo／actionScoring 的同一份常數，不會跟實際不一致） */
+function AiPoolInfo() {
+  return (
+    <details className="rounded border border-(--gridline) bg-(--page-plane) px-2 py-1 text-xs text-(--text-secondary)">
+      <summary className="cursor-pointer select-none text-(--accent)">這份 AI 建議名單的股票是怎麼來的？（點開看資料池）</summary>
+      <div className="mt-2 space-y-2 leading-relaxed">
+        <p>
+          <b>第 1 步：組候選池</b>（不是全市場，而是從下列榜單各取前幾名，同一檔重複上榜只算一檔，依序加入、合計最多 {POOL_CANDIDATE_LIMIT} 檔）：
+        </p>
+        <ul className="list-inside list-disc">
+          {POOL_SOURCES.map((p) => (
+            <li key={p.label}>
+              {p.label}：前 {p.limit} 名——{p.note}
+            </li>
+          ))}
+        </ul>
+        <p>
+          <b>第 2 步：初篩</b>——五個面向（技術、籌碼、持股結構、估值、財報）至少 {QUALIFY_MIN_SUPPORT} 個支持、且明確不支持不超過 {QUALIFY_MAX_AGAINST} 個。
+        </p>
+        <p>
+          <b>第 3 步：評分</b>——通過初篩的最多取前 {POOL_RATED_LIMIT} 檔，各算一次「本站綜合評等」（跟個股頁、今日建議同一份），只留評等為「建議買進」的。
+        </p>
+        <p>
+          <b>第 4 步：排名</b>——依本站把握程度（高→低）、面向支持數、現價離支撐遠近排序，取你設定的前 N 檔（最多 {AI_LIST_MAX} 檔）。你的策略條件（含成交量等）是在這份名單上再篩一次。
+        </p>
+      </div>
+    </details>
+  );
+}
 
 function parseSymbols(text: string): string[] {
   return [...new Set(text.split(/[\s,，、]+/).map((s) => s.trim().toUpperCase()).filter(Boolean))];
@@ -183,6 +215,7 @@ export default function SourcePicker({
         </div>
         <div className="space-y-1">
           <div className="text-xs font-medium text-(--text-muted)">AI 判斷</div>
+          <AiPoolInfo />
           <div className="flex flex-wrap gap-2">
             {opts.aiModes.map((m) => (
               <button key={m.id} type="button" className={chip(has((s) => s.source === "ai" && s.mode === m.id))} onClick={() => add({ source: "ai", mode: m.id, count: 10 })}>
@@ -237,6 +270,7 @@ export default function SourcePicker({
               )}
               {s.source === "ai" && (
                 <div className="flex flex-wrap items-center gap-2">
+                  <AiPoolInfo />
                   <p className="text-xs text-(--text-muted)">每次執行時讀取 AI 建議名單（依本站評分排名，取你在「我的關注 → AI 建議清單」設定的前 N 檔），名單變動會跟著變。</p>
                 </div>
               )}
