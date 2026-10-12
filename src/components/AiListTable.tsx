@@ -46,8 +46,8 @@ export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
             <th className={thR}>漲跌幅</th>
             <th className={thR}>持有股數</th>
             <th className={thR}>平均成本</th>
-            <th className={thR}>未實現損益</th>
-            <th className={thR}>占淨值</th>
+            <th className={thR} title="現價相對平均成本的損益金額與百分比，不是今日漲跌幅">未實現損益</th>
+            <th className={thR} title="占 AI 模擬組合淨值的比例">占淨值</th>
             <th className={thR}>買進日</th>
             <th className={thR}>停損價</th>
           </tr>
@@ -57,6 +57,7 @@ export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
             const q = quotes[r.symbol.toUpperCase()];
             const price = q?.price ?? r.price;
             const change = q?.changePercent ?? r.changePercent;
+            const pnlAmount = (price - r.avgCost) * r.shares;
             const pnlPct = r.avgCost > 0 ? (price / r.avgCost - 1) * 100 : r.pnlPct;
             return (
               <tr key={r.symbol} className="whitespace-nowrap border-b border-(--gridline) last:border-0 hover:bg-(--page-plane)">
@@ -68,7 +69,10 @@ export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
                 <td className={`py-2 pr-2 text-right tabular-nums ${change != null ? priceDirectionClass(change) : "text-(--text-muted)"}`}>{change != null ? formatPercent(change) : "—"}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{r.shares.toLocaleString()}</td>
                 <td className="py-2 pr-2 text-right tabular-nums">{formatPrice(r.avgCost, "TWD")}</td>
-                <td className={`py-2 pr-2 text-right tabular-nums ${priceDirectionClass(pnlPct)}`}>{formatPercent(pnlPct)}</td>
+                <td className={`py-2 pr-2 text-right tabular-nums ${priceDirectionClass(pnlPct)}`} title="未實現損益：現價相對平均成本的漲跌（金額未扣賣出成本），不是今日漲跌幅">
+                  {pnlAmount > 0 ? "+" : ""}
+                  {Math.round(pnlAmount).toLocaleString("en-US")} 元 <span className="text-xs">({formatPercent(pnlPct)})</span>
+                </td>
                 <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">{r.weightPct.toFixed(1)}%</td>
                 <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">{r.buyDay}</td>
                 <td className="py-2 pr-2 text-right tabular-nums text-(--text-secondary)">{r.stopPrice != null ? formatPrice(r.stopPrice, "TWD") : "—"}</td>

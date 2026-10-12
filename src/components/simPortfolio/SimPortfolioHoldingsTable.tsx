@@ -32,10 +32,10 @@ export default function SimPortfolioHoldingsTable({ holdings }: { holdings: SimH
               <th className={th}>股數</th>
               <th className={th}>成本</th>
               <th className={th}>現價</th>
-              <th className={th}>今日</th>
+              <th className={th} title="這檔今天的漲跌幅（相對昨收）">今日</th>
               <th className={th}>市值</th>
-              <th className={th}>占比</th>
-              <th className={th}>未實現損益</th>
+              <th className={th} title="占組合淨值的比例（持股市值 ÷ 目前淨值）">占比</th>
+              <th className={th} title="現價相對平均成本的損益金額與百分比（已扣假設賣出成本），不是今日漲跌幅">未實現損益</th>
               {showChips && <ChipsRatioHeaderCells />}
               <th className="py-2 pr-2.5 sm:pr-4 font-medium whitespace-nowrap">持有中評等／出場價</th>
             </tr>

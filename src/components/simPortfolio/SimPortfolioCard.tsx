@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import AllocationBar from "./AllocationBar";
 import { fmtTime, ntd, pct, SIM_DISCLAIMER, tone, useSimPortfolio } from "./useSimPortfolio";
 
 /** 首頁卡片顯示的持股與交易筆數。 */
@@ -47,6 +48,7 @@ export default function SimPortfolioCard() {
               cls={tone(perf.vsLevPct)}
             />
           </div>
+          <AllocationBar holdings={data.holdings ?? []} cash={data.cash ?? 0} nav={perf.nav} />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <div>
               <h3 className="text-[13px] font-medium text-(--text-muted)">持股（{data.holdings?.length ?? 0} 檔，現金 {ntd(data.cash ?? 0)} 元）</h3>
@@ -55,11 +57,22 @@ export default function SimPortfolioCard() {
                   <li key={h.symbol} className="flex items-baseline justify-between gap-2">
                     <Link href={`/stock/${h.symbol}?market=TW`} className="truncate hover:text-(--accent)">
                       {h.name} <span className="text-(--text-muted) tabular-nums">{h.symbol}</span>
-                      <span className="ml-1 text-[12px] text-(--text-muted)">{h.weightPct}%</span>
+                      <span className="ml-1 text-[12px] text-(--text-muted)" title="占組合淨值的比例（持股市值 ÷ 目前淨值）">
+                        占{h.weightPct}%
+                      </span>
                     </Link>
-                    <span className={`tabular-nums whitespace-nowrap ${tone(h.pnlPct)}`}>{pct(h.pnlPct)}</span>
+                    <span
+                      className={`tabular-nums whitespace-nowrap ${tone(h.pnlPct)}`}
+                      title={`未實現損益：現價相對平均成本 ${h.avgCost} 的漲跌（已扣假設賣出成本），不是今日漲跌幅`}
+                    >
+                      {h.pnl > 0 ? "+" : ""}
+                      {ntd(h.pnl)} 元 <span className="text-[12px]">({pct(h.pnlPct)})</span>
+                    </span>
                   </li>
                 ))}
+                {(data.holdings?.length ?? 0) > CARD_HOLDINGS && (
+                  <li className="text-[12px] text-(--text-muted)">另有 {(data.holdings?.length ?? 0) - CARD_HOLDINGS} 檔，見「查看完整持股與交易」</li>
+                )}
                 {(data.holdings?.length ?? 0) === 0 && <li className="text-(--text-muted)">目前空手</li>}
               </ul>
             </div>

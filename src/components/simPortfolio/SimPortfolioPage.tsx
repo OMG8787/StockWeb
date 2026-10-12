@@ -4,6 +4,7 @@ import Link from "next/link";
 import MarkdownLite from "../MarkdownLite";
 import NavChart from "./NavChart";
 import SimArchiveSection from "./SimArchiveSection";
+import AllocationBar from "./AllocationBar";
 import SimPortfolioHoldingsTable from "./SimPortfolioHoldingsTable";
 import { fmtTime, ntd, pct, SIM_DISCLAIMER, tone, useSimPortfolio } from "./useSimPortfolio";
 
@@ -69,7 +70,10 @@ export default function SimPortfolioPage() {
 
           <section className={card}>
             <h2 className="mb-2 font-semibold">目前持股（{data.holdings?.length ?? 0} 檔）</h2>
-            <SimPortfolioHoldingsTable holdings={data.holdings ?? []} />
+            {data.perf && <AllocationBar holdings={data.holdings ?? []} cash={data.cash ?? 0} nav={data.perf.nav} />}
+            <div className="mt-4">
+              <SimPortfolioHoldingsTable holdings={data.holdings ?? []} />
+            </div>
             <p className="mt-2 text-[12px] text-(--text-muted)">未實現損益已扣假設現在賣出的手續費與證交稅（跟關注清單同一套算法）。</p>
           </section>
 
