@@ -5,7 +5,8 @@
 
 import type { SimRatingSnapshot } from "./archive";
 
-export type SimSlotId = "0930" | "1300" | "1335" | "1435";
+/** 1300／1335 是 2026-10-12 以前的舊時點（舊交易紀錄還會有），現在的下單時點是 0930／1100／1230，1435 只結算與檢討 */
+export type SimSlotId = "0930" | "1100" | "1230" | "1300" | "1335" | "1435";
 
 export interface SimHolding {
   symbol: string;

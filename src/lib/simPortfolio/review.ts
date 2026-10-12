@@ -7,7 +7,7 @@ import { sellFee, type SimPerformance } from "./rules";
 import type { SimReview, SimState } from "./types";
 
 /**
- * AI 模擬投資組合的每日收盤後檢討（13:35 時點跑完交易後一次，一天一次 AI 呼叫，用預設 lite 等級、不吃較強模型配額）。
+ * AI 模擬投資組合的每日收盤後檢討（14:35 結算跑完後一次，一天一次 AI 呼叫，用預設 lite 等級、不吃較強模型配額）。
  * 「做了什麼、為什麼、哪筆錯了」的事實（交易、評等理由、已實現獎勵、未實現損益）全部由程式先整理好（buildReviewFacts），
  * AI 只負責把它寫成白話並指出問題；AI 失敗就用程式版（同一份事實）。
  * 完整檢討另存進學習紀錄命名空間 `learning:v1:sim-review:{日期}`（永久，不設過期），跟評等紀錄、獎勵同一套學習架構；

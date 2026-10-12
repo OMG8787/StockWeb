@@ -29,7 +29,7 @@ export default function SimPortfolioCard() {
         <div className="mt-3 h-28 animate-pulse rounded-md bg-(--page-plane)" aria-hidden />
       ) : !data.started || !perf ? (
         <p className="mt-2 text-sm text-(--text-secondary)">
-          {data.enabled ? "下一個交易時點（09:30／13:00／13:35）開始自動建倉。" : "這個環境沒有設定資料庫，模擬投資組合未啟用。"}
+          {data.enabled ? "下一個交易時點（09:30／11:00／12:30）開始自動建倉。" : "這個環境沒有設定資料庫，模擬投資組合未啟用。"}
         </p>
       ) : (
         <>

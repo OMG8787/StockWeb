@@ -40,7 +40,7 @@ import type { SimSlotId, SimState, SimTrade } from "./types";
  * AI 模擬投資組合的執行（有 I/O）。由 /api/cron/warm-cache（cron-job.org 每 5 分鐘）順帶呼叫，
  * 不在執行時點時零 Redis 指令直接略過；也可手動打 /api/cron/sim-portfolio。
  * 買賣規則、成交判斷全在 rules.ts（純函式）；這裡只負責抓評等／報價／盤口、套用、存檔。
- * 時點：盤中 09:30、13:00 立即撮合；13:35 下盤後定價委託；14:35 起以收盤價結算（成交時間 14:30）並寫 AI 檢討。
+ * 時點：盤中 09:30、11:00、12:30 立即撮合；14:35 起結算（舊版 13:35 盤後定價委託若有留單，以收盤價成交、時間記 14:30）並寫 AI 檢討。
  */
 
 export interface SimRunResult {
@@ -109,7 +109,7 @@ export async function runSimPortfolio(opts: { now?: Date; slot?: SimSlotDef | nu
   if (!simStoreEnabled) return { status: "disabled", reason: "沒有 Redis" };
   const now = opts.now ?? new Date();
   const slot = opts.slot ?? currentSimSlot(now);
-  if (!slot) return { status: "skipped", reason: "不在執行時點（盤中 09:30、13:00；13:35 下盤後委託；14:35 結算）" };
+  if (!slot) return { status: "skipped", reason: "不在執行時點（盤中 09:30、11:00、12:30；14:35 結算）" };
   const day = taipeiDayKey(now);
   const doneKey = slotDoneKey(day, slot.id);
   if (doneMemo.has(doneKey)) return { status: "skipped", reason: "這個時點已執行過", slot: slot.id };

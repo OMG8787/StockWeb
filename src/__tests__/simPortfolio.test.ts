@@ -91,13 +91,17 @@ describe("股數", () => {
 });
 
 describe("執行時點", () => {
-  it("09:30、13:00、13:35 起；週末與空檔不執行", () => {
+  it("09:30、11:00、12:30 下單、14:35 結算；週末與空檔不執行", () => {
     expect(currentSimSlot(tpe(DAY, "09:29"))).toBeNull();
     expect(currentSimSlot(tpe(DAY, "09:30"))?.id).toBe("0930");
-    expect(currentSimSlot(tpe(DAY, "12:59"))?.id).toBe("0930");
-    expect(currentSimSlot(tpe(DAY, "13:10"))?.id).toBe("1300");
-    expect(currentSimSlot(tpe(DAY, "13:32"))).toBeNull();
-    expect(currentSimSlot(tpe(DAY, "13:35"))?.id).toBe("1335");
+    expect(currentSimSlot(tpe(DAY, "10:59"))?.id).toBe("0930");
+    expect(currentSimSlot(tpe(DAY, "11:00"))?.id).toBe("1100");
+    expect(currentSimSlot(tpe(DAY, "12:29"))?.id).toBe("1100");
+    expect(currentSimSlot(tpe(DAY, "12:30"))?.id).toBe("1230");
+    expect(currentSimSlot(tpe(DAY, "13:29"))?.id).toBe("1230");
+    expect(currentSimSlot(tpe(DAY, "13:35"))).toBeNull(); // 舊的盤後定價下單時點已取消
+    expect(currentSimSlot(tpe(DAY, "14:34"))).toBeNull();
+    expect(currentSimSlot(tpe(DAY, "14:35"))?.id).toBe("1435");
     expect(currentSimSlot(tpe("2026-10-10", "10:00"))).toBeNull(); // 週六
   });
   it("冪等紀錄：同一時點只記一次、只留最近幾筆", () => {
@@ -352,7 +356,7 @@ describe("撮合與盤後委託", () => {
       ctx: { at: fixedFillAt(DAY), day: DAY, slot: "1435", index: 20000 },
     });
     expect(res.filled[0]).toMatchObject({ price: 101, shares: 1000, at: "2026-10-06T06:30:00.000Z" });
-    expect(currentSimSlot(tpe(DAY, "14:00"))?.kind).toBe("fixed-decide");
+    expect(currentSimSlot(tpe(DAY, "14:00"))).toBeNull(); // 13:35 盤後定價下單時點已取消（2026-10-12），結算流程保留給舊委託
     expect(currentSimSlot(tpe(DAY, "14:31"))).toBeNull();
     expect(currentSimSlot(tpe(DAY, "14:35"))?.kind).toBe("fixed-settle");
   });

@@ -62,7 +62,7 @@ export default function SimPortfolioPage() {
 
           <section className={card}>
             <h2 className="font-semibold">累計報酬走勢</h2>
-            <p className="mt-0.5 text-[12px] text-(--text-muted)">每個交易日一點（收盤後 13:35 那次為收盤淨值）；0050 與 00631L 只計價格、未含股利；00631L 是 2 倍槓桿 ETF，波動與損耗都比 0050 大，只當另一個對照。</p>
+            <p className="mt-0.5 text-[12px] text-(--text-muted)">每個交易日一點（收盤後 14:35 那次為收盤淨值）；0050 與 00631L 只計價格、未含股利；00631L 是 2 倍槓桿 ETF，波動與損耗都比 0050 大，只當另一個對照。</p>
             <div className="mt-2">
               <NavChart points={data.nav ?? []} initialCapital={data.initialCapital} base={data.base ?? { etf: null, index: null, lev: null }} />
             </div>
@@ -80,7 +80,7 @@ export default function SimPortfolioPage() {
           <section className={card}>
             <h2 className="font-semibold">AI 每日檢討</h2>
             {(data.reviews ?? []).length === 0 ? (
-              <p className="mt-2 text-sm text-(--text-muted)">每個交易日 13:35 收盤後交易完成時寫一篇。</p>
+              <p className="mt-2 text-sm text-(--text-muted)">每個交易日 14:35 收盤後寫一篇。</p>
             ) : (
               <div className="mt-2 space-y-4">
                 {(data.reviews ?? []).slice(0, 5).map((rv) => (
@@ -179,7 +179,7 @@ export default function SimPortfolioPage() {
           </li>
           <li>
             成交：盤中買進用最佳賣價、賣出用最佳買價（讀不到五檔才用最近成交價）；現價＝漲停且賣方無掛單（漲停鎖死）買不到、現價＝跌停且買方無掛單（跌停鎖死）賣不掉；
-            13:35 那輪是盤後定價委託，{r.fixedFillTime} 以收盤價成交（收盤漲停買不到、收盤跌停賣不掉，零頭走盤後零股、以收盤價近似）；單筆最多成交當日成交量的{" "}
+            舊版 13:35 盤後定價委託的紀錄是 {r.fixedFillTime} 以收盤價成交（已取消這個時點）；單筆最多成交當日成交量的{" "}
             {r.maxVolumeSharePct}%，超過部分成交；讀不到五檔與漲跌停價時退回保守規則（漲跌幅 ≥ {r.limitLockPct}% 視為鎖死）。未成交的單記在交易紀錄並寫明原因，不續掛，下一個時點重新評估。
           </li>
           <li>

@@ -33,7 +33,7 @@ function NameCell({ symbol, name, hide }: { symbol: string; name: string; hide: 
 export function AiHoldingsTable({ rows }: { rows: AiHoldRow[] }) {
   const quotes = useTwQuotes(rows.map((r) => r.symbol));
   if (rows.length === 0) {
-    return <p className="py-8 text-center text-sm text-(--text-muted)">AI 模擬組合目前沒有持股（交易日 09:30、13:00、13:35 依本站評等自動買進）。</p>;
+    return <p className="py-8 text-center text-sm text-(--text-muted)">AI 模擬組合目前沒有持股（交易日 09:30、11:00、12:30 依本站評等自動買進）。</p>;
   }
   return (
     <div className="overflow-x-auto">
