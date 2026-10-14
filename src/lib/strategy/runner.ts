@@ -117,7 +117,7 @@ export function rangeFor(cfg: StrategyConfig, indicators: UserIndicator[]): Cand
   let longest = 0;
   for (const i of indicators) {
     if (!ids.has(i.id)) continue;
-    for (const k of ["period", "long", "short", "days"]) {
+    for (const k of ["period", "long", "mid", "short", "days"]) {
       const v = Number(i.params[k]);
       if (Number.isFinite(v)) longest = Math.max(longest, v);
     }

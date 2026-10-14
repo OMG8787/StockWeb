@@ -63,6 +63,25 @@ describe("參考指標", () => {
     expect(evaluateIndicator("ma_cross", { short: 5, long: 20, dir: "dead", within: 5 }, ctx).pass).toBe(false);
   });
 
+  it("均線多頭排列：長期上漲 5>20>60 且 20 日線向上；下跌或盤整不成立", () => {
+    const up = ctxOf(range(90, (i) => 100 + i));
+    const r = evaluateIndicator("ma_alignment", { short: 5, mid: 20, long: 60, slopeDays: 3 }, up);
+    expect(r.pass).toBe(true);
+    expect(evaluateIndicator("ma_alignment", { short: 5, mid: 20, long: 60, slopeDays: 3 }, ctxOf(range(90, (i) => 200 - i))).pass).toBe(false);
+    expect(evaluateIndicator("ma_alignment", { short: 5, mid: 20, long: 60, slopeDays: 3 }, ctxOf(range(30, (i) => 100 + i))).pass).toBeNull(); // 資料不足 60 天
+    // 先漲後急跌：5 日線掉到 20 日線之下 → 不成立
+    expect(evaluateIndicator("ma_alignment", { short: 5, mid: 20, long: 60, slopeDays: 0 }, ctxOf([...range(80, (i) => 100 + i), ...range(6, (i) => 170 - i * 8)])).pass).toBe(false);
+  });
+
+  it("RSI 穿越門檻：連跌後反彈穿越 30（up）、連漲後回落跌破 70（down）", () => {
+    const rebound = ctxOf([...range(30, (i) => 100 - i), ...range(4, (i) => 71 + i * 6)]);
+    expect(evaluateIndicator("rsi_cross", { period: 14, dir: "up", level: 30, within: 6 }, rebound).pass).toBe(true);
+    // 沒有跌到門檻以下的上漲股不成立
+    expect(evaluateIndicator("rsi_cross", { period: 14, dir: "up", level: 30, within: 6 }, ctxOf(range(40, (i) => 100 + i))).pass).toBe(false);
+    const fall = ctxOf([...range(30, (i) => 100 + i * 2), ...range(4, (i) => 158 - i * 6)]);
+    expect(evaluateIndicator("rsi_cross", { period: 14, dir: "down", level: 70, within: 6 }, fall).pass).toBe(true);
+  });
+
   it("成交量放大、突破新高、N 日漲跌幅", () => {
     const ctx: EvalContext = { symbol: "2330", market: "TW", candles: candles([...range(30, () => 100), 110], 5000) };
     expect(evaluateIndicator("volume_surge", { period: 20, multiple: 2 }, ctx).pass).toBe(true);

@@ -131,6 +131,37 @@ export const INDICATOR_TYPES: IndicatorType[] = [
     },
   },
   {
+    id: "rsi_cross",
+    label: "RSI 穿越門檻（超賣反彈／超買回落）",
+    group: "技術面",
+    description:
+      "RSI 由下往上穿越門檻（例如曾低於 30、最近重新站上 30＝超賣反彈），或由上往下跌破門檻（例如從 70 以上回落＝超買回落）。跟「RSI 強弱指標」不同：那個只看現在的數值，這個看「剛剛穿越」這件事。建議搭配止跌或趨勢條件，避免只因 RSI 穿越就進場。",
+    params: [
+      { key: "period", label: "RSI 天數", type: "number", default: 14, min: 2, max: 60 },
+      { key: "dir", label: "方向", type: "select", default: "up", options: [{ value: "up", label: "由下往上穿越（超賣反彈）" }, { value: "down", label: "由上往下跌破（超買回落）" }] },
+      { key: "level", label: "門檻", type: "number", default: 30, min: 1, max: 99 },
+      { key: "within", label: "最近幾天內", type: "number", default: 5, min: 1, max: 20 },
+    ],
+    needs: ["candles"],
+    describe: (p) =>
+      p.dir === "down"
+        ? `RSI(${n(p.period, 14)}) 由上往下跌破 ${n(p.level, 30)}（${n(p.within, 5)} 天內）`
+        : `RSI(${n(p.period, 14)}) 曾低於 ${n(p.level, 30)} 後重新站上（${n(p.within, 5)} 天內）`,
+    evaluate(ctx, p) {
+      const series = computeRsiSeries(ctx.candles, n(p.period, 14));
+      if (series.length < 2) return NO_DATA;
+      const level = n(p.level, 30);
+      const start = Math.max(1, series.length - n(p.within, 5));
+      let crossed = false;
+      for (let i = start; i < series.length; i++) {
+        const prev = series[i - 1].value;
+        const cur = series[i].value;
+        if (p.dir === "down" ? prev >= level && cur < level : prev < level && cur >= level) crossed = true;
+      }
+      return { pass: crossed, detail: `RSI(${n(p.period, 14)})＝${fmt(series[series.length - 1].value, 1)}、前一日＝${fmt(series[series.length - 2].value, 1)}` };
+    },
+  },
+  {
     id: "kd_cross",
     label: "KD 交叉",
     group: "技術面",
@@ -193,6 +224,40 @@ export const INDICATOR_TYPES: IndicatorType[] = [
       const crossed = crossedWithin(s, l, p.dir, n(p.within, 3));
       if (crossed == null) return NO_DATA;
       return { pass: crossed, detail: `MA${n(p.short, 5)}＝${fmt(last(s)!.value)}、MA${n(p.long, 20)}＝${fmt(last(l)!.value)}` };
+    },
+  },
+  {
+    id: "ma_alignment",
+    label: "均線多頭排列",
+    group: "技術面",
+    description:
+      "短、中、長三條均線由上到下依序排列（例如 5 日線 > 20 日線 > 60 日線）代表多頭排列，趨勢向上；可再要求中天期均線本身向上（跟幾天前比較）。均線有落後性，排列成形時股價可能已經漲了一段。",
+    params: [
+      { key: "short", label: "短天期", type: "number", default: 5, min: 2, max: 60 },
+      { key: "mid", label: "中天期", type: "number", default: 20, min: 3, max: 120 },
+      { key: "long", label: "長天期", type: "number", default: 60, min: 4, max: 240 },
+      { key: "slopeDays", label: "中天期均線需向上（跟幾天前比，0＝不要求）", type: "number", default: 3, min: 0, max: 20 },
+    ],
+    needs: ["candles"],
+    describe: (p) =>
+      `均線多頭排列（${n(p.short, 5)} 日線 > ${n(p.mid, 20)} 日線 > ${n(p.long, 60)} 日線${n(p.slopeDays, 3) > 0 ? `，${n(p.mid, 20)} 日線向上` : ""}）`,
+    evaluate(ctx, p) {
+      const s = last(computeMaSeries(ctx.candles, n(p.short, 5)))?.value;
+      const midSeries = computeMaSeries(ctx.candles, n(p.mid, 20));
+      const m = last(midSeries)?.value;
+      const l = last(computeMaSeries(ctx.candles, n(p.long, 60)))?.value;
+      if (s == null || m == null || l == null) return NO_DATA;
+      const slope = n(p.slopeDays, 3);
+      let up = true;
+      if (slope > 0) {
+        const before = midSeries[midSeries.length - 1 - slope]?.value;
+        if (before == null) return NO_DATA;
+        up = m > before;
+      }
+      return {
+        pass: s > m && m > l && up,
+        detail: `MA${n(p.short, 5)}＝${fmt(s)}、MA${n(p.mid, 20)}＝${fmt(m)}、MA${n(p.long, 60)}＝${fmt(l)}${slope > 0 ? `（中天期線${up ? "向上" : "未向上"}）` : ""}`,
+      };
     },
   },
   {
