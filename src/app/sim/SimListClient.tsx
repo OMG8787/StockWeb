@@ -15,7 +15,7 @@ export default function SimListClient() {
 
   return (
     <div className="space-y-5 pb-24">
-      <LabTabs active="/sim" intro="模擬倉用虛擬資金依你選的策略自動買賣（每個交易日收盤後執行），也可以手動下單；成交價用收盤價（手動下單用最新報價），手續費與證交稅照實扣。" />
+      <LabTabs active="/sim" intro="模擬倉用虛擬資金依你選的策略自動買賣（預設每個交易日收盤後 16:40 以收盤價成交；也可選盤中 10:00／11:30／13:00 檢查、以即時價成交並留檢查紀錄），也可以手動下單（用最新報價），手續費與證交稅照實扣。" />
       {(sims.error || strategies.error) && <p className="text-sm text-(--price-up)">{sims.error || strategies.error}</p>}
 
       {creating ? (

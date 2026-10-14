@@ -210,7 +210,13 @@ export async function runSim(
   // 以多數股票的最後一根日K日期判斷「今天的收盤資料出來了沒」
   const lastDays = contexts.map((c) => c.ctx?.candles[c.ctx.candles.length - 1]?.time).filter((x): x is string => !!x);
   if (lastDays.length === 0) return finish(sim, "抓不到任何股票的日K，這次不交易", today, false);
-  const day = lastDays.sort().at(-1)!;
+  // 盤中檢查：日期一律是台北今天，只用「有今天即時K」的股票判斷；沒有今天這根（即時價抓不到）就不拿昨天收盤價成交
+  const day = mode === "intraday" ? today : lastDays.sort().at(-1)!;
+  if (mode === "intraday" && !lastDays.includes(today)) {
+    const probe = [...all.values()].find((t) => t.market === "TW");
+    const q = probe ? await getQuote(probe.symbol, "TW").then((x) => `${probe.symbol} 報價時間 ${x?.tradeTime ?? "無"}、量 ${x?.volume ?? "無"}`).catch((e) => `${probe.symbol} 報價失敗：${(e as Error).message}`) : "沒有台股";
+    return finish(sim, `盤中檢查：${all.size} 檔都抓不到今天的即時K，這次不交易也不記檢查紀錄（下一輪排程再試）。診斷：${q}`, today, false);
+  }
   if (mode !== "intraday" && sim.lastRunDay >= day) return { simId: sim.id, ran: false, note: `最新交易日 ${day} 已經執行過，等下一個交易日收盤後再執行`, trades: 0 };
 
   const decisions = new Map<string, Candidate>();

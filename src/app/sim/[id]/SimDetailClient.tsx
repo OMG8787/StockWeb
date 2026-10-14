@@ -312,7 +312,7 @@ export default function SimDetailClient({ id }: { id: string }) {
             盤中 10:00、11:30、13:00 用即時價判斷是否交易，每次檢查（包含沒交易）都記一筆；收盤後 16:40 只結算淨值、不再交易。只保留最近 {90} 筆。
           </p>
           {sim.checkLog.length === 0 ? (
-            <p className="text-sm text-(--text-muted)">還沒有檢查紀錄（下一個交易日 10:00 起開始）。</p>
+            <p className="text-sm text-(--text-muted)">還沒有檢查紀錄（下一個檢查時點（10:00／11:30／13:00）起開始）。</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1)">
               <table className="w-full">

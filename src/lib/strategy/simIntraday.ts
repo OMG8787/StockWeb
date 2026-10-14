@@ -27,17 +27,19 @@ export async function runIntradaySimChecks(now: Date = new Date()): Promise<stri
   const cache = new DataCache(new Set(), true); // 所有模擬倉共用：同一檔股票只抓一次
   let ok = 0;
   const errors: string[] = [];
+  const notes: string[] = [];
   for (const sim of todo) {
     if (Date.now() - started > BUDGET_MS) {
       errors.push(`${sim.name}：時間不夠，留給下一次`);
       continue;
     }
     try {
-      await runSim(sim, { cache, deadline: started + BUDGET_MS, mode: "intraday", slot: slot.id });
-      ok++;
+      const res = await runSim(sim, { cache, deadline: started + BUDGET_MS, mode: "intraday", slot: slot.id });
+      if (res.ran) ok++;
+      notes.push(`${sim.name}：${res.note}`);
     } catch (err) {
       errors.push(`${sim.name}：${(err as Error).message}`);
     }
   }
-  return `${slot.label} 檢查 ${ok}/${todo.length} 個模擬倉${errors.length ? `；${errors.join("；")}` : ""}`;
+  return `${slot.label} 檢查 ${ok}/${todo.length} 個模擬倉${errors.length ? `；${errors.join("；")}` : ""}｜${notes.slice(0, 3).join("｜")}`;
 }
