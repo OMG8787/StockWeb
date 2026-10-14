@@ -1,5 +1,6 @@
 "use client";
 
+import type { SimCheck } from "@/lib/strategy/simSlots";
 import { useCallback, useEffect, useState } from "react";
 
 /** 三個頁面共用的資料型別（對應 /api/strategy/* 的回應） */
@@ -82,6 +83,8 @@ export interface Sim {
   equity: number;
   returnPct: number;
   autoTrade: boolean;
+  schedule: "close" | "intraday";
+  checkLog: SimCheck[];
   lastRunDay: string;
   lastRunNote: string;
   positions: SimPosition[];

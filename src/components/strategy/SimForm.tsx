@@ -27,6 +27,7 @@ export default function SimForm({
   const [sourceMode, setSourceMode] = useState<SourceMode>(sim?.sourceMode ?? "union");
   const [initialCash, setInitialCash] = useState(1_000_000);
   const [autoTrade, setAutoTrade] = useState(sim?.autoTrade ?? true);
+  const [schedule, setSchedule] = useState<"close" | "intraday">(sim?.schedule ?? "close");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -37,7 +38,7 @@ export default function SimForm({
       // 儲存＋重新載入列表一起遮住，完成時直接看到新的模擬倉
       await runBusy(sim ? "儲存模擬倉中…" : "建立模擬倉中…", async () => {
         const r = await api<{ item: Sim }>("/api/strategy/sims", {
-          body: { id: sim?.id, name, strategyId, sources, sourceMode, initialCash, autoTrade },
+          body: { id: sim?.id, name, strategyId, sources, sourceMode, initialCash, autoTrade, schedule },
         });
         await onSaved(r.item);
       });
@@ -91,7 +92,14 @@ export default function SimForm({
         )}
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={autoTrade} onChange={(e) => setAutoTrade(e.target.checked)} />
-          每個交易日收盤後依策略自動交易
+          依策略自動交易
+        </label>
+        <label className="block space-y-1">
+          <span>交易時機</span>
+          <select value={schedule} onChange={(e) => setSchedule(e.target.value as "close" | "intraday")} className={`${inputCls} !w-auto`} disabled={!autoTrade}>
+            <option value="close">每個交易日收盤後（16:40，以收盤價成交）</option>
+            <option value="intraday">盤中 10:00、11:30、13:00 檢查（以即時價成交，每次檢查都留紀錄）</option>
+          </select>
         </label>
       </div>
 

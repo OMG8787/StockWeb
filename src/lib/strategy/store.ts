@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { SIM_CHECK_LOG_KEEP, type SimCheck } from "./simSlots";
 import { AI_PICK_LIMIT_DEFAULT, normalizePickLimit } from "@/lib/aiPickLimits";
 import { getStore, type Row } from "@/lib/auth/store";
 import { taipeiNow } from "@/lib/auth/accounts";
@@ -213,6 +214,10 @@ export interface SimView {
   equity: number;
   returnPct: number;
   autoTrade: boolean;
+  /** 交易時機：close＝每個交易日收盤後（16:40，收盤價）；intraday＝盤中 10:00／11:30／13:00 檢查（即時價），收盤後只結算淨值 */
+  schedule: "close" | "intraday";
+  /** 盤中檢查紀錄（舊的在前，最多 SIM_CHECK_LOG_KEEP 筆） */
+  checkLog: SimCheck[];
   lastRunDay: string;
   lastRunNote: string;
   positions: SimPosition[];
@@ -251,6 +256,8 @@ export function toSim(r: Row): SimView {
     equity: Number(r.Equity) || initialCash,
     returnPct: Number(r.ReturnPct) || 0,
     autoTrade: String(r.AutoTrade).toUpperCase() !== "FALSE",
+    schedule: r.Schedule === "intraday" ? "intraday" : "close",
+    checkLog: parseJson<SimCheck[]>(r.CheckLog, []),
     lastRunDay: r.LastRunDay ?? "",
     lastRunNote: r.LastRunNote ?? "",
     positions: parseJson(r.Positions, []),
@@ -300,7 +307,7 @@ async function withNames(list: SimView["symbols"]): Promise<SimView["symbols"]> 
 
 export async function saveSim(
   owner: Owner,
-  input: { id?: string; name?: unknown; strategyId?: unknown; sources?: unknown; sourceMode?: unknown; initialCash?: unknown; autoTrade?: unknown },
+  input: { id?: string; name?: unknown; strategyId?: unknown; sources?: unknown; sourceMode?: unknown; initialCash?: unknown; autoTrade?: unknown; schedule?: unknown },
 ): Promise<SimView> {
   const [mine, strategies] = await readMineMany(owner.userId, "Sims", "Strategies");
   const name = text(input.name, 40);
@@ -324,7 +331,7 @@ export async function saveSim(
   const now = taipeiNow();
   const patch: Row = {
     Account: owner.account, Name: name, StrategyId: strategyId, Universe: "sources", Symbols: JSON.stringify(symbols),
-    Sources: JSON.stringify(sources), SourceMode: sourceMode, AutoTrade: autoTrade ? "TRUE" : "FALSE", UpdatedAt: now, UserId: owner.userId,
+    Sources: JSON.stringify(sources), SourceMode: sourceMode, AutoTrade: autoTrade ? "TRUE" : "FALSE", Schedule: input.schedule === "intraday" ? "intraday" : "close", UpdatedAt: now, UserId: owner.userId,
   };
   if (input.id) {
     const old = mine.find((r) => r.ID === input.id);
@@ -395,7 +402,7 @@ export async function persistSimResult(
   sim: SimView,
   next: { cash: number; positions: SimPosition[]; equity: number },
   trades: Array<Omit<SimTradeView, "id" | "at">>,
-  opts: { day: string; runNote?: string; markRun?: boolean; indexClose?: number | null },
+  opts: { day: string; runNote?: string; markRun?: boolean; indexClose?: number | null; checkLog?: SimCheck[] },
 ): Promise<void> {
   const now = taipeiNow();
   const returnPct = sim.initialCash ? ((next.equity / sim.initialCash - 1) * 100).toFixed(2) : "0";
@@ -403,6 +410,8 @@ export async function persistSimResult(
     Cash: String(Math.round(next.cash * 100) / 100), Positions: JSON.stringify(next.positions), Equity: String(Math.round(next.equity)),
     ReturnPct: returnPct, UpdatedAt: now,
   };
+  if (opts.runNote && !opts.markRun) patch.LastRunNote = opts.runNote;
+  if (opts.checkLog) patch.CheckLog = JSON.stringify(opts.checkLog.slice(-SIM_CHECK_LOG_KEEP));
   if (opts.markRun) {
     patch.LastRunDay = opts.day;
     patch.LastRunNote = opts.runNote ?? "";

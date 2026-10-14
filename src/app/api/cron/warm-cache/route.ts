@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { runIntradaySimChecks } from "@/lib/strategy/simIntraday";
 import {
   getChips,
   getChipsRatiosBatch,
@@ -155,6 +156,8 @@ export async function GET(req: NextRequest) {
       { label: "learning (daily)", run: () => runLearningUpdate().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`) },
       // AI 模擬投資組合（lib/simPortfolio）：只在 09:30／11:00／12:30 起的下單時點與 14:35 結算、且當天該時點還沒做過才交易（冪等＋鎖），
       // 其餘時間不打 Redis 直接略過。14:35 那次另寫一段 AI 檢討（一天一次 lite 呼叫）。
+      // 策略庫「盤中型」模擬倉：10:00／11:30／13:00 用即時價檢查並記錄（simIntraday.ts；窗口外立刻略過）
+      { label: "strategy sims intraday", run: () => runIntradaySimChecks() },
       { label: "sim portfolio", run: () => runSimPortfolio().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`) },
     ];
     const due = entries.filter((e) => (!e.slow || slowDue) && (e.market !== "TW" || twActive) && (e.market !== "US" || usActive));

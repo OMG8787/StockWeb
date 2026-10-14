@@ -177,7 +177,7 @@ export default function SimDetailClient({ id }: { id: string }) {
         ))}
       </div>
       <p className="text-xs text-(--text-muted)">
-        初始資金 {money(sim.initialCash)}・建立於 {sim.createdAt.slice(0, 10)}
+        初始資金 {money(sim.initialCash)}・交易時機：{sim.schedule === "intraday" ? "盤中 10:00／11:30／13:00 檢查" : "收盤後 16:40"}・建立於 {sim.createdAt.slice(0, 10)}
         {sim.lastRunNote && `・最近執行：${sim.lastRunDay && !sim.lastRunNote.startsWith(sim.lastRunDay) ? `${sim.lastRunDay} ` : ""}${sim.lastRunNote}`}
       </p>
 
@@ -304,6 +304,47 @@ export default function SimDetailClient({ id }: { id: string }) {
           </div>
         )}
       </section>
+
+      {sim.schedule === "intraday" && (
+        <section className="space-y-2">
+          <h2 className="font-semibold">盤中檢查紀錄（{sim.checkLog.length}）</h2>
+          <p className="text-xs text-(--text-muted)">
+            盤中 10:00、11:30、13:00 用即時價判斷是否交易，每次檢查（包含沒交易）都記一筆；收盤後 16:40 只結算淨值、不再交易。只保留最近 {90} 筆。
+          </p>
+          {sim.checkLog.length === 0 ? (
+            <p className="text-sm text-(--text-muted)">還沒有檢查紀錄（下一個交易日 10:00 起開始）。</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1)">
+              <table className="w-full">
+                <thead className="border-b border-(--gridline)">
+                  <tr>
+                    {["日期", "時間", "時點", "掃描", "買", "賣", "結果"].map((h) => (
+                      <th key={h} className={th}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...sim.checkLog].reverse().map((c, i) => (
+                    <tr key={`${c.day}-${c.slot}-${c.at}-${i}`} className="border-b border-(--gridline) align-top last:border-0">
+                      <td className={td}>{c.day}</td>
+                      <td className={td}>{c.at}</td>
+                      <td className={td}>{c.slot === "manual" ? "手動" : `${c.slot.slice(0, 2)}:${c.slot.slice(2)}`}</td>
+                      <td className={td}>{c.scanned} 檔</td>
+                      <td className={td}>{c.buys}</td>
+                      <td className={td}>{c.sells}</td>
+                      <td className="px-2 py-2 text-sm">
+                        {c.trades.length === 0 ? <span className="text-(--text-muted)">沒有符合條件的交易</span> : c.trades.map((t) => <div key={t}>{t}</div>)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="space-y-2">
         <h2 className="font-semibold">交易紀錄（{trades.length}）</h2>

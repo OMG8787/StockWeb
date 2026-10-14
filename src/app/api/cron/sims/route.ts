@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
     }
     try {
       // 每個模擬倉抓資料的期限＝整體剩餘時間，留 30 秒寫回
-      results.push(await runSim(sim, { cache, deadline: started + BUDGET_MS - 30_000 }));
+      // 盤中型模擬倉（schedule＝intraday）已在盤中三個時點交易過，收盤只結算淨值
+      results.push(await runSim(sim, { cache, deadline: started + BUDGET_MS - 30_000, mode: sim.schedule === "intraday" ? "settle" : "close" }));
     } catch (err) {
       results.push({ simId: sim.id, error: (err as Error).message });
     }

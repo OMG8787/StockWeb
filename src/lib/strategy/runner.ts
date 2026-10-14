@@ -6,6 +6,7 @@ import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { getStockRating } from "@/lib/ai/stockRating";
 import { taipeiNow } from "@/lib/auth/accounts";
 import { getMarketStatus } from "@/lib/marketStatus";
+import type { SimCheck, SimCheckSlot } from "./simSlots";
 import { getStore } from "@/lib/auth/store";
 import { INDICATOR_TYPE_MAP, type EvalContext, type IndicatorNeed } from "./indicatorCatalog";
 import {
@@ -161,6 +162,8 @@ async function taiexClose(): Promise<number | null> {
   return idx.find((i) => i.symbol === "TAIEX")?.price ?? null;
 }
 
+export type SimRunMode = "close" | "intraday" | "settle";
+
 export interface RunResult {
   simId: string;
   ran: boolean;
@@ -172,7 +175,13 @@ export interface RunResult {
  * 依策略跑一次模擬倉，以「最新一個有收盤資料的交易日」為準（平日 16:40 排程＝當天；
  * 晚上或假日手動執行＝最近一個交易日）。同一個交易日只會執行一次，不會重複交易。
  */
-export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?: number } = {}): Promise<RunResult> {
+export async function runSim(
+  sim: SimView,
+  opts: { cache?: DataCache; deadline?: number; mode?: SimRunMode; slot?: SimCheckSlot["id"] } = {},
+): Promise<RunResult> {
+  // 模式：close＝收盤價判斷並交易（預設）；intraday＝盤中用即時價判斷並交易、記檢查紀錄；settle＝只結算淨值不交易
+  // （盤中型模擬倉的收盤結算；手動執行時盤中走 intraday、收盤後走 settle）。
+  const mode: SimRunMode = opts.mode ?? (sim.schedule === "intraday" ? (getMarketStatus("TW") === "open" ? "intraday" : "settle") : "close");
   const today = taipeiToday();
   const deadline = opts.deadline ?? Date.now() + FETCH_BUDGET_MS;
   await prefetchStrategyTables(sim.userId);
@@ -181,7 +190,7 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   if (!strategy) throw new StrategyError("模擬倉沒有設定策略，或策略已被刪除");
 
   const cfg = strategy.config;
-  const cache = opts.cache ?? new DataCache(new Set());
+  const cache = opts.cache ?? new DataCache(new Set(), mode === "intraday");
   cache.addNeeds(needsOf(cfg, indicators), rangeFor(cfg, indicators));
 
   const { targets: universe, errors: sourceErrors } = await simTargets(sim, cfg);
@@ -202,7 +211,7 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   const lastDays = contexts.map((c) => c.ctx?.candles[c.ctx.candles.length - 1]?.time).filter((x): x is string => !!x);
   if (lastDays.length === 0) return finish(sim, "抓不到任何股票的日K，這次不交易", today, false);
   const day = lastDays.sort().at(-1)!;
-  if (sim.lastRunDay >= day) return { simId: sim.id, ran: false, note: `最新交易日 ${day} 已經執行過，等下一個交易日收盤後再執行`, trades: 0 };
+  if (mode !== "intraday" && sim.lastRunDay >= day) return { simId: sim.id, ran: false, note: `最新交易日 ${day} 已經執行過，等下一個交易日收盤後再執行`, trades: 0 };
 
   const decisions = new Map<string, Candidate>();
   for (const { t, ctx } of contexts) {
@@ -217,21 +226,43 @@ export async function runSim(sim: SimView, opts: { cache?: DataCache; deadline?:
   const candidates = universe.map((t) => decisions.get(`${t.market}:${t.symbol}`)).filter((c): c is Candidate => !!c);
 
   const state: SimState = { initialCash: sim.initialCash, cash: sim.cash, positions: sim.positions };
-  const result = runSimDay(state, cfg, day, held, candidates);
+  // settle：盤中型模擬倉的收盤結算，只重算淨值、不交易（交易已在盤中檢查時點做過）
+  const result = mode === "settle" ? { state, trades: [] as ReturnType<typeof runSimDay>["trades"] } : runSimDay(state, cfg, day, held, candidates);
   const prices = new Map([...decisions].map(([k, c]) => [k, c.price]));
   const equity = simEquity(result.state, prices);
   const buys = result.trades.filter((t) => t.side === "buy").length;
   const sells = result.trades.length - buys;
   const missing = universe.length - candidates.length;
+  const label = mode === "intraday" ? `盤中檢查${opts.slot && opts.slot !== "manual" ? ` ${opts.slot.slice(0, 2)}:${opts.slot.slice(2)}` : "（手動）"}` : mode === "settle" ? "收盤結算（不交易）" : "收盤";
   const note =
-    `${day} 收盤：掃描 ${candidates.length} 檔，${result.trades.length ? `買進 ${buys} 筆、賣出 ${sells} 筆` : "沒有符合條件的交易"}` +
+    `${day} ${label}：掃描 ${candidates.length} 檔，${result.trades.length ? `買進 ${buys} 筆、賣出 ${sells} 筆` : mode === "settle" ? "只結算淨值" : "沒有符合條件的交易"}` +
     (missing > 0 ? `（${missing} 檔資料沒抓到${skipped ? "，時間不夠先略過" : ""}）` : "") +
     (sourceErrors.length ? `；名單來源失敗：${sourceErrors.join("；")}` : "");
+  // 盤中檢查：每次都記一筆紀錄（含沒交易），之後在模擬倉頁查看
+  const checkLog =
+    mode === "intraday"
+      ? [
+          ...sim.checkLog,
+          {
+            day,
+            slot: opts.slot ?? "manual",
+            at: taipeiNow().slice(11, 16),
+            scanned: candidates.length,
+            buys,
+            sells,
+            trades: result.trades.slice(0, 6).map((t) => `${t.side === "buy" ? "買" : "賣"} ${t.name || t.symbol}(${t.symbol}) ${t.shares} 股 @ ${t.price}：${t.reason}`),
+            note,
+          } satisfies SimCheck,
+        ]
+      : undefined;
   await persistSimResult(
     sim,
     { cash: result.state.cash, positions: result.state.positions, equity },
     result.trades.map((t) => ({ ...t, day, pnl: t.pnl ?? null })),
-    { day, runNote: note, markRun: true, indexClose: await taiexClose() },
+    // 盤中檢查不標「今天已執行」、不寫當日淨值（收盤結算才寫），但把最近執行說明更新
+    mode === "intraday"
+      ? { day, checkLog, runNote: note }
+      : { day, runNote: note, markRun: true, indexClose: await taiexClose() },
   );
   return { simId: sim.id, ran: true, note, trades: result.trades.length };
 }

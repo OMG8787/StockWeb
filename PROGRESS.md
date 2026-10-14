@@ -488,6 +488,10 @@ ode_modules`（只刪連結）再刪資料夾。→ 2026-10-06 刪 Stock-web-bas
 
 ## 工作日誌（新到舊，只列有意義的變更；commit hash 對應 `git log`）
 
+### 2026-10-14（續）：策略庫模擬倉新增「盤中 10:00／11:30／13:00 檢查」並留紀錄
+
+使用者：「我想設定成10點、11:30、13:00檢查看是否需要交易然後需要有紀錄」（問的是策略庫自己的模擬倉，原本只有 16:40 收盤價一天一次）。模擬倉表單新增「交易時機」（`Schedule`：close 預設／intraday）；intraday 型在三個時點用即時價（DataCache live、`runSim` mode=intraday）判斷並交易，每次檢查（含沒交易）寫一筆 `SimCheck` 到 Sims 列的 `CheckLog`（最多 90 筆），詳情頁新增「盤中檢查紀錄」；16:40 的 /api/cron/sims 對 intraday 型只結算淨值（mode=settle，不再交易）。觸發：warm-cache 每 5 分鐘順帶 `runIntradaySimChecks`（`simSlots.ts` 窗口 10:00–11:29／11:30–12:59／13:00–13:29，同時點每個模擬倉只做一次，窗口外立即略過）。手動「立即執行」：盤中＝即時檢查並記為手動、收盤後＝結算。已知限制：同一天先賣出的股票下個時點可能再買回（runSimDay 的 soldToday 只在單次內）。驗證：tsc、eslint、vitest 745、build；正式站盤中實測交給驗證 agent。
+
 ### 2026-10-14：策略庫「測試一檔股票」盤中也帶即時五檔
 
 使用者截圖：測試結果「即時可買進(5檔)／五檔委買量…沒有即時五檔」。根因：`previewStrategy` 一律用收盤模式（DataCache live=false），五檔指標只在 live 模式抓。改成台股盤中（`getMarketStatus==="open"`）用 live 模式（即時價補今日 K＋即時五檔，與即時提醒同一套），收盤後仍以最新收盤判斷；測試標題與結果加「盤中即時／收盤」說明。驗證：tsc、eslint、vitest 744；盤中實測交給驗證 agent。
