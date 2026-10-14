@@ -29,6 +29,7 @@ interface Preview {
   symbol: string;
   name: string;
   lastDay: string;
+  live?: boolean;
   decision: { buy: boolean; sell: boolean; score: number; summary: string; hits: Array<{ id: string; name: string; pass: boolean | null; detail: string }> };
 }
 
@@ -237,7 +238,7 @@ export default function StrategiesClient() {
 
           {draft.id && (
             <div className="space-y-2 rounded-md border border-(--gridline) p-3 text-sm">
-              <div className="font-medium">🔍 用這個策略測試一檔股票（以最新收盤判斷）</div>
+              <div className="font-medium">🔍 用這個策略測試一檔股票（盤中用即時價與即時五檔；收盤後以最新收盤判斷，沒有五檔）</div>
               <div className="flex gap-2">
                 <input value={testSymbol} onChange={(e) => setTestSymbol(e.target.value)} placeholder="代號，例如 2330" className={`${inputCls} !w-40`} />
                 <button type="button" className={btnGhost} disabled={busy || !testSymbol.trim()} onClick={test}>
@@ -248,7 +249,7 @@ export default function StrategiesClient() {
               {preview && (
                 <div className="space-y-1">
                   <div>
-                    {preview.name}（{preview.symbol}，{preview.lastDay}）：
+                    {preview.name}（{preview.symbol}，{preview.lastDay}{preview.live ? ' 盤中即時' : ' 收盤'}）：
                     <b className={preview.decision.buy ? "text-(--price-up)" : preview.decision.sell ? "text-(--price-down)" : ""}>
                       {preview.decision.buy ? "符合買進" : preview.decision.sell ? "符合賣出" : "不動作"}
                     </b>

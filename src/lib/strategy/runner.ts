@@ -5,6 +5,7 @@ import { getOrderBook } from "@/lib/data/orderBook";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
 import { getStockRating } from "@/lib/ai/stockRating";
 import { taipeiNow } from "@/lib/auth/accounts";
+import { getMarketStatus } from "@/lib/marketStatus";
 import { getStore } from "@/lib/auth/store";
 import { INDICATOR_TYPE_MAP, type EvalContext, type IndicatorNeed } from "./indicatorCatalog";
 import {
@@ -296,9 +297,11 @@ export async function previewStrategy(userId: string, strategyId: string, target
   const market = target.market ?? (detectMarket(symbol) === "US" ? "US" : "TW");
   if (market === "TW") await warmUniverseBriefly();
   const t: Target = { symbol, market, name: (market === "TW" ? findInUniverse(symbol, "TW")?.name : undefined) ?? symbol };
-  const cache = new DataCache(new Set());
+  // 盤中：用即時價補今天的日K並抓即時五檔（跟即時提醒、策略疊圖同一套 live 模式）；收盤後／休市：以最新收盤判斷，沒有五檔。
+  const live = getMarketStatus(market) === "open";
+  const cache = new DataCache(new Set(), live);
   cache.addNeeds(needsOf(strategy.config, indicators), rangeFor(strategy.config, indicators));
   const ctx = await cache.get(t);
   if (!ctx) throw new StrategyError(`抓不到 ${symbol} 的日K（代號不存在，或資料來源暫時忙碌，請稍後再試）`);
-  return { symbol: t.symbol, name: t.name, lastDay: ctx.candles.at(-1)?.time ?? "", decision: evaluateStrategy(strategy.config, indicators, ctx) };
+  return { symbol: t.symbol, name: t.name, lastDay: ctx.candles.at(-1)?.time ?? "", live, decision: evaluateStrategy(strategy.config, indicators, ctx) };
 }
