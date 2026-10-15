@@ -86,7 +86,7 @@ export function isAdmin(perms: readonly number[]): boolean {
 const PUBLIC_PREFIXES = ["/login", "/api/auth/login", "/api/auth/setup", "/api/auth/register", "/api/auth/forgot", "/api/cron/"];
 
 /** 登入後即可使用、不需要任何功能權限的路徑（帳號設定、登出、改密碼、自己的關注清單與庫存） */
-const ANY_USER_PREFIXES = ["/account", "/api/auth/", "/api/watchlist"];
+const ANY_USER_PREFIXES = ["/account", "/api/auth/", "/api/watchlist", "/help", "/api/help-ask"];
 
 /**
  * 網址 → 需要的權限。依序比對，第一個符合的生效；都不符合就需要「行情瀏覽」。

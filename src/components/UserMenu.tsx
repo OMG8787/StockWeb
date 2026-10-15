@@ -44,6 +44,9 @@ export default function UserMenu() {
               <br />
               {profile.account}
             </div>
+            <Link href="/help" className={item} onClick={() => setOpen(false)}>
+              📖 操作手冊
+            </Link>
             <Link href="/account" className={item} onClick={() => setOpen(false)}>
               ⚙️ 帳號設定
             </Link>

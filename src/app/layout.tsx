@@ -56,9 +56,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <p>本站資訊為公開資料整理與 AI 生成內容，僅供研究參考，不構成投資建議。</p>
         <p className="mt-1">股情雷達 StockRadar · Demo</p>
       </footer>
-      <RequirePerm need={[PERM.AI_CHAT]}>
-        <ChatWidget />
-      </RequirePerm>
+      {/* 聊天視窗：登入的帳號都有（教學助手）；股票問答分頁需要「AI 問答」權限，由 ChatWidget 自己判斷 */}
+      <ChatWidget />
       <PriceAlertWatcher />
       {/* 策略即時提醒：有權限的帳號在任何頁面都會背景追蹤（設定在 /strategies/alerts） */}
       <RequirePerm need={[PERM.STRATEGY_LAB]}>

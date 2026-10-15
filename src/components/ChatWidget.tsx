@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { ASK_ABOUT_EVENT, type AskAboutDetail } from "@/lib/chatEvents";
+import { ASK_ABOUT_EVENT, HELP_OPEN_EVENT, type AskAboutDetail, type HelpOpenDetail } from "@/lib/chatEvents";
+import { PERM } from "@/lib/auth/permissions";
+import { useHasPerm, useProfile } from "@/lib/auth/useProfile";
+import HelpAssistant from "./help/HelpAssistant";
 import { getWatchlist, WATCHLIST_CHANGED_EVENT } from "@/lib/watchlist";
 import { useVoiceInput } from "@/lib/useVoiceInput";
 import MarkdownLite from "./MarkdownLite";
@@ -40,6 +43,12 @@ const SUGGESTIONS = ["2330 最近走勢如何？", "AAPL 現在多少錢？", "�
 const CHAT_TEXTAREA_MAX_HEIGHT_PX = 112;
 
 export default function ChatWidget() {
+  const profile = useProfile();
+  // 教學助手任何登入帳號都能用；股票問答需要「AI 問答」權限（沒有權限只顯示教學助手）
+  const canStock = useHasPerm([PERM.AI_CHAT]);
+  const [modeState, setModeState] = useState<"stock" | "help">("stock");
+  const mode = canStock ? modeState : "help";
+  const [helpRequest, setHelpRequest] = useState<{ n: number; view?: "ask" | "manual"; sectionId?: string } | undefined>(undefined);
   const watchlist = useSyncExternalStore(subscribeToWatchlist, getWatchlist, () => EMPTY_WATCHLIST);
   const [open, setOpen] = useState(false);
   // 「🛠 回報網站」表單（整站問題／建議，跟每則回答下方的📝回報不同）
@@ -60,12 +69,23 @@ export default function ChatWidget() {
     function handleAskAbout(e: Event) {
       const detail = (e as CustomEvent<AskAboutDetail>).detail;
       setContextSymbol(detail);
+      setModeState("stock");
       setOpen(true);
       // 2026-10-04 使用者要求：預填問句要直接要一個「買或不買」的結論，不只問走勢。
       setInput(`關於 ${detail.name}（${detail.symbol}），最近走勢如何？現在建議買還是不買？`);
     }
+    function handleHelpOpen(e: Event) {
+      const detail = ((e as CustomEvent<HelpOpenDetail>).detail ?? {}) as HelpOpenDetail;
+      setModeState("help");
+      setOpen(true);
+      setHelpRequest((r) => ({ n: (r?.n ?? 0) + 1, view: detail.view, sectionId: detail.sectionId }));
+    }
     window.addEventListener(ASK_ABOUT_EVENT, handleAskAbout);
-    return () => window.removeEventListener(ASK_ABOUT_EVENT, handleAskAbout);
+    window.addEventListener(HELP_OPEN_EVENT, handleHelpOpen);
+    return () => {
+      window.removeEventListener(ASK_ABOUT_EVENT, handleAskAbout);
+      window.removeEventListener(HELP_OPEN_EVENT, handleHelpOpen);
+    };
   }, []);
 
   // 使用者反映：問完問題、AI回覆出現時，畫面會自動捲到最下面（等於先看到答案的
@@ -149,6 +169,8 @@ export default function ChatWidget() {
     }
   }
 
+  if (!profile) return null;
+
   return (
     <div className="fixed bottom-4 right-4 z-50">
       {/* 使用者反映：關閉面板（按✕）再重新打開，畫面會跳回去而不是留在關閉前看到的
@@ -170,8 +192,8 @@ export default function ChatWidget() {
         <div className="mb-3 flex h-[448px] max-h-[calc(100vh-6rem)] w-[352px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-(--gridline) bg-(--surface-1) shadow-xl">
           <div className="flex items-center justify-between border-b border-(--gridline) px-4 py-3">
             <div>
-              <p className="font-semibold text-sm">AI 股票問答</p>
-              {contextSymbol && (
+              <p className="font-semibold text-sm">{mode === "help" ? "🎓 教學助手" : "AI 股票問答"}</p>
+              {mode === "stock" && contextSymbol && (
                 // Clearable: the widget lives in the root layout, so the
                 // focus set by "問 AI 關於 X" outlived navigating away from
                 // that stock's page. Asking "今天大盤表現如何？" from the
@@ -218,6 +240,25 @@ export default function ChatWidget() {
 
           {showSiteFeedback && <SiteFeedbackForm onClose={() => setShowSiteFeedback(false)} />}
 
+          {canStock && (
+            <div className="flex gap-2 border-b border-(--gridline) px-3 py-2">
+              {(["stock", "help"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setModeState(m)}
+                  className={`flex-1 rounded-md px-2 py-1 text-xs ${mode === m ? "bg-(--accent) font-semibold text-white" : "border border-(--gridline) text-(--text-secondary) hover:bg-(--page-plane)"}`}
+                >
+                  {m === "stock" ? "💬 股票問答" : "🎓 教學助手"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {mode === "help" && <HelpAssistant canFeedback={canStock} request={helpRequest} onNavigate={() => setOpen(false)} />}
+
+          {/* 股票問答分頁：用 hidden 切換（不卸載），捲動位置與輸入框內容保留 */}
+          <div className={mode === "stock" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {messages.length === 0 && (
               <div className="space-y-2">
@@ -339,13 +380,14 @@ export default function ChatWidget() {
             </form>
             <p className="mt-1 text-[11px] text-(--text-muted)">按 Enter 傳送，Shift+Enter 換行</p>
           </div>
+          </div>
         </div>
       </div>
 
       <button
         onClick={() => setOpen((o) => !o)}
         className="flex h-14 w-14 items-center justify-center rounded-full bg-(--accent) text-white shadow-lg hover:opacity-90"
-        aria-label="開啟 AI 問答"
+        aria-label="開啟 AI 問答與教學助手"
       >
         {open ? "✕" : "💬"}
       </button>
