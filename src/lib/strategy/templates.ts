@@ -7,6 +7,11 @@
  * backtestable：只用日K類指標（策略回測能完整重現）；用到籌碼／基本面／本站評等的範本回測時那些條件會當作不成立。
  */
 
+import { QUALIFY_MAX_AGAINST, QUALIFY_MIN_SUPPORT } from "@/lib/ai/actionScoring";
+
+/** 「AI 策略・完整版」範本的 id（策略庫的 AI 策略說明區塊用它一鍵複製） */
+export const AI_FULL_TEMPLATE_ID = "ai-full";
+
 export interface TemplateIndicator {
   /** 範本內部代號（策略條件用它對應） */
   key: string;
@@ -35,6 +40,31 @@ export interface StrategyTemplate {
 }
 
 export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
+  {
+    id: AI_FULL_TEMPLATE_ID,
+    name: "AI 策略・完整版",
+    style: "AI 策略（可自行加減）",
+    desc: `把本站綜合評等「建議買進」的規則拆成一條條條件：支持面向至少 ${QUALIFY_MIN_SUPPORT} 個、不支持最多 ${QUALIFY_MAX_AGAINST} 個、技術面不能是不支持（一票否決）、籌碼面不能是不支持（法人賣超）、價位框架未破底；賣出＝破底或不支持面向達 2 個（本站的「建議出場／減碼」）。資金分配同 AI 模擬組合（每檔 15%、最多 6 檔）。建立後可自行加減條件，變成自己的策略。`,
+    risk: "本站評等沒有逐日歷史，不能回測，只能用模擬倉從今天往後跑。跟正式評等的差別：正式評等改判要連續 2 個交易日確認（破底立即生效），這裡每次都用當下的結果；本站出場價（支撐）改用固定停損 8% 近似。",
+    backtestable: false,
+    indicators: [
+      { key: "support", typeId: "rating_facet_count", params: { kind: "support", op: "gte", n: QUALIFY_MIN_SUPPORT } },
+      { key: "against", typeId: "rating_facet_count", params: { kind: "against", op: "lte", n: QUALIFY_MAX_AGAINST } },
+      { key: "tech", typeId: "rating_facet", params: { facet: "tech", verdict: "notAgainst" } },
+      { key: "chips", typeId: "rating_facet", params: { facet: "chips", verdict: "notAgainst" } },
+      { key: "frame", typeId: "rating_price_frame", params: { cond: "notBroken", pct: 3 } },
+      { key: "broken", typeId: "rating_price_frame", params: { cond: "broken", pct: 3 } },
+      { key: "against2", typeId: "rating_facet_count", params: { kind: "against", op: "gte", n: 2 } },
+    ],
+    mode: "rules",
+    buy: { keys: ["support", "against", "tech", "chips", "frame"], match: 0 },
+    sell: { keys: ["broken", "against2"], match: 1 },
+    stopLossPct: 8,
+    takeProfitPct: 0,
+    maxHoldDays: 0,
+    positionPct: 15,
+    maxPositions: 6,
+  },
   {
     id: "ai-style-tech",
     name: "AI 推薦風格・技術版",

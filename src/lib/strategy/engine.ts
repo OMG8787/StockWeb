@@ -118,6 +118,11 @@ export interface StrategyDecision {
   hits: IndicatorHit[];
   /** 一句話摘要（交易紀錄的「原因」） */
   summary: string;
+  /**
+   * 賣出時的原因（只描述賣出條件）。2026-10-15 驗證發現：買進與賣出條件同時成立時 summary 寫的是「買進條件成立：…」，
+   * 賣出交易的原因因此寫錯，賣出一律改用這個欄位。
+   */
+  sellSummary: string;
 }
 
 function setPasses(set: ConditionSet, results: Map<string, IndicatorHit>): { pass: boolean; count: number } {
@@ -148,6 +153,7 @@ export function evaluateStrategy(cfg: StrategyConfig, indicators: UserIndicator[
       score,
       hits,
       summary: `總分 ${Math.round(score * 100) / 100}${passedNames.length ? `（${passedNames.join("、")}）` : ""}`,
+      sellSummary: `總分 ${Math.round(score * 100) / 100} ≤ 賣出門檻 ${cfg.sellScore}${passedNames.length ? `（${passedNames.join("、")}）` : ""}`,
     };
   }
   const b = setPasses(cfg.buy, results);
@@ -159,6 +165,7 @@ export function evaluateStrategy(cfg: StrategyConfig, indicators: UserIndicator[
     score: b.count,
     hits,
     summary: b.pass ? `買進條件成立：${names(cfg.buy).join("、")}` : s.pass ? `賣出條件成立：${names(cfg.sell).join("、")}` : "條件未成立",
+    sellSummary: `賣出條件成立：${names(cfg.sell).join("、") || "—"}`,
   };
 }
 
@@ -285,7 +292,7 @@ export function runSimDay(
     if (cfg.stopLossPct > 0 && chg <= -cfg.stopLossPct) reason = `停損（${chg.toFixed(1)}%）`;
     else if (cfg.takeProfitPct > 0 && chg >= cfg.takeProfitPct) reason = `停利（+${chg.toFixed(1)}%）`;
     else if (cfg.maxHoldDays > 0 && dayDiff(p.buyDay, day) >= cfg.maxHoldDays) reason = `持有滿 ${cfg.maxHoldDays} 天`;
-    else if (c.decision.sell) reason = c.decision.summary;
+    else if (c.decision.sell) reason = c.decision.sellSummary || c.decision.summary;
     if (!reason) continue;
     const r = applySell(s, { symbol: p.symbol, market: p.market, shares: p.shares, price: c.price, reason, source: "auto" });
     s = r.state;

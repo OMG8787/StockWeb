@@ -3,12 +3,13 @@ import { detectMarket, getChart, getEarnings, getFundamentals, getIndices, getQu
 import { getTwChipsHistory, type TwChipsDay } from "@/lib/data/chipsHistory";
 import { getOrderBook } from "@/lib/data/orderBook";
 import { ensureTwUniverseWarm, findInUniverse } from "@/lib/data/universe";
-import { getStockRating } from "@/lib/ai/stockRating";
+import { getStockRating, type StockRatingResult } from "@/lib/ai/stockRating";
+import { ratingConfidence } from "@/lib/ai/siteRating";
 import { taipeiNow } from "@/lib/auth/accounts";
 import { getMarketStatus } from "@/lib/marketStatus";
 import type { SimCheck, SimCheckSlot } from "./simSlots";
 import { getStore } from "@/lib/auth/store";
-import { INDICATOR_TYPE_MAP, type EvalContext, type IndicatorNeed } from "./indicatorCatalog";
+import { INDICATOR_TYPE_MAP, type EvalContext, type IndicatorNeed, type RatingDetail } from "./indicatorCatalog";
 import {
   applyBuy,
   applySell,
@@ -83,6 +84,21 @@ export class DataCache {
   }
 }
 
+/** 本站評等結果 → 策略條件用的組成（「AI 策略」拆解條件、見 indicatorCatalog.ts 的 rating_* 指標） */
+export function ratingDetailOf(r: StockRatingResult): RatingDetail {
+  return {
+    facets: r.facets.map((f) => ({ name: f.name, verdict: f.verdict })),
+    supportCount: r.rating.supportCount,
+    againstCount: r.rating.againstCount,
+    brokeDown: !!r.framework && !r.framework.zone,
+    zoneLow: r.rating.zone?.low ?? null,
+    zoneHigh: r.rating.zone?.high ?? null,
+    price: r.price,
+    holdingCode: r.rating.holdingCode,
+    confidence: ratingConfidence(r.rating)?.level ?? null,
+  };
+}
+
 async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleRange, live = false): Promise<EvalContext | null> {
   const chart = live ? await getChartLive(t.symbol, range, t.market) : await getChart(t.symbol, range, t.market);
   // 自動交易只用官方收盤日K；即時模式保留盤中補上的今天這根
@@ -94,7 +110,15 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleR
   if (needs.has("earnings")) jobs.push(getEarnings(t.symbol, t.market).then((e) => (ctx.earnings = e)).catch(() => null));
   // 五檔只在盤中即時判斷時抓（收盤後的快照不是當沖要看的東西）
   if (needs.has("orderbook") && live && t.market === "TW") jobs.push(getOrderBook(t.symbol).then((b) => (ctx.orderBook = b)).catch(() => null));
-  if (needs.has("rating")) jobs.push(getStockRating(t.symbol, t.market).then((r) => (ctx.ratingCode = r?.rating.code ?? null)).catch(() => null));
+  if (needs.has("rating"))
+    jobs.push(
+      getStockRating(t.symbol, t.market)
+        .then((r) => {
+          ctx.ratingCode = r?.rating.code ?? null;
+          ctx.ratingDetail = r ? ratingDetailOf(r) : null;
+        })
+        .catch(() => null),
+    );
   if (needs.has("chips") && t.market === "TW") {
     jobs.push(
       (async () => {

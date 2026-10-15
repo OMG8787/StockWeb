@@ -81,7 +81,8 @@ export function runBacktest(input: {
   const usable = input.series.filter((s) => s.candles.filter((c) => c.time < input.startDay).length >= 30 && s.candles.filter((c) => c.time >= input.startDay).length >= 2);
   const skipped = input.series.filter((s) => !usable.includes(s)).map((s) => s.symbol);
   const index = usable.map((s) => new Map(s.candles.map((c, i) => [c.time, i])));
-  const calSource = input.bench && input.bench.length ? input.bench.map((c) => c.time) : [...new Set(usable.flatMap((s) => s.candles.map((c) => c.time)))].sort();
+  // 交易日曆＝0050 與所有股票日期的聯集（2026-10-15 驗證：Yahoo 的 0050 偶爾缺某一天，只用 0050 當日曆會讓那天全部股票都被跳過、停損晚一天）
+  const calSource = [...new Set([...(input.bench ?? []).map((c) => c.time), ...usable.flatMap((s) => s.candles.map((c) => c.time))])].sort();
   const calendar = calSource.filter((d) => d >= input.startDay);
 
   let state: SimState = { initialCash, cash: initialCash, positions: [] };

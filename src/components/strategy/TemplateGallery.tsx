@@ -5,13 +5,16 @@ import { useState } from "react";
 import { api, runBusy } from "./api";
 import { cardCls } from "@/components/auth/ui";
 import { INDICATOR_TYPE_MAP, normalizeParams } from "@/lib/strategy/indicatorCatalog";
-import { STRATEGY_TEMPLATES, type StrategyTemplate } from "@/lib/strategy/templates";
+import { AI_FULL_TEMPLATE_ID, STRATEGY_TEMPLATES, type StrategyTemplate } from "@/lib/strategy/templates";
+
+/** 「AI 策略・完整版」放在上面的 AI 策略說明區（AiStrategyPanel），範本區不重複列 */
+const GALLERY = STRATEGY_TEMPLATES.filter((t) => t.id !== AI_FULL_TEMPLATE_ID);
 
 /**
  * 策略範本（2026-10-15 使用者：「要寫一個指標策略，我之後就可以直接取用，因為也不知道現在 AI 推薦適用什麼策略」）。
  * 每張卡片列出範本的買賣條件與風控，按「一鍵建立」就在自己帳號建好參考指標＋策略（伺服器 templateCreate.ts）。
  */
-function conditionText(t: StrategyTemplate, keys: string[], match: number): string {
+export function conditionText(t: StrategyTemplate, keys: string[], match: number): string {
   const parts = keys.map((k) => {
     const ind = t.indicators.find((i) => i.key === k)!;
     const type = INDICATOR_TYPE_MAP.get(ind.typeId);
@@ -41,7 +44,7 @@ export default function TemplateGallery({ onCreated }: { onCreated: (text: strin
     <section className={`${cardCls} space-y-3`}>
       <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="font-semibold">📚 策略範本（一鍵建立）</span>
-        <span className="text-sm text-(--accent)">{open ? "收起 ▲" : `展開 ${STRATEGY_TEMPLATES.length} 個範本 ▼`}</span>
+        <span className="text-sm text-(--accent)">{open ? "收起 ▲" : `展開 ${GALLERY.length} 個範本 ▼`}</span>
       </button>
       {open && (
         <>
@@ -52,7 +55,7 @@ export default function TemplateGallery({ onCreated }: { onCreated: (text: strin
           </p>
           {error && <p className="text-sm text-(--price-up)">{error}</p>}
           <div className="grid gap-3 md:grid-cols-2">
-            {STRATEGY_TEMPLATES.map((t) => (
+            {GALLERY.map((t) => (
               <div key={t.id} className="flex flex-col gap-2 rounded-md border border-(--gridline) p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{t.name}</span>

@@ -30,8 +30,28 @@ export interface EvalContext {
   chipsDays?: TwChipsDay[] | null;
   /** 本站綜合評等代碼（buy／buy-on-pullback／avoid） */
   ratingCode?: string | null;
+  /** 本站綜合評等的組成（各面向、支持／不支持數、價位框架、持有中建議、把握程度）；「AI 策略」拆解條件用 */
+  ratingDetail?: RatingDetail | null;
   /** 即時五檔（只有盤中即時判斷才有：策略疊圖最新一天、即時提醒） */
   orderBook?: OrderBook | null;
+}
+
+/** 本站綜合評等的組成（由 stockRating 的結果整理；見 runner.ts buildContext） */
+export interface RatingDetail {
+  /** 五個計分面向＋消息面：名稱（例「技術面」「基本面（估值）」）與結論 */
+  facets: Array<{ name: string; verdict: "支持" | "中性" | "不支持" | "無資料" }>;
+  supportCount: number;
+  againstCount: number;
+  /** 有算出價位框架、但現價下方已經沒有支撐（跌破所有均線與近期低點＝破底） */
+  brokeDown: boolean;
+  /** 支撐區（買點區間）；破底或資料不足是 null */
+  zoneLow: number | null;
+  zoneHigh: number | null;
+  price: number;
+  /** 持有中的建議：add 可分批加碼／hold 續抱／reduce 建議減碼／exit 建議出場 */
+  holdingCode: "add" | "hold" | "reduce" | "exit";
+  /** 本站把握程度（只有建議買進才有） */
+  confidence: "高" | "中" | "低" | null;
 }
 
 export type ParamDef =
@@ -109,6 +129,24 @@ function netOf(d: TwChipsDay, who: unknown): number | undefined {
   }
   return d.foreignNet;
 }
+
+/** 本站評等的計分面向（value＝參數值、prefix＝facets 名稱開頭、label＝顯示） */
+export const RATING_FACETS = [
+  { value: "tech", prefix: "技術面", label: "技術面" },
+  { value: "chips", prefix: "籌碼面", label: "籌碼面（三大法人）" },
+  { value: "holding", prefix: "持股結構面", label: "持股結構面（大戶／外資／融資）" },
+  { value: "value", prefix: "基本面", label: "估值面（本益比／淨值比／殖利率）" },
+  { value: "earnings", prefix: "財報面", label: "財報面（月營收／EPS）" },
+] as const;
+const facetLabel = (v: unknown) => RATING_FACETS.find((f) => f.value === v)?.label ?? "技術面";
+const verdictLabel = (v: unknown) => (v === "against" ? "不支持" : v === "notAgainst" ? "不是「不支持」" : "支持");
+const HOLDING_TEXT: Record<string, string> = {
+  add: "可分批加碼",
+  hold: "續抱",
+  reduce: "建議減碼",
+  exit: "建議出場",
+  exitOrReduce: "建議出場或減碼",
+};
 
 // ---------- 指標清單 ----------
 export const INDICATOR_TYPES: IndicatorType[] = [
@@ -517,6 +555,179 @@ export const INDICATOR_TYPES: IndicatorType[] = [
       // 「等回檔」已併入建議買進（siteRating.ts 二分結論）
       const isBuy = ctx.ratingCode === "buy" || ctx.ratingCode === "buy-on-pullback";
       return { pass: p.code === "avoid" ? !isBuy : isBuy, detail: `本站評等：${isBuy ? "建議買進" : "建議先不要買"}` };
+    },
+  },
+  {
+    id: "rating_facet",
+    label: "本站評等・單一面向",
+    group: "本站",
+    description:
+      "本站綜合評等五個計分面向（技術、籌碼、持股結構、估值、財報）其中一個的結論：支持／中性／不支持（程式依當天資料判斷，跟個股頁的評等同一份）。「AI 策略」買進門檻就是用這些面向組成的，可以單獨拿來加減。",
+    params: [
+      {
+        key: "facet",
+        label: "面向",
+        type: "select",
+        default: "tech",
+        options: RATING_FACETS.map((f) => ({ value: f.value, label: f.label })),
+      },
+      {
+        key: "verdict",
+        label: "條件",
+        type: "select",
+        default: "support",
+        options: [
+          { value: "support", label: "支持" },
+          { value: "notAgainst", label: "不是「不支持」（支持、中性或無資料都算）" },
+          { value: "against", label: "不支持" },
+        ],
+      },
+    ],
+    needs: ["rating"],
+    describe: (p) => `本站${facetLabel(p.facet)}${verdictLabel(p.verdict)}`,
+    evaluate(ctx, p) {
+      const d = ctx.ratingDetail;
+      if (!d) return NO_DATA;
+      const prefix = RATING_FACETS.find((f) => f.value === p.facet)?.prefix ?? "技術面";
+      const f = d.facets.find((x) => x.name.startsWith(prefix));
+      const v = f?.verdict ?? "無資料";
+      const pass = p.verdict === "against" ? v === "不支持" : p.verdict === "notAgainst" ? v !== "不支持" : v === "支持";
+      return { pass, detail: `${facetLabel(p.facet)}：${v}` };
+    },
+  },
+  {
+    id: "rating_facet_count",
+    label: "本站評等・支持／不支持面向數",
+    group: "本站",
+    description:
+      "五個計分面向（技術、籌碼、持股結構、估值、財報）裡「支持」或「不支持」的個數。本站「建議買進」的體質門檻是支持至少 2 個、不支持最多 1 個；持有中不支持達 2 個以上會建議減碼。",
+    params: [
+      {
+        key: "kind",
+        label: "數哪一種",
+        type: "select",
+        default: "support",
+        options: [
+          { value: "support", label: "支持的面向數" },
+          { value: "against", label: "不支持的面向數" },
+        ],
+      },
+      {
+        key: "op",
+        label: "條件",
+        type: "select",
+        default: "gte",
+        options: [
+          { value: "gte", label: "至少" },
+          { value: "lte", label: "最多" },
+        ],
+      },
+      { key: "n", label: "個數", type: "number", default: 2, min: 0, max: 5 },
+    ],
+    needs: ["rating"],
+    describe: (p) => `本站評等${p.kind === "against" ? "不支持" : "支持"}的面向${p.op === "lte" ? "最多" : "至少"} ${n(p.n, 2)} 個（共 5 個）`,
+    evaluate(ctx, p) {
+      const d = ctx.ratingDetail;
+      if (!d) return NO_DATA;
+      const v = p.kind === "against" ? d.againstCount : d.supportCount;
+      const pass = p.op === "lte" ? v <= n(p.n, 2) : v >= n(p.n, 2);
+      return { pass, detail: `支持 ${d.supportCount} 個、不支持 ${d.againstCount} 個（共 5 個面向）` };
+    },
+  },
+  {
+    id: "rating_price_frame",
+    label: "本站價位框架（支撐／破底）",
+    group: "本站",
+    description:
+      "本站用均線與近期高低點算出的支撐區（買點區間）。「破底」＝現價已跌破所有均線與近期低點、下方沒有支撐，本站這時一律不建議買進、持有中建議出場；「貼近支撐區」＝現價不高於支撐區上緣 N%（不追高）。",
+    params: [
+      {
+        key: "cond",
+        label: "條件",
+        type: "select",
+        default: "notBroken",
+        options: [
+          { value: "notBroken", label: "未破底（現價下方還有支撐）" },
+          { value: "broken", label: "已破底（跌破所有均線與近期低點）" },
+          { value: "nearZone", label: "現價貼近支撐區（不高於支撐區上緣 N%）" },
+        ],
+      },
+      { key: "pct", label: "貼近的範圍（只對「貼近支撐區」有效）", type: "number", default: 3, min: 0, max: 30, step: 0.5, unit: "%" },
+    ],
+    needs: ["rating"],
+    describe: (p) =>
+      p.cond === "broken" ? "本站價位框架：已破底" : p.cond === "nearZone" ? `現價不高於本站支撐區上緣 ${n(p.pct, 3)}%` : "本站價位框架：未破底（下方還有支撐）",
+    evaluate(ctx, p) {
+      const d = ctx.ratingDetail;
+      if (!d) return NO_DATA;
+      const zone = d.zoneLow != null && d.zoneHigh != null ? `支撐區 ${fmt(d.zoneLow)}～${fmt(d.zoneHigh)}` : d.brokeDown ? "已破底、沒有支撐區" : "日K不足、沒有算出支撐區";
+      if (p.cond === "broken") return { pass: d.brokeDown, detail: `現價 ${fmt(d.price)}，${zone}` };
+      if (p.cond === "nearZone") {
+        if (d.zoneHigh == null) return { pass: false, detail: `現價 ${fmt(d.price)}，${zone}` };
+        const above = ((d.price - d.zoneHigh) / d.zoneHigh) * 100;
+        return { pass: above <= n(p.pct, 3), detail: `現價 ${fmt(d.price)}，${zone}（高於上緣 ${fmt(above, 1)}%）` };
+      }
+      return { pass: !d.brokeDown, detail: `現價 ${fmt(d.price)}，${zone}` };
+    },
+  },
+  {
+    id: "rating_holding",
+    label: "本站持有中建議",
+    group: "本站",
+    description:
+      "本站對「已經持有」的人的建議：可分批加碼、續抱、建議減碼（不支持面向 ≥ 2）、建議出場（破底）。適合當賣出條件。",
+    params: [
+      {
+        key: "code",
+        label: "建議",
+        type: "select",
+        default: "exitOrReduce",
+        options: [
+          { value: "exitOrReduce", label: "建議出場或減碼" },
+          { value: "exit", label: "建議出場" },
+          { value: "reduce", label: "建議減碼" },
+          { value: "hold", label: "續抱" },
+          { value: "add", label: "可分批加碼" },
+        ],
+      },
+    ],
+    needs: ["rating"],
+    describe: (p) => `本站持有中建議為「${HOLDING_TEXT[String(p.code)] ?? "建議出場或減碼"}」`,
+    evaluate(ctx, p) {
+      const d = ctx.ratingDetail;
+      if (!d) return NO_DATA;
+      const pass = p.code === "exitOrReduce" ? d.holdingCode === "exit" || d.holdingCode === "reduce" : d.holdingCode === p.code;
+      return { pass, detail: `持有中建議：${HOLDING_TEXT[d.holdingCode]}` };
+    },
+  },
+  {
+    id: "rating_confidence",
+    label: "本站把握程度",
+    group: "本站",
+    description:
+      "本站對「建議買進」的把握程度：高＝大盤不偏弱且已連續 3 個交易日以上建議買進；低＝大盤偏弱且剛轉為建議買進（2 天內）；其餘為中。今日建議名單就是依這個排序（高的排前面）。不是建議買進的股票沒有把握程度（條件不成立）。",
+    params: [
+      {
+        key: "min",
+        label: "至少",
+        type: "select",
+        default: "mid",
+        options: [
+          { value: "high", label: "高" },
+          { value: "mid", label: "中以上" },
+          { value: "low", label: "低以上（只要是建議買進）" },
+        ],
+      },
+    ],
+    needs: ["rating"],
+    describe: (p) => `本站把握程度${p.min === "high" ? "為高" : p.min === "low" ? "低以上（建議買進）" : "中以上"}`,
+    evaluate(ctx, p) {
+      const d = ctx.ratingDetail;
+      if (!d) return NO_DATA;
+      if (!d.confidence) return { pass: false, detail: "不是建議買進，沒有把握程度" };
+      const rank = { 高: 0, 中: 1, 低: 2 }[d.confidence];
+      const need = p.min === "high" ? 0 : p.min === "low" ? 2 : 1;
+      return { pass: rank <= need, detail: `本站把握程度：${d.confidence}` };
     },
   },
   {

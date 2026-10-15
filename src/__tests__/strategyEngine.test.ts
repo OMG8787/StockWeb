@@ -148,8 +148,23 @@ describe("策略", () => {
 
 describe("模擬倉", () => {
   const cfg: StrategyConfig = { ...normalizeStrategyConfig({}, ids), stopLossPct: 10, takeProfitPct: 20, positionPct: 30, maxPositions: 3 };
-  const dec = (buy: boolean, sell = false, score = 1) => ({ buy, sell, score, hits: [], summary: buy ? "買進條件成立" : sell ? "賣出條件成立" : "" });
+  const dec = (buy: boolean, sell = false, score = 1) => ({
+    buy,
+    sell,
+    score,
+    hits: [],
+    summary: buy ? "買進條件成立" : sell ? "賣出條件成立" : "",
+    sellSummary: "賣出條件成立",
+  });
   const cand = (symbol: string, price: number, buy: boolean, sell = false, score = 1): Candidate => ({ symbol, market: "TW", name: symbol, price, decision: dec(buy, sell, score) });
+
+  it("買進與賣出條件同時成立時，賣出交易的原因寫賣出條件（不是「買進條件成立」）", () => {
+    const state: SimState = { initialCash: 100_000, cash: 50_000, positions: [{ symbol: "A", market: "TW", name: "A", shares: 100, avgCost: 100, buyDay: "2026-10-01" }] };
+    const both = cand("A", 101, true, true);
+    const r = runSimDay(state, cfg, "2026-10-05", new Map([["TW:A", both]]), []);
+    expect(r.trades[0].side).toBe("sell");
+    expect(r.trades[0].reason).toBe("賣出條件成立");
+  });
 
   it("手動買賣：手續費、證交稅、現金不足與股數檢查", () => {
     let s: SimState = { initialCash: 100_000, cash: 100_000, positions: [] };

@@ -1,6 +1,7 @@
 "use client";
 
 import TemplateGallery from "@/components/strategy/TemplateGallery";
+import AiStrategyPanel from "@/components/strategy/AiStrategyPanel";
 import Link from "next/link";
 import { useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
@@ -149,6 +150,12 @@ export default function StrategiesClient() {
       <LabTabs active="/strategies" intro="策略把多個參考指標組合成買賣規則，可選「條件式」或「加權計分」，再加上停損、停利與資金分配；模擬倉選一個策略就會照它自動交易。" />
       {msg && <p className={`text-sm ${msg.ok ? "text-(--price-down)" : "text-(--price-up)"}`}>{msg.text}</p>}
       {(ind.error || st.error) && <p className="text-sm text-(--price-up)">{ind.error || st.error}</p>}
+      <AiStrategyPanel
+        onCreated={async (text) => {
+          await Promise.all([ind.reload(), st.reload()]);
+          setMsg({ ok: true, text });
+        }}
+      />
       <TemplateGallery
         onCreated={async (text) => {
           await Promise.all([ind.reload(), st.reload()]);
