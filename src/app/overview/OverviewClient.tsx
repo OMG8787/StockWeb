@@ -1,5 +1,6 @@
 "use client";
 
+import { momentumTone } from "@/lib/momentumTone";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import WatchlistButton from "@/components/WatchlistButton";
@@ -32,8 +33,8 @@ type SourceKey = "ai" | "momentum" | "smart" | "alert" | "held";
 
 const SOURCE_META: Record<SourceKey, { label: string; badge: string; cls: string; tip: string }> = {
   ai: { label: "AI 建議", badge: "🎯 AI建議", cls: "bg-(--price-up)/15 text-(--price-up)", tip: "本站依綜合評等挑出的建議買進名單（依評分排名，取你設定的前 N 檔）" },
-  momentum: { label: "技術訊號共振", badge: "📡 共振", cls: "bg-[#c98a1b]/15 text-[#c98a1b]", tip: "成交活躍、同時出現多個技術訊號的股票（只看技術面，還要搭配本站建議判斷）" },
-  alert: { label: "提醒訊號", badge: "🔔 提醒", cls: "bg-(--accent)/15 text-(--accent)", tip: "你在「即時提醒」追蹤的股票，目前有策略出現買進或賣出訊號" },
+  momentum: { label: "技術訊號共振", badge: "📡 共振", cls: "bg-[#c98a1b]/15 text-[#c98a1b]", tip: "成交活躍、同時出現多個「多方」技術訊號的股票（只看技術面的候選，不是推薦；要不要買看本站建議）" },
+  alert: { label: "提醒訊號", badge: "🔔 提醒", cls: "bg-(--accent)/15 text-(--accent)", tip: "你在「即時提醒」追蹤的股票，目前有策略出現訊號：買點＝買進訊號；轉弱＝賣出／先不要買訊號（沒持有就是先別買，有持有才考慮賣）" },
   smart: { label: "智能清單", badge: "🧠 智能清單", cls: "bg-[#8a63d2]/15 text-[#8a63d2]", tip: "你的智能清單裡目前符合策略的股票（依你選的策略每天掃描全市場）" },
   held: { label: "AI 持有", badge: "🤖 AI持有", cls: "bg-(--page-plane) text-(--text-secondary)", tip: "AI 模擬投資組合目前持有這檔" },
 };
@@ -108,7 +109,8 @@ function Overview() {
       r.aiPlan = p.plan;
       r.aiConfidence = p.confidence;
     });
-    (momentum.data?.items ?? []).forEach((m, i) => {
+    // 只收多方共振（空方共振＝跌破均線、連跌，不是候選）
+    (momentum.data?.items ?? []).filter((m) => momentumTone(m.signals) === "bull").forEach((m, i) => {
       const r = get(m.symbol, m.name);
       r.sources.add("momentum");
       r.momentumRank = i + 1;
@@ -260,6 +262,7 @@ function Overview() {
       )}
 
       <p className="text-xs text-(--text-muted)">
+        「本站建議」標籤：買＝本站綜合評等建議買進、不買＝先不要買，後面有「＊」表示需要觀察（滑鼠移到標籤上看理由）。
         想知道這些推薦過去準不準？看 <Link href="/review" className="text-(--accent) underline">📈 推薦回顧</Link>（每次推薦的價格與照建議操作的結果）。
         AI 建議名單的檔數可以在首頁「我的關注 → AI 建議清單」調整。僅供參考，不構成投資建議。
       </p>
@@ -277,7 +280,7 @@ function SourceBadges({ r }: { r: Row }) {
             {SOURCE_META[k].badge}
             {k === "ai" && r.aiRank ? ` #${r.aiRank}` : ""}
             {k === "momentum" && r.momentumRank ? ` #${r.momentumRank}` : ""}
-            {k === "alert" ? (r.alertTone === "buy" ? " 買" : " 賣") : ""}
+            {k === "alert" ? (r.alertTone === "buy" ? " 買點" : " 轉弱") : ""}
           </span>
         ))}
     </span>

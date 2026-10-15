@@ -24,7 +24,7 @@ export default function SimPortfolioHoldingsTable({ holdings }: { holdings: SimH
         <ChipsColumnsToggle className="ml-auto" />
       </div>
       <StickyTableScroll>
-        <table className={`sticky-table w-full text-sm ${showChips ? "min-w-[1240px]" : "min-w-[860px]"}`}>
+        <table className={`sticky-table w-full text-sm ${showChips ? "min-w-[1180px]" : "min-w-[860px]"}`}>
           <thead>
             <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
               <th className="w-8" />

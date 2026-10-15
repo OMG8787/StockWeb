@@ -1,4 +1,5 @@
 import { searchStocks } from "@/lib/data";
+import { getSmartList } from "./smartList";
 import { getTwFundamentalsMap } from "@/lib/data/companyData";
 import { getVolumeHistory } from "@/lib/data/volumeHistory";
 import { getActionBrief } from "@/lib/ai/actionBrief";
@@ -52,6 +53,10 @@ async function metricValues(metric: ScreenMetric, items: SearchItem[]): Promise<
 
 /** 執行篩選，回傳股票名單（依篩選順序） */
 export async function runScreen(cfg: ScreenConfig, userId: string): Promise<ScreenedStock[]> {
+  if (cfg.source === "smart") {
+    // 我的智能清單：只取目前符合策略的（暫不符合的不當選股來源）
+    return (await getSmartList(userId)).entries.filter((e) => e.qualified).map((e) => ({ symbol: e.symbol, market: "TW" as const, name: e.name }));
+  }
   if (cfg.source === "watchlist") {
     return (await getServerWatchlist(userId)).map((w) => ({ symbol: w.symbol, market: w.market, name: w.name }));
   }

@@ -176,7 +176,7 @@ function MarketSection({
   }, [market]);
 
   useEffect(() => {
-    const params = new URLSearchParams({ market, sortBy, sortDir });
+    const params = new URLSearchParams({ market, sortBy, sortDir, etf: "1" });
     if (sectors.length > 0) params.set("sectors", sectors.join(","));
     if (query) params.set("q", query);
     if (minPrice) params.set("minPrice", minPrice);

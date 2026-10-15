@@ -93,9 +93,9 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
   },
   {
     id: "ai-style-rating",
-    name: "AI 推薦風格・本站評等",
-    style: "AI 推薦（直接用評等）",
-    desc: "直接用本站綜合評等：評等是「建議買進」而且股價在 20 日線之上就買，評等轉成「先不要買」就賣。跟今日建議、AI 模擬組合用的是同一份評等。",
+    name: "AI 推薦風格・簡易版",
+    style: "AI 推薦（直接用評等結論）",
+    desc: "不拆條件、直接用本站綜合評等的結論：評等是「建議買進」而且股價在 20 日線之上就買，評等轉成「先不要買」就賣。想自己加減評等裡的各個條件，請用上方「🤖 AI 策略」複製的「AI 策略・完整版」。",
     risk: "本站評等沒有逐日歷史，這個範本不能回測，只能用模擬倉從今天開始往後跑。",
     backtestable: false,
     indicators: [

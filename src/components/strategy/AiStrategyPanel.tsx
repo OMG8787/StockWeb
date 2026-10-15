@@ -40,9 +40,9 @@ export default function AiStrategyPanel({ onCreated }: { onCreated: (text: strin
 
   return (
     <section className={`${cardCls} space-y-3`}>
-      <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button type="button" className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="font-semibold">🤖 AI 策略（本站怎麼判斷買不買，可複製成自己的策略）</span>
-        <span className="text-sm text-(--accent)">{open ? "收起 ▲" : "展開看完整規則 ▼"}</span>
+        <span className="shrink-0 text-xs text-(--accent) sm:text-sm">{open ? "收起 ▲" : "展開看完整規則 ▼"}</span>
       </button>
       {open && (
         <div className="space-y-3 text-sm leading-relaxed text-(--text-secondary)">

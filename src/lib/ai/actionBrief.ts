@@ -13,6 +13,7 @@ import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { frozenListEpochKey, LAST_LIST_TTL_MS } from "./actionStability";
 import { recordRecommendations } from "./recLedger";
+import { getStockRating } from "./stockRating";
 import { recordActionListChange } from "./actionListLog";
 import {
   buildPlan,
@@ -239,7 +240,12 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
         stop: p.rating.rating.exit,
         addAt: p.rating.rating.pullbackAdd ?? null,
       })),
-      exitReason: "移出 AI 建議名單",
+      exitReason: "移出 AI 建議名單（評等轉為先不要買）",
+      // 只是被排名擠出、評等仍是建議買進：照持有中處理（之後跌破出場價或持有滿天數才結算）
+      keepOpen: async (sym) => {
+        const r = await getStockRating(sym, "TW").catch(() => null);
+        return !!r && (r.rating.code === "buy" || r.rating.code === "buy-on-pullback");
+      },
       exitPriceOf: async (sym) =>
         priceNow.get(sym.toUpperCase()) ?? (await getQuote(sym, "TW").then((q) => (q && q.price > 0 ? q.price : null)).catch(() => null)),
     }).catch(() => 0);

@@ -42,9 +42,9 @@ export default function TemplateGallery({ onCreated }: { onCreated: (text: strin
 
   return (
     <section className={`${cardCls} space-y-3`}>
-      <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+      <button type="button" className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 text-left" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="font-semibold">📚 策略範本（一鍵建立）</span>
-        <span className="text-sm text-(--accent)">{open ? "收起 ▲" : `展開 ${GALLERY.length} 個範本 ▼`}</span>
+        <span className="shrink-0 text-xs text-(--accent) sm:text-sm">{open ? "收起 ▲" : `展開 ${GALLERY.length} 個範本 ▼`}</span>
       </button>
       {open && (
         <>

@@ -1,4 +1,5 @@
 import { kvEnabled, redis } from "@/lib/data/kv";
+import { momentumTone } from "@/lib/momentumTone";
 import { getQuote, getMultiSignalStocks, searchStocks } from "@/lib/data";
 import { dayKeyInZone } from "@/lib/data/liveCandle";
 import { taipeiDayKey, taipeiWeekday } from "@/lib/pollingSchedule";
@@ -76,6 +77,11 @@ export async function recordRecommendations(args: {
   items: RecItemInput[];
   exitReason: string;
   exitPriceOf?: (symbol: string) => Promise<number | null>;
+  /**
+   * 被移出名單時要不要「繼續持有」不結算（例如 AI 名單只是被排名擠出、本站評等仍是建議買進）：回 true＝紀錄保持持有中，
+   * 之後照跌破出場價／持有滿天數的規則結算。2026-10-15 全站檢查：名單排名 15～20 名進進出出，第一天就被算成 17 筆出場。
+   */
+  keepOpen?: (symbol: string) => Promise<boolean>;
   now?: Date;
 }): Promise<number> {
   if (!kvEnabled || !redis) return 0;
@@ -102,6 +108,12 @@ export async function recordRecommendations(args: {
     for (const sym of added) {
       const it = args.items.find((x) => x.symbol.toUpperCase() === sym)!;
       const id = `${day}:${args.source}:${sym}`;
+      // 之前那筆還持有中（被擠出時沒結算）→ 回到名單只是延續，不重記一筆
+      const stillOpenDay = openOf.get(sym);
+      if (stillOpenDay && stillOpenDay !== day) {
+        const cur = parse(await redis.hget(K.day(stillOpenDay), `${stillOpenDay}:${args.source}:${sym}`));
+        if (cur && !cur.exitDay) continue;
+      }
       const existing = parse(await redis.hget(K.day(day), id));
       // 同一天被移出又回來：重新打開原本那筆（不重複記）
       const entry: RecEntry = existing
@@ -149,6 +161,7 @@ export async function recordRecommendations(args: {
       const id = `${openDay}:${args.source}:${sym}`;
       const e = parse(writes[openDay]?.[id] ?? (await redis.hget(K.day(openDay), id)));
       if (!e || e.exitDay) continue;
+      if (args.keepOpen && (await args.keepOpen(e.symbol).catch(() => false))) continue;
       e.exitDay = day;
       e.exitPrice = args.exitPriceOf ? await args.exitPriceOf(e.symbol).catch(() => null) : null;
       e.exitReason = args.exitReason;
@@ -262,7 +275,7 @@ export async function runRecLedgerDaily(now: Date = new Date()): Promise<string>
     const added = await recordRecommendations({
       source: "momentum",
       // 只記使用者看得到的前 REC_MOMENTUM_TOP 名（/api/momentum 也只顯示前 10 名）；整份內部名單上百檔會讓回顧變雜訊
-      items: momentum.slice(0, REC_MOMENTUM_TOP).map((m, i) => ({ symbol: m.symbol, name: m.name, price: m.price, rank: i + 1, signals: m.signals.map((s) => s.label) })),
+      items: momentum.filter((m) => momentumTone(m.signals) === "bull").slice(0, REC_MOMENTUM_TOP).map((m, i) => ({ symbol: m.symbol, name: m.name, price: m.price, rank: i + 1, signals: m.signals.map((s) => s.label) })),
       exitReason: "移出技術訊號共振股名單",
       exitPriceOf: async (s) => closeOf.get(s.toUpperCase()) ?? null,
       now,

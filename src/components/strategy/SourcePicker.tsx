@@ -136,7 +136,7 @@ export default function SourcePicker({
   };
   const patch = (i: number, s: StockSource) => update(sources.map((x, j) => (j === i ? s : x)));
   /** 全市場、關注名單、依策略選股只能選一次：再按一次就取消 */
-  const toggleSingle = (kind: "all" | "watchlist" | "strategy") => {
+  const toggleSingle = (kind: "all" | "watchlist" | "strategy" | "smart") => {
     const at = sources.findIndex((s) => s.source === kind);
     if (at >= 0) remove(at);
     else add({ source: kind });
@@ -185,6 +185,9 @@ export default function SourcePicker({
             </button>
             <button type="button" className={chip(has((s) => s.source === "watchlist"))} onClick={() => toggleSingle("watchlist")} title="每次執行時讀取你帳號目前的關注清單">
               我的關注清單
+            </button>
+            <button type="button" className={chip(has((s) => s.source === "smart"))} onClick={() => toggleSingle("smart")} title="每次執行時讀取你的智能清單裡目前符合策略的股票">
+              🧠 我的智能清單
             </button>
             {allowStrategy && (
               <button
@@ -277,6 +280,7 @@ export default function SourcePicker({
               {s.source === "list" && <ListEditor symbols={s.symbols} onChange={(symbols) => patch(i, { source: "list", symbols })} />}
               {s.source === "all" && <p className="text-xs text-(--text-muted)">台股當天有成交的股票（約一千多檔），依成交量由大到小判斷；模擬倉每天執行有時間上限，來不及的會略過並寫在執行紀錄。</p>}
               {s.source === "watchlist" && <p className="text-xs text-(--text-muted)">每次執行時讀取你帳號「目前」的關注清單，關注清單變動會跟著變。</p>}
+              {s.source === "smart" && <p className="text-xs text-(--text-muted)">每次執行時讀取你的智能清單裡「目前符合策略」的股票（在 🧠 智能清單 設定策略與更新時間）。</p>}
               {s.source === "strategy" &&
                 (strategy ? (
                   strategyScreens.length ? (

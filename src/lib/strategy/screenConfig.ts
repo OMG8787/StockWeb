@@ -35,7 +35,8 @@ export type ScreenAiMode = (typeof SCREEN_AI_MODES)[number]["id"];
 export type ScreenConfig =
   | { source: "metric"; metric: ScreenMetric; position: ScreenPosition; count: number }
   | { source: "ai"; mode: ScreenAiMode; count: number }
-  | { source: "watchlist" };
+  | { source: "watchlist" }
+  | { source: "smart" };
 
 export interface ScreenedStock {
   symbol: string;
@@ -56,12 +57,14 @@ export function normalizeScreen(raw: unknown): ScreenConfig | null {
   }
   if (r.source === "ai") return { source: "ai", mode: pick(SCREEN_AI_MODES, r.mode, "action_picks"), count };
   if (r.source === "watchlist") return { source: "watchlist" };
+  if (r.source === "smart") return { source: "smart" };
   return null;
 }
 
 export function describeScreen(s: ScreenConfig | null | undefined): string {
   if (!s) return "未設定股票篩選";
   if (s.source === "watchlist") return "全部關注名單";
+  if (s.source === "smart") return "我的智能清單（目前符合的）";
   if (s.source === "ai") return "AI 建議名單（依帳號設定的檔數）";
   const metric = SCREEN_METRICS.find((m) => m.id === s.metric)?.label ?? s.metric;
   const pos = s.position === "top" ? "前" : s.position === "bottom" ? "後" : "中間";

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { momentumTone } from "@/lib/momentumTone";
 import WatchlistButton from "./WatchlistButton";
 import SignalTags from "./SignalTags";
 import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
@@ -28,6 +29,11 @@ export default function MomentumTable({ items, showAdvice = false }: { items: Mo
                 <span className="ml-1.5 text-(--text-muted) tabular-nums">{item.symbol}</span>
               </Link>
               <div className="mt-1">
+                {momentumTone(item.signals) === "bear" && (
+                  <span className="mr-1 rounded bg-(--price-down)/12 px-1.5 py-0.5 text-[11px] font-medium text-(--price-down)" title="空方訊號多於多方（跌破均線、連跌等），是轉弱警訊，不是買進候選">
+                    空方訊號
+                  </span>
+                )}
                 <SignalTags signals={item.signals} />
               </div>
             </div>

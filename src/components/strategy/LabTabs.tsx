@@ -14,7 +14,8 @@ const TABS = [
 export default function LabTabs({ active, intro }: { active: string; intro: string }) {
   return (
     <div className="space-y-2">
-      <div data-no-gloss className="flex gap-1 overflow-x-auto border-b border-(--gridline)">
+      {/* 手機：頁首導覽已經有同一排子分頁（全站檢查：兩排重複），這排只在平板以上顯示 */}
+      <div data-no-gloss className="hidden gap-1 overflow-x-auto border-b border-(--gridline) sm:flex">
         {TABS.map((t) => (
           <Link
             key={t.href}

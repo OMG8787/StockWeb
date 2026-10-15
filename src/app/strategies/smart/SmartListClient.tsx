@@ -6,6 +6,7 @@ import LabTabs from "@/components/strategy/LabTabs";
 import WatchlistButton from "@/components/WatchlistButton";
 import { api, useList, type Strategy } from "@/components/strategy/api";
 import { ALERT_CONFIG_EVENT } from "@/components/strategy/AlertWatcher";
+import { AdviceBadge, WatchAdviceProvider } from "@/components/WatchAdviceContext";
 import { btnGhost, btnPrimary, cardCls, inputCls } from "@/components/auth/ui";
 import { useTwQuotes } from "@/lib/useTwQuotes";
 import { formatPercent, priceDirectionClass } from "@/lib/format";
@@ -83,7 +84,7 @@ export default function SmartListClient() {
     try {
       const r = await api<{ data: SmartListData; note: string }>("/api/strategy/smart-list", {
         body: { action: "run" },
-        busyText: `更新智能清單中…（掃描約 ${SMART_UNIVERSE} 檔，第一次約 30～90 秒）`,
+        busyText: `更新智能清單中…（掃描約 ${SMART_UNIVERSE} 檔，約 10～60 秒）`,
       });
       setData(r.data);
       setMsg({ ok: true, text: `更新完成：${r.note}` });
@@ -204,8 +205,8 @@ export default function SmartListClient() {
             {entries.length === 0 ? "清單還是空的：選好策略、儲存後按「立即更新一次」，或等排定時間自動更新。" : "這個分類沒有股票。"}
           </p>
         ) : (
-          <>
-          {/* 手機：卡片；平板以上：表格 */}
+          <WatchAdviceProvider list={shown.slice(0, 60).map((e) => ({ symbol: e.symbol, market: "TW" as const, name: e.name }))}>
+          {/* 手機：卡片；平板以上：表格。本站建議一次最多算 60 檔（依目前排序） */}
           <ul className="space-y-2 sm:hidden">
             {shown.map((e) => {
               const q = quotes[e.symbol.toUpperCase()];
@@ -226,6 +227,10 @@ export default function SmartListClient() {
                     ) : (
                       <span className="shrink-0 rounded bg-(--page-plane) px-1.5 py-0.5 text-xs font-medium text-(--text-secondary)">⚠️ 暫不符合{left != null ? `・${left} 天後移除` : ""}</span>
                     )}
+                  </div>
+                  <div className="mt-1 flex items-center gap-1.5 text-xs">
+                    <span className="text-(--text-muted)">本站建議</span>
+                    <AdviceBadge market="TW" symbol={e.symbol} />
                   </div>
                   <div className="mt-1 text-xs tabular-nums text-(--text-secondary)">
                     加入價 {fmtNum(e.addedPrice)} → 現價 {fmtNum(now)}{" "}
@@ -248,6 +253,7 @@ export default function SmartListClient() {
                   <th className="px-2 py-2" aria-label="加入關注" />
                   <th className="px-2 py-2 font-medium">股票</th>
                   <th className="px-2 py-2 font-medium">狀態</th>
+                  <th className="px-2 py-2 font-medium" title="本站綜合評等的結論（要不要買以這個為準；符合策略不等於本站建議買進）">本站建議</th>
                   <th className="px-2 py-2 text-right font-medium" title="加入清單時的價格 → 現在">加入價 → 現價</th>
                   <th className="px-2 py-2 font-medium">符合的策略／不成立的條件</th>
                   <th className="px-2 py-2 font-medium" title="第一次加入、最近一次符合的時間">加入／最近符合</th>
@@ -280,6 +286,9 @@ export default function SmartListClient() {
                           </span>
                         )}
                       </td>
+                      <td className="px-2 py-2">
+                        <AdviceBadge market="TW" symbol={e.symbol} />
+                      </td>
                       <td className="whitespace-nowrap px-2 py-2 text-right tabular-nums">
                         {fmtNum(e.addedPrice)} → {fmtNum(now)}
                         <span className={`block text-xs ${since == null ? "text-(--text-muted)" : priceDirectionClass(since)}`}>{since == null ? "—" : formatPercent(since)}</span>
@@ -305,7 +314,7 @@ export default function SmartListClient() {
               </tbody>
             </table>
           </div>
-          </>
+          </WatchAdviceProvider>
         )}
       </section>
 

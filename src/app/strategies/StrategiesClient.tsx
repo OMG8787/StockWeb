@@ -265,14 +265,14 @@ export default function StrategiesClient() {
                   <div>
                     {preview.name}（{preview.symbol}，{preview.lastDay}{preview.live ? ' 盤中即時' : ' 收盤'}）：
                     <b className={preview.decision.buy ? "text-(--price-up)" : preview.decision.sell ? "text-(--price-down)" : ""}>
-                      {preview.decision.buy ? "符合買進" : preview.decision.sell ? "符合賣出" : "不動作"}
+                      {preview.decision.buy ? "符合買進" : preview.decision.sell ? "符合賣出" : "不動作（買進、賣出條件都沒成立）"}
                     </b>
-                    <span className="ml-2 text-xs text-(--text-muted)">{preview.decision.summary}</span>
+                    {(preview.decision.buy || preview.decision.sell) && <span className="ml-2 text-xs text-(--text-muted)">{preview.decision.summary}</span>}
                   </div>
                   <ul className="space-y-0.5 text-xs">
                     {preview.decision.hits.map((h) => (
                       <li key={h.id}>
-                        {h.pass === true ? "✅" : h.pass === false ? "❌" : "⚪"} {h.name}：{h.detail}
+                        {h.pass === true ? "✅ 成立" : h.pass === false ? "▫️ 未成立" : "⚪ 資料不足"}・{h.name}：{h.detail}
                       </li>
                     ))}
                   </ul>

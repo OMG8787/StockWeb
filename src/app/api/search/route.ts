@@ -64,8 +64,8 @@ export async function GET(req: NextRequest) {
       market,
       sectors,
       query: query ?? undefined,
-      // 搜尋頁要找得到 ETF（產業選「ETF」可以只看 ETF）
-      includeEtf: true,
+      // 搜尋頁帶 etf=1 才含 ETF（首頁焦點排行、每日焦點的漲跌／成交量榜是個股，不含 ETF——全站檢查：ETF 會把成交量榜洗版）
+      includeEtf: sp.get("etf") === "1",
       minChangePercent: numberParam(sp.get("min")),
       maxChangePercent: numberParam(sp.get("max")),
       minPrice: numberParam(sp.get("minPrice")),
