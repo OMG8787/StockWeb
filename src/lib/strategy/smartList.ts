@@ -96,6 +96,8 @@ export async function runSmartList(
   const unknownByStrategy = new Map(picked.map((s) => [s.id, expensiveIds(strategyIndicatorIds(s.config), indicators)]));
 
   let unfinished = 0;
+  /** 這次有抓到日K、實際判斷的檔數（訊息的「掃描 N 檔」） */
+  let scanned = 0;
   // 第一階段先記下已經有答案的策略；需要本站評等／五檔才判斷得了的策略留到第二階段（不影響其他策略的結果）
   type Pending = { t: Target; ctx: EvalContext; price: number | null; passed: string[]; failing: string[]; pending: StrategyView[] };
   const phase2: Pending[] = [];
@@ -107,6 +109,7 @@ export async function runSmartList(
     }
     const hist = await getBacktestCandles(t.symbol, "TW").catch(() => null);
     if (!hist || hist.length < 30) return;
+    scanned++;
     const today = new Date(now.getTime() + 8 * 3_600_000).toISOString().slice(0, 10);
     const quote = quoteMap.get(t.symbol) ?? null;
     const candles = overlayLiveCandle(hist.filter((c) => c.time < today).slice(-CANDLES_KEEP), quote, { marketOpen: live, now });
@@ -160,7 +163,7 @@ export async function runSmartList(
 
   const qualifiedNow = evals.filter((e) => e.passed.length > 0).length;
   const note = [
-    `${live ? "盤中即時" : "收盤後"}掃描 ${evals.length} 檔（成交值前 ${top.length} 名＋清單內 ${prev.entries.length} 檔）`,
+    `${live ? "盤中即時" : "收盤後"}掃描 ${scanned} 檔（成交值前 ${top.length} 名＋清單裡原有的 ${prev.entries.length} 檔，重複的只算一次）`,
     `符合 ${qualifiedNow} 檔`,
     phase2.length ? `需本站評等的有 ${phase2.length} 檔、這次算 ${phase2Done} 檔${left.length ? `、其餘 ${left.length} 檔下次輪到再算` : ""}` : "",
     unfinished ? `${unfinished} 檔時間不夠先略過` : "",

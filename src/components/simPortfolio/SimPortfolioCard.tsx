@@ -50,7 +50,7 @@ export default function SimPortfolioCard() {
           </div>
           <AllocationBar holdings={data.holdings ?? []} cash={data.cash ?? 0} nav={perf.nav} />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <div>
+            <div className="min-w-0">
               <h3 className="text-[13px] font-medium text-(--text-muted)">持股（{data.holdings?.length ?? 0} 檔，現金 {ntd(data.cash ?? 0)} 元）</h3>
               <ul className="mt-1 space-y-1 text-sm">
                 {(data.holdings ?? []).slice(0, CARD_HOLDINGS).map((h) => (
@@ -76,7 +76,7 @@ export default function SimPortfolioCard() {
                 {(data.holdings?.length ?? 0) === 0 && <li className="text-(--text-muted)">目前空手</li>}
               </ul>
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="text-[13px] font-medium text-(--text-muted)">
                 最近交易{(data.pending?.length ?? 0) > 0 && `（另有 ${data.pending!.length} 筆盤後定價委託，${data.rules.fixedFillTime} 成交）`}
               </h3>

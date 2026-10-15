@@ -265,7 +265,13 @@ export default function StrategiesClient() {
                   <div>
                     {preview.name}（{preview.symbol}，{preview.lastDay}{preview.live ? ' 盤中即時' : ' 收盤'}）：
                     <b className={preview.decision.buy ? "text-(--price-up)" : preview.decision.sell ? "text-(--price-down)" : ""}>
-                      {preview.decision.buy ? "符合買進" : preview.decision.sell ? "符合賣出" : "不動作（買進、賣出條件都沒成立）"}
+                      {preview.decision.buy && preview.decision.sell
+                        ? "買進、賣出條件同時成立（模擬倉：已持有會賣出，沒持有會買進）"
+                        : preview.decision.buy
+                          ? "符合買進"
+                          : preview.decision.sell
+                            ? "符合賣出"
+                            : "不動作（買進、賣出條件都沒成立）"}
                     </b>
                     {(preview.decision.buy || preview.decision.sell) && <span className="ml-2 text-xs text-(--text-muted)">{preview.decision.summary}</span>}
                   </div>

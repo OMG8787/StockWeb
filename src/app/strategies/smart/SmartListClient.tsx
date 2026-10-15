@@ -32,6 +32,7 @@ const fmtTime = (iso: string) => {
   const t = new Date(new Date(iso).getTime() + 8 * 3_600_000).toISOString();
   return `${t.slice(5, 10).replace("-", "/")} ${t.slice(11, 16)}`;
 };
+const PAGE_SIZE = 50;
 const fmtNum = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("en-US", { maximumFractionDigits: 2 }));
 
 export default function SmartListClient() {
@@ -42,6 +43,7 @@ export default function SmartListClient() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [filter, setFilter] = useState<"all" | "ok" | "no">("all");
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     Promise.all([api<{ config: AlertCfg }>("/api/strategy/alerts"), api<{ data: SmartListData }>("/api/strategy/smart-list")])
@@ -54,7 +56,11 @@ export default function SmartListClient() {
   }, []);
 
   const entries = useMemo(() => data?.entries ?? [], [data]);
-  const shown = entries.filter((e) => (filter === "all" ? true : filter === "ok" ? e.qualified : !e.qualified));
+  const filtered = entries.filter((e) => (filter === "all" ? true : filter === "ok" ? e.qualified : !e.qualified));
+  // 一頁 PAGE_SIZE 檔：清單可能上百檔，「本站建議」只算這一頁（操作建議 API 一次最多 60 檔）
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const curPage = Math.min(page, pages - 1);
+  const shown = filtered.slice(curPage * PAGE_SIZE, curPage * PAGE_SIZE + PAGE_SIZE);
   const symbols = useMemo(() => entries.map((e) => e.symbol).slice(0, 100), [entries]);
   const quotes = useTwQuotes(symbols);
 
@@ -191,7 +197,10 @@ export default function SmartListClient() {
             <button
               key={f}
               type="button"
-              onClick={() => setFilter(f)}
+              onClick={() => {
+                setFilter(f);
+                setPage(0);
+              }}
               className={`rounded-full border px-2.5 py-0.5 text-xs ${filter === f ? "border-(--accent) text-(--accent)" : "border-(--gridline) text-(--text-muted)"}`}
             >
               {f === "all" ? `全部 ${entries.length}` : f === "ok" ? `✅ 符合 ${okCount}` : `⚠️ 暫不符合 ${entries.length - okCount}`}
@@ -205,8 +214,13 @@ export default function SmartListClient() {
             {entries.length === 0 ? "清單還是空的：選好策略、儲存後按「立即更新一次」，或等排定時間自動更新。" : "這個分類沒有股票。"}
           </p>
         ) : (
-          <WatchAdviceProvider list={shown.slice(0, 60).map((e) => ({ symbol: e.symbol, market: "TW" as const, name: e.name }))}>
-          {/* 手機：卡片；平板以上：表格。本站建議一次最多算 60 檔（依目前排序） */}
+          <WatchAdviceProvider list={shown.map((e) => ({ symbol: e.symbol, market: "TW" as const, name: e.name }))}>
+          {data.runs[0] && (
+            <p className="mb-2 text-xs text-(--text-muted)">
+              最近一次更新（{fmtTime(data.runs[0].at)}）：{data.runs[0].note}。用到本站評等的策略（例如 AI 策略）每次只算一部分股票、輪流算，還沒輪到的股票暫時只看其他策略；「本站建議」第一次計算約需半分鐘。
+            </p>
+          )}
+          {/* 手機：卡片；平板以上：表格 */}
           <ul className="space-y-2 sm:hidden">
             {shown.map((e) => {
               const q = quotes[e.symbol.toUpperCase()];
@@ -314,6 +328,19 @@ export default function SmartListClient() {
               </tbody>
             </table>
           </div>
+          {pages > 1 && (
+            <div className="mt-2 flex items-center justify-center gap-3 text-sm">
+              <button type="button" className={btnGhost} disabled={curPage === 0} onClick={() => setPage(curPage - 1)}>
+                ← 上一頁
+              </button>
+              <span className="text-(--text-muted)">
+                第 {curPage + 1} / {pages} 頁（共 {filtered.length} 檔）
+              </span>
+              <button type="button" className={btnGhost} disabled={curPage >= pages - 1} onClick={() => setPage(curPage + 1)}>
+                下一頁 →
+              </button>
+            </div>
+          )}
           </WatchAdviceProvider>
         )}
       </section>
