@@ -206,18 +206,19 @@ export default function SiteHeader() {
 
   return (
     <header className="border-b border-(--gridline) bg-(--surface-1)">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center gap-4">
+      {/* 手機只留 SR 標誌、間距縮小，搜尋框才夠寬（390px 時原本只剩約 80px，提示字被截成「代號或」） */}
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 h-16 flex items-center gap-2 sm:gap-4">
         <Link href="/" prefetch={false} className="flex items-center gap-2 shrink-0">
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-(--accent) text-white font-bold text-sm">
             SR
           </span>
-          <span className="font-semibold text-lg tracking-tight">股情雷達</span>
+          <span className="hidden font-semibold text-lg tracking-tight sm:inline">股情雷達</span>
         </Link>
 
         <DesktopNav items={navItems} />
 
         {profile ? (
-        <div ref={boxRef} className="relative ml-auto flex-1 max-w-sm">
+        <div ref={boxRef} className="relative ml-auto min-w-0 flex-1 max-w-sm">
           <form onSubmit={handleSubmit}>
             <input
               type="text"
