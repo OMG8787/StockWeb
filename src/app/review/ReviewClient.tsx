@@ -190,7 +190,13 @@ export default function ReviewClient() {
                 </button>
               ))}
             </div>
-            <div className="overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1)">
+            {/* 手機：卡片；平板以上：表格 */}
+            <ul className="space-y-2 sm:hidden">
+              {rows.map(({ e, o }) => (
+                <MobileCard key={e.id} e={e} o={o} />
+              ))}
+            </ul>
+            <div className="hidden overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1) sm:block">
               <table className="w-full min-w-[980px]">
                 <thead className="border-b border-(--gridline)">
                   <tr>
@@ -228,6 +234,44 @@ function Card({ label, value, sub, cls = "", tip }: { label: string; value: stri
       <div className={`mt-0.5 text-lg font-semibold tabular-nums ${cls}`}>{value}</div>
       <div className="text-[12px] text-(--text-muted)">{sub}</div>
     </div>
+  );
+}
+
+function MobileCard({ e, o }: { e: RecEntry; o: ReturnType<typeof followOutcome> }) {
+  const zone = e.zoneLow != null && e.zoneHigh != null ? `${fmtNum(e.zoneLow)}～${fmtNum(e.zoneHigh)}` : null;
+  return (
+    <li className="rounded-lg border border-(--gridline) bg-(--surface-1) p-3 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-1.5">
+          <WatchlistButton symbol={e.symbol} market="TW" name={e.name} />
+          <Link href={`/stock/${e.symbol}?market=TW`} prefetch={false} className="min-w-0 font-medium hover:text-(--accent)">
+            {e.name} <span className="text-xs font-normal text-(--text-muted)">{e.symbol}</span>
+          </Link>
+        </div>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${e.source === "ai" ? "bg-(--accent)/15 text-(--accent)" : "bg-[#c98a1b]/15 text-[#c98a1b]"}`}>
+          {e.source === "ai" ? "🎯 AI 建議" : "📡 共振"}
+          {e.rank != null ? ` #${e.rank}` : ""}
+        </span>
+      </div>
+      <div className="mt-1 text-xs text-(--text-muted)">
+        {e.day} {e.time} 推薦・推薦價 <span className="tabular-nums text-(--text-primary)">{fmtNum(e.price)}</span>
+        {zone ? `・買點 ${zone}` : ""}
+        {e.stop != null ? `・跌破 ${fmtNum(e.stop)} 出場` : ""}
+      </div>
+      <div className="mt-1.5 grid grid-cols-4 gap-1 text-center text-xs tabular-nums">
+        {[1, 5, 20].map((h) => (
+          <div key={h} className="rounded bg-(--page-plane) py-1">
+            <div className="text-[10px] text-(--text-muted)">{h} 日</div>
+            {pctCell(horizonReturn(e, h))}
+          </div>
+        ))}
+        <div className="rounded bg-(--page-plane) py-1" title="照建議操作">
+          <div className="text-[10px] text-(--text-muted)">照建議</div>
+          {pctCell(o.pct)}
+        </div>
+      </div>
+      <div className="mt-1 text-[11px] text-(--text-muted)">{o.closed ? `${o.day ?? ""} 出場 @ ${fmtNum(o.price)}：${o.reason}` : `持有中・現價 ${fmtNum(o.price)}`}</div>
+    </li>
   );
 }
 

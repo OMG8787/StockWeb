@@ -178,7 +178,37 @@ function Overview() {
         <p className="rounded-lg border border-(--gridline) bg-(--surface-1) p-5 text-sm text-(--text-muted)">這個分類目前沒有股票。</p>
       ) : (
         <WatchAdviceProvider list={adviceList}>
-          <div className="overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1)">
+          {/* 手機：卡片（不用左右滑）；平板以上：表格 */}
+          <ul className="space-y-2 sm:hidden">
+            {shown.map((r) => {
+              const q = quotes[r.symbol];
+              return (
+                <li key={r.symbol} className="rounded-lg border border-(--gridline) bg-(--surface-1) p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-start gap-1.5">
+                      <WatchlistButton symbol={r.symbol} market="TW" name={r.name} />
+                      <Link href={`/stock/${r.symbol}?market=TW`} prefetch={false} className="min-w-0 font-medium hover:text-(--accent)">
+                        {r.name} <span className="text-xs font-normal text-(--text-muted)">{r.symbol}</span>
+                      </Link>
+                    </div>
+                    <div className="shrink-0 text-right text-sm tabular-nums">
+                      <div>{q ? formatPrice(q.price, "TWD") : "—"}</div>
+                      <div className={`text-xs ${q ? priceDirectionClass(q.changePercent) : "text-(--text-muted)"}`}>{q ? formatPercent(q.changePercent) : "—"}</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="text-(--text-muted)">本站建議</span>
+                    <AdviceBadge market="TW" symbol={r.symbol} />
+                    <SourceBadges r={r} />
+                  </div>
+                  <div className="mt-1.5 text-xs leading-relaxed text-(--text-secondary)">
+                    <RowNotes r={r} />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1) sm:block">
             <table className="w-full min-w-[860px] text-sm">
               <thead className="border-b border-(--gridline)">
                 <tr className="text-left text-xs text-(--text-muted)">
@@ -215,31 +245,10 @@ function Overview() {
                         <AdviceBadge market="TW" symbol={r.symbol} />
                       </td>
                       <td className="px-2 py-2">
-                        <div className="flex flex-wrap gap-1">
-                          {(Object.keys(SOURCE_META) as SourceKey[])
-                            .filter((k) => r.sources.has(k))
-                            .map((k) => (
-                              <span key={k} title={SOURCE_META[k].tip} className={`cursor-help whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium ${SOURCE_META[k].cls}`}>
-                                {SOURCE_META[k].badge}
-                                {k === "ai" && r.aiRank ? ` #${r.aiRank}` : ""}
-                                {k === "momentum" && r.momentumRank ? ` #${r.momentumRank}` : ""}
-                                {k === "alert" ? (r.alertTone === "buy" ? " 買" : " 賣") : ""}
-                              </span>
-                            ))}
-                        </div>
+                        <SourceBadges r={r} />
                       </td>
                       <td className="max-w-[360px] px-2 py-2 text-xs leading-relaxed text-(--text-secondary)">
-                        {r.aiLabel && <span className="block font-medium text-(--text-primary)">{r.aiLabel}</span>}
-                        {r.aiPlan && <span className="block">操作：{r.aiPlan}</span>}
-                        {r.aiConfidence && <span className="block text-(--text-muted)">{r.aiConfidence}</span>}
-                        {r.signals?.length ? <span className="block">技術訊號：{r.signals.join("、")}</span> : null}
-                        {r.alertLines?.map((l) => (
-                          <span key={l} className="block">
-                            🔔 {l}
-                          </span>
-                        ))}
-                        {r.smartStrategies?.length ? <span className="block">🧠 智能清單符合：{r.smartStrategies.join("、")}</span> : null}
-                        {r.heldPnl != null && <span className="block">AI 模擬組合持有中，未實現損益 {formatPercent(r.heldPnl)}</span>}
+                        <RowNotes r={r} />
                       </td>
                     </tr>
                   );
@@ -255,6 +264,41 @@ function Overview() {
         AI 建議名單的檔數可以在首頁「我的關注 → AI 建議清單」調整。僅供參考，不構成投資建議。
       </p>
     </div>
+  );
+}
+
+function SourceBadges({ r }: { r: Row }) {
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {(Object.keys(SOURCE_META) as SourceKey[])
+        .filter((k) => r.sources.has(k))
+        .map((k) => (
+          <span key={k} title={SOURCE_META[k].tip} className={`cursor-help whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium ${SOURCE_META[k].cls}`}>
+            {SOURCE_META[k].badge}
+            {k === "ai" && r.aiRank ? ` #${r.aiRank}` : ""}
+            {k === "momentum" && r.momentumRank ? ` #${r.momentumRank}` : ""}
+            {k === "alert" ? (r.alertTone === "buy" ? " 買" : " 賣") : ""}
+          </span>
+        ))}
+    </span>
+  );
+}
+
+function RowNotes({ r }: { r: Row }) {
+  return (
+    <>
+      {r.aiLabel && <span className="block font-medium text-(--text-primary)">{r.aiLabel}</span>}
+      {r.aiPlan && <span className="block">操作：{r.aiPlan}</span>}
+      {r.aiConfidence && <span className="block text-(--text-muted)">{r.aiConfidence}</span>}
+      {r.signals?.length ? <span className="block">技術訊號：{r.signals.join("、")}</span> : null}
+      {r.alertLines?.map((l) => (
+        <span key={l} className="block">
+          🔔 {l}
+        </span>
+      ))}
+      {r.smartStrategies?.length ? <span className="block">🧠 智能清單符合：{r.smartStrategies.join("、")}</span> : null}
+      {r.heldPnl != null && <span className="block">AI 模擬組合持有中，未實現損益 {formatPercent(r.heldPnl)}</span>}
+    </>
   );
 }
 

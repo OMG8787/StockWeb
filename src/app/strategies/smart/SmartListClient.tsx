@@ -204,7 +204,44 @@ export default function SmartListClient() {
             {entries.length === 0 ? "清單還是空的：選好策略、儲存後按「立即更新一次」，或等排定時間自動更新。" : "這個分類沒有股票。"}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1)">
+          <>
+          {/* 手機：卡片；平板以上：表格 */}
+          <ul className="space-y-2 sm:hidden">
+            {shown.map((e) => {
+              const q = quotes[e.symbol.toUpperCase()];
+              const now = q?.price ?? e.lastPrice;
+              const since = e.addedPrice && now ? (now / e.addedPrice - 1) * 100 : null;
+              const left = daysUntilRemoval(e);
+              return (
+                <li key={e.symbol} className="rounded-lg border border-(--gridline) bg-(--surface-1) p-3 text-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-start gap-1.5">
+                      <WatchlistButton symbol={e.symbol} market="TW" name={e.name} />
+                      <Link href={`/stock/${e.symbol}?market=TW`} prefetch={false} className="min-w-0 font-medium hover:text-(--accent)">
+                        {e.name} <span className="text-xs font-normal text-(--text-muted)">{e.symbol}</span>
+                      </Link>
+                    </div>
+                    {e.qualified ? (
+                      <span className="shrink-0 rounded bg-(--price-down)/12 px-1.5 py-0.5 text-xs font-medium text-(--price-down)">✅ 符合</span>
+                    ) : (
+                      <span className="shrink-0 rounded bg-(--page-plane) px-1.5 py-0.5 text-xs font-medium text-(--text-secondary)">⚠️ 暫不符合{left != null ? `・${left} 天後移除` : ""}</span>
+                    )}
+                  </div>
+                  <div className="mt-1 text-xs tabular-nums text-(--text-secondary)">
+                    加入價 {fmtNum(e.addedPrice)} → 現價 {fmtNum(now)}{" "}
+                    <span className={since == null ? "text-(--text-muted)" : priceDirectionClass(since)}>{since == null ? "" : formatPercent(since)}</span>
+                  </div>
+                  <div className="mt-1 text-xs leading-relaxed text-(--text-secondary)">
+                    {e.qualified ? `符合：${e.strategies.join("、")}` : e.failing.map((f) => <span key={f} className="block">不成立：{f}</span>)}
+                  </div>
+                  <div className="mt-1 text-[11px] text-(--text-muted)">
+                    加入 {fmtTime(e.addedAt)}・最近符合 {fmtTime(e.lastQualifiedAt)}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="hidden overflow-x-auto rounded-lg border border-(--gridline) bg-(--surface-1) sm:block">
             <table className="w-full min-w-[760px] text-sm">
               <thead className="border-b border-(--gridline)">
                 <tr className="text-left text-xs text-(--text-muted)">
@@ -268,6 +305,7 @@ export default function SmartListClient() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
 
