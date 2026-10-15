@@ -3,8 +3,10 @@ import WatchlistButton from "./WatchlistButton";
 import SignalTags from "./SignalTags";
 import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
 import type { MomentumItem } from "@/lib/data";
+import { AdviceBadge } from "./WatchAdviceContext";
 
-export default function MomentumTable({ items }: { items: MomentumItem[] }) {
+/** showAdvice：每檔右側顯示「本站建議」（要包在 WatchAdviceProvider 裡；只有台股） */
+export default function MomentumTable({ items, showAdvice = false }: { items: MomentumItem[]; showAdvice?: boolean }) {
   if (items.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-(--text-muted)">目前沒有同時符合多個技術訊號的股票</p>
@@ -31,6 +33,11 @@ export default function MomentumTable({ items }: { items: MomentumItem[] }) {
             </div>
           </div>
           <div className="shrink-0 text-right">
+            {showAdvice && item.market === "TW" && (
+              <div className="mb-0.5 text-[11px] text-(--text-muted)" title="本站綜合評等的結論（要不要買以這個為準）">
+                本站建議 <AdviceBadge market="TW" symbol={item.symbol} />
+              </div>
+            )}
             <div className="tabular-nums font-medium">{formatPrice(item.price, item.market === "TW" ? "TWD" : "USD")}</div>
             <div className={`text-sm tabular-nums ${priceDirectionClass(item.changePercent)}`}>
               {formatPercent(item.changePercent)}

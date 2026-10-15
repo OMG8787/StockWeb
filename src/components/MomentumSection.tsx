@@ -5,6 +5,8 @@ import MomentumTable from "./MomentumTable";
 import type { MomentumItem } from "@/lib/data";
 import { useFetchOnce } from "@/lib/useFetchOnce";
 import { clientRefreshMs } from "@/lib/autoRefresh";
+import { WatchAdviceProvider } from "./WatchAdviceContext";
+import RecommendationGuide from "./RecommendationGuide";
 
 /**
  * Fetched client-side rather than server-rendered like the boards above it:
@@ -29,12 +31,23 @@ export default function MomentumSection() {
 
   return (
     <section className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
-      <h2 className="font-semibold">技術訊號共振股</h2>
-      <p className="mb-3 text-xs text-(--text-muted)">
-        同時符合兩個以上客觀技術訊號（如爆量、站上均線、連續上漲）的股票。純粹描述當下數據呈現的狀態，不是對未來走勢的預測，不構成投資建議。
+      <h2 className="font-semibold">技術訊號共振股（技術面候選，不是買進推薦）</h2>
+      <p className="mb-2 text-xs text-(--text-muted)">
+        同時符合兩個以上客觀技術訊號（如爆量、站上均線、連續上漲）的股票，只看技術面；每檔右側的「本站建議」才是本站綜合評等的結論。
       </p>
+      <div className="mb-3">
+        <RecommendationGuide context="技術訊號共振股只是候選" />
+      </div>
       <MarketTabs
-        tw={tw === null ? <MomentumSkeleton /> : <MomentumTable items={tw} />}
+        tw={
+          tw === null ? (
+            <MomentumSkeleton />
+          ) : (
+            <WatchAdviceProvider list={tw.map((i) => ({ symbol: i.symbol, market: "TW" as const, name: i.name }))}>
+              <MomentumTable items={tw} showAdvice />
+            </WatchAdviceProvider>
+          )
+        }
         us={us === null ? <MomentumSkeleton /> : <MomentumTable items={us} />}
       />
     </section>

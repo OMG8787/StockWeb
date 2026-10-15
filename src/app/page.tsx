@@ -120,11 +120,14 @@ export default function HomePage() {
       <section>
         <div className="rounded-lg border border-(--gridline) bg-(--surface-1) p-4">
           <div className="flex items-center justify-between mb-1">
-            <h2 className="font-semibold">焦點排行</h2>
+            <h2 className="font-semibold">焦點排行（市場資訊，不是推薦）</h2>
             <Link href="/search" className="text-sm text-(--accent) hover:underline">
               查看完整排行 →
             </Link>
           </div>
+          <p className="mb-2 text-xs text-(--text-muted)">
+            今天漲跌最多、成交最熱的股票；本站的推薦請看 <Link href="/overview" className="text-(--accent) underline">推薦總覽</Link>（以「本站建議」為準）。
+          </p>
           <Suspense fallback={<BlockSkeleton height="h-72" />}>
             <HomeMovers />
           </Suspense>

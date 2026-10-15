@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import WatchlistButton from "@/components/WatchlistButton";
+import RecommendationGuide from "@/components/RecommendationGuide";
 import { AiListsProvider, useAiLists } from "@/components/AiListsContext";
 import { AdviceBadge, WatchAdviceProvider } from "@/components/WatchAdviceContext";
 import { ALERT_CHECK_NOW_EVENT } from "@/components/strategy/AlertWatcher";
@@ -157,6 +158,8 @@ function Overview() {
           出現在越多名單的排越前面。
         </p>
       </div>
+
+      <RecommendationGuide variant="full" />
 
       <div className="flex flex-wrap gap-2 text-sm">
         <Chip active={filter === "all"} onClick={() => setFilter("all")} label={`全部（${rows.length}）`} />

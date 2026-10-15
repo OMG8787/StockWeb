@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import RecommendationGuide from "@/components/RecommendationGuide";
 import LiveMoversBoard from "@/components/LiveMoversBoard";
 import MarketTabs from "@/components/MarketTabs";
 import MomentumSection from "@/components/MomentumSection";
@@ -49,6 +50,8 @@ export default async function HighlightsPage() {
           )}
         </div>
       </div>
+
+      <RecommendationGuide context="漲跌榜、成交量榜是市場資訊，不是推薦" />
 
       <Board
         title="漲幅榜"
