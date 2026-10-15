@@ -23,8 +23,11 @@ export default function SimPortfolioHoldingsTable({ holdings }: { holdings: SimH
         <p className="text-[13px] text-(--text-muted) xl:hidden">← 可左右滑動查看完整欄位，表頭與名稱欄會固定 →</p>
         <ChipsColumnsToggle className="ml-auto" />
       </div>
+      {/* 桌機（≥1280px）StickyTableScroll 不當捲動容器（表頭貼整頁），但這張表含籌碼欄有 13 欄、比頁面寬，
+          會撐出整頁橫向捲軸（全站檢查：1280px 時 scrollWidth 1316）；持股最多 6 列、不需要整頁貼頂表頭，所以外面再包一層橫向捲動。 */}
+      <div className="overflow-x-auto">
       <StickyTableScroll>
-        <table className={`sticky-table w-full text-sm ${showChips ? "min-w-[1180px]" : "min-w-[860px]"}`}>
+        <table className={`sticky-table w-full text-sm ${showChips ? "min-w-[1240px]" : "min-w-[860px]"}`}>
           <thead>
             <tr className="border-b border-(--gridline) text-left text-(--text-muted)">
               <th className="w-8" />
@@ -47,6 +50,7 @@ export default function SimPortfolioHoldingsTable({ holdings }: { holdings: SimH
           </tbody>
         </table>
       </StickyTableScroll>
+      </div>
     </>
   );
 }
