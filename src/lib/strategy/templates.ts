@@ -47,21 +47,22 @@ export interface StrategyTemplate {
 export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
   {
     id: "search-v1",
-    name: "第一版策略・突破 20 日新高",
+    name: "第一版策略・放量突破 60 日新高",
     style: "趨勢追蹤（回測選出）",
-    desc: "收盤創 20 日新高就買；收盤跌破 60 日線才賣；停損 8%、不設停利（讓賺錢的部位一直抱）。2026-10 用 198 檔台股、約 1,500 種指標組合回測，只用 2023-10～2025-10 選出，再用沒看過的 2025-10～2026-10 驗證（報告：docs/backtest/2026-10-strategy-search.md）。",
-    risk: "勝率只有三成多，靠少數大漲的股票撐起報酬，會常常小停損；回測期間台股大多頭，空頭市場可能連續停損；股票池是現在的名單（倖存者偏差），實際可能較差。建議先用模擬倉跟一段時間。",
+    desc: "收盤創 60 日新高、而且成交量 ≥ 20 日均量 1.5 倍就買；收盤跌破 60 日線才賣；停損 8%、不設停利（讓賺錢的部位一直抱）。2026-10 用 198 檔台股、1,536 種指標組合回測，只用 2023-10～2025-10 選出，再用沒看過的 2025-10～2026-10 驗證（報告 docs/backtest/2026-10-strategy-search.md）。",
+    risk: "勝率只有三成左右，靠少數大漲的股票賺錢，會常常小停損；主要優點是最大回撤約只有買進持有的一半；小型股上沒有優勢；回測期間台股大多頭，股票池有倖存者偏差。建議先用模擬倉跟一段時間。",
     backtestable: true,
     evidence: {
-      text: "2023-10～2025-10：+127%（同批股票買進持有 +55%、0050 +96%），最大回撤 −21%；沒看過的 2025-10～2026-10：+143%（+114%、+81%），最大回撤 −17%",
+      text: "2023-10～2025-10：+101%（同批股票買進持有 +55%），最大回撤 −19%（買進持有 −34%）；沒看過的 2025-10～2026-10：+178%（+114%），最大回撤 −20%（−31%）",
       good: true,
     },
     indicators: [
-      { key: "high", typeId: "breakout", params: { days: 20, dir: "high" } },
+      { key: "high", typeId: "breakout", params: { days: 60, dir: "high" } },
+      { key: "vol", typeId: "volume_surge", params: { period: 20, multiple: 1.5 } },
       { key: "below60", typeId: "price_vs_ma", params: { period: 60, op: "lt" } },
     ],
     mode: "rules",
-    buy: { keys: ["high"], match: 0 },
+    buy: { keys: ["high", "vol"], match: 0 },
     sell: { keys: ["below60"], match: 1 },
     stopLossPct: 8,
     takeProfitPct: 0,
