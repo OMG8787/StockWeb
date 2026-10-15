@@ -17,11 +17,13 @@ interface SymbolSuggestion {
   name: string;
   market: "TW" | "US";
   exchange?: "TWSE" | "TPEx";
+  kind?: "etf";
 }
 
 /** 使用者看得懂的市場別標籤（內部的 exchange 欄位不直接曝光）。 */
 function marketLabel(item: SymbolSuggestion): string {
   if (item.market === "US") return "美股";
+  if (item.kind === "etf") return item.exchange === "TPEx" ? "上櫃ETF" : "上市ETF";
   if (item.exchange === "TPEx") return "上櫃";
   return "上市";
 }
@@ -35,7 +37,8 @@ function marketLabel(item: SymbolSuggestion): string {
  * 直接跳轉（見 resolveAndGo），這樣 AAPL、F、T 這類真代號一樣是一次到位。
  */
 function isTwStockCode(input: string): boolean {
-  return /^\d{4,6}$/.test(input);
+  // 4～6 碼數字，ETF／特別股可能接一個英文字母（00406A、00631L、00679B、2881A）
+  return /^\d{4,6}[A-Z]?$/i.test(input);
 }
 
 const SUGGEST_DEBOUNCE_MS = 200;

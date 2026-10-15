@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     name: entry.name,
     market: entry.market,
     exchange: entry.exchange,
+    kind: entry.kind,
   }));
   return NextResponse.json({ results }, { headers: privateCache(3600, 86400) }); // 代號／名稱字典一天才變一次
 }

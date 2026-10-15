@@ -52,7 +52,8 @@ export async function getMultiSignalStocks(market: Market, minSignals = 2): Prom
     const avgVolumeMap = await getTrailingAverageVolumeMap(market);
 
     const candidates = pool
-      .filter((entry) => quoteMap.has(entry.symbol))
+      // ETF 不進技術訊號共振股（這份名單餵今日建議／AI 推薦，評分用公司基本面與籌碼）
+      .filter((entry) => entry.kind !== "etf" && quoteMap.has(entry.symbol))
       .sort((a, b) => {
         const qa = quoteMap.get(a.symbol)!;
         const qb = quoteMap.get(b.symbol)!;

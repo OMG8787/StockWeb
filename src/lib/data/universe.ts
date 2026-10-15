@@ -16,6 +16,11 @@ export interface UniverseEntry {
    * pre-existing seed/US entry needs no changes.
    */
   exchange?: "TWSE" | "TPEx" | "Emerging";
+  /**
+   * 證券種類：沒有＝一般股票；"etf"＝ETF（2026-10-15 使用者：「ETF 似乎都沒抓到，搜尋 00406A 抓不到」）。
+   * ETF 查得到、有報價／K線、出現在搜尋頁，但不進 AI 建議與技術訊號共振這類「個股」推薦池（那些用公司基本面／籌碼評分）。
+   */
+  kind?: "etf";
 }
 
 // Small hand-curated seed list. Used as the TW universe until the full
@@ -329,6 +334,8 @@ const MAX_TWSE_UNIVERSE = 1200;
 // is a ceiling for correctness/future headroom, not an active constraint:
 // every real TPEx stock should now appear in search/rankings.
 const MAX_TPEX_UNIVERSE = 900;
+// ETF（上市＋上櫃）的上限：2026-10-15 實測上市 241、上櫃 118 檔；上市 ETF 的報價走同一個 MIS 分塊批次（50 檔一塊），約多 5 塊。
+const MAX_ETF_UNIVERSE = 450;
 
 // Kept in sync (best-effort, in the background) so the synchronous
 // findInUniverse/sectorsFor helpers below get the fuller official list as
@@ -497,14 +504,16 @@ function capOne(companies: UniverseEntry[], seed: UniverseEntry[], max: number):
  * 決策的話，要連同上面三點一起重新評估，不要只因為「看起來少收了東西」就加。
  */
 function capUniverse(companies: UniverseEntry[]): UniverseEntry[] {
-  const twse = companies.filter((e) => e.exchange == null || e.exchange === "TWSE");
-  const tpex = companies.filter((e) => e.exchange === "TPEx");
+  const twse = companies.filter((e) => e.kind !== "etf" && (e.exchange == null || e.exchange === "TWSE"));
+  const tpex = companies.filter((e) => e.kind !== "etf" && e.exchange === "TPEx");
+  // ETF 自己一組上限（不跟公司搶 MAX_TWSE_UNIVERSE 的名額）；上市約 240、上櫃約 120 檔
+  const etfs = companies.filter((e) => e.kind === "etf").slice(0, MAX_ETF_UNIVERSE);
   // TW_UNIVERSE_SEED is all-TWSE, so it only ever matches (and only ever
   // needs to be checked against) the twse partition; tpex has no hand-picked
   // seed — fetchTpexListedCompanies' own paid-in-capital sort already puts
   // its well-known large caps first, so a plain cap-to-N does the
   // equivalent job for that partition.
-  return [...capOne(twse, TW_UNIVERSE_SEED, MAX_TWSE_UNIVERSE), ...capOne(tpex, [], MAX_TPEX_UNIVERSE)];
+  return [...capOne(twse, TW_UNIVERSE_SEED, MAX_TWSE_UNIVERSE), ...capOne(tpex, [], MAX_TPEX_UNIVERSE), ...etfs];
 }
 
 // "-v4": this key's SHAPE changed when TPEx was merged in (TWSE-only ->
@@ -526,7 +535,8 @@ function capUniverse(companies: UniverseEntry[]): UniverseEntry[] {
 // changed, and without a bump every instance would keep serving the
 // pre-興櫃 list out of Redis for up to the full 24h TTL, making emerging
 // stocks look like they still aren't covered.
-const TW_UNIVERSE_CACHE_KEY = "tw-universe-full-raw-v5";
+// "-v6"：2026-10-15 加入 ETF（kind: "etf"），內容形狀改變，同上理由升版。
+const TW_UNIVERSE_CACHE_KEY = "tw-universe-full-raw-v6";
 // How long a DEGRADED (TPEx came back empty — meaning its fetch almost
 // certainly failed, since a real company listing is never actually empty)
 // merge result is trusted before the next request gets a fresh attempt.
@@ -548,6 +558,8 @@ export async function getTwUniverse(): Promise<UniverseEntry[]> {
   const { fetchTwseListedCompanies } = await import("./twse");
   const { fetchTpexListedCompanies } = await import("./tpex");
   const { fetchEmergingListedCompanies } = await import("./emerging");
+  const { fetchTwseEtfList } = await import("./twse");
+  const { fetchTpexEtfList } = await import("./tpex");
   // Cache holds the FULL uncapped official list (TWSE + TPEx merged) — the
   // cap is applied fresh on every read (cheap: an in-memory filter over an
   // already-fetched array), so the raw full list is always available for
@@ -568,16 +580,24 @@ export async function getTwUniverse(): Promise<UniverseEntry[]> {
     full = await universeComputePromise;
   } else {
     universeComputePromise = (async () => {
-      const [twse, tpex, emerging] = await Promise.all([
+      const [twse, tpex, emerging, twseEtf, tpexEtf] = await Promise.all([
         fetchTwseListedCompanies().catch(() => []),
         fetchTpexListedCompanies().catch(() => []),
         fetchEmergingListedCompanies().catch(() => []),
+        fetchTwseEtfList().catch(() => []),
+        fetchTpexEtfList().catch(() => []),
       ]);
       // TWSE failing outright falls back to the hand-curated (all-TWSE) seed
       // as before — TPEx succeeding independently must never be the reason
       // every TWSE stock silently vanishes from the universe.
       const twseFinal = twse.length > 0 ? twse : TW_UNIVERSE_SEED;
-      const merged = [...twseFinal, ...tpex, ...emerging];
+      // ETF（上市＋上櫃）接在各自公司清單後面；同一代號只留第一次出現（公司清單優先）
+      const seenCodes = new Set<string>();
+      const merged = [...twseFinal, ...twseEtf, ...tpex, ...tpexEtf, ...emerging].filter((e) => {
+        if (seenCodes.has(e.symbol)) return false;
+        seenCodes.add(e.symbol);
+        return true;
+      });
       // 降級 TTL 的判斷條件只看 TPEx（維持原本的行為）：那份清單空掉幾乎必然
       // 代表抓取失敗，而且它會直接讓上櫃股從排行/搜尋消失，屬於嚴重降級。興櫃
       // 清單空掉的影響小得多（興櫃本來就不進排行，只影響「查不查得到」），且

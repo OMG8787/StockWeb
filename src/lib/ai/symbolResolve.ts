@@ -16,7 +16,7 @@ import type { Market } from "@/lib/data";
 // 名稱比對走另一條路徑`findAllSymbolsByName`，不受這裡影響）；代價是T/F/V/C/D/O
 // 這幾檔本來就有的真實單字母代號，改成只能用公司名稱查、不能只打裸代號，
 // 這個犧牲遠比「亂碼/雜訊文字誤觸發分析無關股票」的風險划算。
-const SYMBOL_PATTERN = /\b\d{4,6}\b(?!\s*年)|\b[A-Z]{2,5}\b/g;
+const SYMBOL_PATTERN = /\b\d{4,6}[A-Z]?\b(?!\s*年)|\b[A-Z]{2,5}\b/g;
 
 // SYMBOL_PATTERN 會把句子裡任何 1-5 個大寫英文字母當成可能的美股代號，所以任何
 // 「長得像代號、其實是專有名詞縮寫」的字都要在這裡擋掉，否則會被當成一檔查不到的
@@ -119,7 +119,8 @@ export async function guessSymbolsFromText(
   if (matches) {
     for (const m of matches) {
       if (seen.has(m)) continue;
-      if (/^\d{4,6}$/.test(m)) {
+      // 數字代號；後面接一個字母的（ETF 00406A、特別股 2881A）要股票清單裡真的有才算，避免把「3000A」這種字誤認
+      if (/^\d{4,6}$/.test(m) || (/^\d{4,6}[A-Z]$/.test(m) && findInUniverse(m, "TW"))) {
         seen.add(m);
         candidates.push({ symbol: m, market: "TW", index: upper.indexOf(m) });
       } else if (

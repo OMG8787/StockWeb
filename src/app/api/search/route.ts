@@ -64,6 +64,8 @@ export async function GET(req: NextRequest) {
       market,
       sectors,
       query: query ?? undefined,
+      // 搜尋頁要找得到 ETF（產業選「ETF」可以只看 ETF）
+      includeEtf: true,
       minChangePercent: numberParam(sp.get("min")),
       maxChangePercent: numberParam(sp.get("max")),
       minPrice: numberParam(sp.get("minPrice")),

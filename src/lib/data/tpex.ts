@@ -852,6 +852,24 @@ interface TpexCompanyRow {
  * 台燿(6274) at rank 38, 鈊象(3293) at rank 40 out of 891 — comfortably
  * inside any reasonable cap.
  */
+/**
+ * 上櫃 ETF 清單（例：00679B 元大美債20年）：mopsfin_t187ap03_O 只有上櫃公司，ETF 從 tpex_mainboard_quotes（上櫃全部證券最近一日行情）取代號符合 ETF 格式的列。
+ */
+export async function fetchTpexEtfList(): Promise<UniverseEntry[]> {
+  const rows = await fetchTpexJson<Array<{ SecuritiesCompanyCode?: string; CompanyName?: string }>>("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes");
+  return rows
+    .filter((r) => r.SecuritiesCompanyCode && r.CompanyName && /^00\d{2,4}[A-Z]?$/.test(r.SecuritiesCompanyCode.trim()))
+    .map((r) => ({
+      symbol: r.SecuritiesCompanyCode!.trim(),
+      market: "TW" as const,
+      name: r.CompanyName!.trim(),
+      sector: "ETF",
+      currency: "TWD",
+      exchange: "TPEx" as const,
+      kind: "etf" as const,
+    }));
+}
+
 export async function fetchTpexListedCompanies(): Promise<UniverseEntry[]> {
   const rows = await fetchTpexJson<TpexCompanyRow[]>("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O");
   return rows

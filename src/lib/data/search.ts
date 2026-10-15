@@ -15,6 +15,8 @@ export interface SearchFilters {
   sector?: string;
   sectors?: string[];
   query?: string;
+  /** 包含 ETF（預設不含：排行、AI 候選池、技術篩選都是「個股」；搜尋頁明確要求才含）。篩選產業選了「ETF」也會包含。 */
+  includeEtf?: boolean;
   minChangePercent?: number;
   maxChangePercent?: number;
   minPrice?: number;
@@ -39,6 +41,8 @@ export async function searchStocks(filters: SearchFilters): Promise<SearchItem[]
   let pool: UniverseEntry[] = filters.market
     ? await universeFor(filters.market)
     : [...(await getTwUniverse()), ...US_UNIVERSE];
+  const wantsEtf = filters.includeEtf || filters.sector === "ETF" || (filters.sectors ?? []).includes("ETF");
+  if (!wantsEtf) pool = pool.filter((e) => e.kind !== "etf");
   if (filters.sector) pool = pool.filter((e) => e.sector === filters.sector);
   if (filters.sectors && filters.sectors.length > 0) {
     const wanted = new Set(filters.sectors);

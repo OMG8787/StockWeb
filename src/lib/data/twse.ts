@@ -850,6 +850,21 @@ export async function fetchTwseListedCompanies(): Promise<UniverseEntry[]> {
     });
 }
 
+/** ETF 代號：00 開頭、4～6 碼數字，可能接一個英文字母（A 主動式、B 債券、L 槓桿、R 反向、U 期貨、K／C 等） */
+export const TW_ETF_CODE = /^00\d{2,4}[A-Z]?$/;
+
+/**
+ * 上市 ETF 清單（2026-10-15 使用者：「ETF 似乎都沒抓到，搜尋 00406A 抓不到」——上面的 t187ap03_L 只有上市「公司」，ETF 不在裡面）。
+ * 來源：openapi STOCK_DAY_ALL（上市全部證券的最近一日行情，含 ETF），取代號符合 TW_ETF_CODE 的列；一天抓一次（股票清單快取 24 小時）。
+ */
+export async function fetchTwseEtfList(): Promise<UniverseEntry[]> {
+  const res = await fetchWithTimeout("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", 8000);
+  const rows = (await res.json()) as Array<{ Code?: string; Name?: string }>;
+  return rows
+    .filter((r) => r.Code && r.Name && TW_ETF_CODE.test(r.Code.trim()))
+    .map((r) => ({ symbol: r.Code!.trim(), market: "TW" as const, name: r.Name!.trim(), sector: "ETF", currency: "TWD", exchange: "TWSE" as const, kind: "etf" as const }));
+}
+
 function rocToIso(roc: string): string {
   const [y, m, d] = roc.split("/").map((n) => parseInt(n, 10));
   return `${y + 1911}-${pad(m)}-${pad(d)}`;

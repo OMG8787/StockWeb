@@ -8,7 +8,8 @@ export async function universeFor(market: Market): Promise<UniverseEntry[]> {
 export function detectMarket(symbolInput: string): Market {
   const known = findInUniverse(symbolInput);
   if (known) return known.market;
-  return /^\d{3,6}$/.test(symbolInput.trim()) ? "TW" : "US";
+  // 台股代號：3～6 碼數字，ETF／特別股可能再接一個英文字母（00406A、00631L、2881A）；美股代號是純英文字母
+  return /^\d{3,6}[A-Z]?$/i.test(symbolInput.trim()) ? "TW" : "US";
 }
 
 /**
