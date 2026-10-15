@@ -21,6 +21,7 @@ vi.mock("@/lib/data", async (orig) => ({
 }));
 vi.mock("@/lib/data/marketQuoteMap", () => ({ getMarketQuoteMap: async () => new Map() }));
 vi.mock("@/lib/strategy/backtestData", () => ({ getBacktestCandles: async (s: string) => (series[s] ? candles(series[s]) : null) }));
+vi.mock("@/lib/ai/stockRating", () => ({ getStockRating: async () => null }));
 vi.mock("@/lib/marketStatus", async (orig) => ({ ...(await orig<object>()), getMarketStatus: () => "closed" }));
 
 const { saveIndicator, saveStrategy } = await import("@/lib/strategy/store");
@@ -48,5 +49,16 @@ describe("智能清單執行（假資料、真策略引擎）", () => {
     expect(up.qualified).toBe(false);
     expect(up.failing[0]).toContain("趨勢：站上5日線");
     expect((await getSmartList("U1")).runs).toHaveLength(2);
+  });
+  it("同時選了需要本站評等的策略：純技術策略的結果不會被吃掉", async () => {
+    series.UP = Array.from({ length: 60 }, (_, i) => 100 + i);
+    const tech = await saveIndicator(amy, { typeId: "price_vs_ma", name: "站上5日線", params: { period: 5, op: "gt" } });
+    const rating = await saveIndicator(amy, { typeId: "site_rating", name: "評等買進", params: { code: "buy" } });
+    const a = await saveStrategy(amy, { name: "技術", config: { buy: { ids: [tech.id], match: 0 } } });
+    const b = await saveStrategy(amy, { name: "評等", config: { buy: { ids: [rating.id], match: 0 } } });
+    const r = await runSmartList("U1", { enabled: true, strategyIds: [a.id, b.id], times: ["10:00"] }, { slot: "10:00", slotKey: "k1", now: new Date("2026-10-15T02:05:00Z") });
+    const up = r.data.entries.find((e) => e.symbol === "UP")!;
+    expect(up.strategies).toEqual(["技術"]);
+    expect(r.data.runs[0].note).toContain("需本站評等的有");
   });
 });

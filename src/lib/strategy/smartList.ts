@@ -35,7 +35,7 @@ import {
 const KEY = (userId: string) => `smart-list:v1:${userId}`;
 const memory = new Map<string, SmartListData>();
 /** 每次最多幾檔去算本站評等／五檔（第二階段） */
-const PHASE2_MAX = 40;
+const PHASE2_MAX = 60;
 /** 日K只取最近幾根（指標最長 240 日均線，留暖機） */
 const CANDLES_KEEP = 300;
 const EXPENSIVE: IndicatorNeed[] = ["rating", "orderbook"];
@@ -96,7 +96,9 @@ export async function runSmartList(
   const unknownByStrategy = new Map(picked.map((s) => [s.id, expensiveIds(strategyIndicatorIds(s.config), indicators)]));
 
   let unfinished = 0;
-  const phase2: Array<{ t: Target; ctx: EvalContext; price: number | null }> = [];
+  // 第一階段先記下已經有答案的策略；需要本站評等／五檔才判斷得了的策略留到第二階段（不影響其他策略的結果）
+  type Pending = { t: Target; ctx: EvalContext; price: number | null; passed: string[]; failing: string[]; pending: StrategyView[] };
+  const phase2: Pending[] = [];
   const evals: SmartEval[] = [];
   await mapWithConcurrency([...universe.values()], 6, async (t) => {
     if (Date.now() > deadline) {
@@ -113,55 +115,62 @@ export async function runSmartList(
     const price = candles.at(-1)?.close ?? null;
     const passed: string[] = [];
     const failing: string[] = [];
-    let needPhase2 = false;
+    const pending: StrategyView[] = [];
     for (const s of picked) {
       const d = evaluateStrategy(s.config, indicators, ctx);
       const unknown = unknownByStrategy.get(s.id)!;
       if (unknown.size > 0 && canStillPass(s.config, d.hits, unknown)) {
-        needPhase2 = true;
+        pending.push(s);
         continue;
       }
       if (d.buy) passed.push(s.name);
       else failing.push(`${s.name}：${failingConditions(s.config, d.hits, d.score).join("、") || "條件未成立"}`);
     }
-    if (needPhase2) phase2.push({ t, ctx, price });
+    if (pending.length) phase2.push({ t, ctx, price, passed, failing, pending });
     else evals.push({ symbol: t.symbol, name: t.name, price, passed, failing });
   });
 
-  // 第二階段：還有可能符合、需要本站評等或五檔的（依成交值排名，最多 PHASE2_MAX 檔）
+  // 第二階段：需要本站評等或五檔的，每次最多 PHASE2_MAX 檔。清單裡已有的先算，其餘依成交值排名、從上次停下的位置接著輪（不會每次都只算同一批）
+  const inList = new Set(prev.entries.map((e) => e.symbol.toUpperCase()));
   const order = [...universe.keys()];
-  phase2.sort((a, b) => order.indexOf(a.t.symbol.toUpperCase()) - order.indexOf(b.t.symbol.toUpperCase()));
+  const listed = phase2.filter((x) => inList.has(x.t.symbol.toUpperCase()));
+  const rest = phase2.filter((x) => !inList.has(x.t.symbol.toUpperCase())).sort((a, b) => order.indexOf(a.t.symbol.toUpperCase()) - order.indexOf(b.t.symbol.toUpperCase()));
+  const cursor = rest.length ? (prev.cursor ?? 0) % rest.length : 0;
+  const queue = [...listed, ...rest.slice(cursor), ...rest.slice(0, cursor)];
+  const take = queue.slice(0, PHASE2_MAX);
+  const left = queue.slice(PHASE2_MAX);
   let phase2Done = 0;
-  let phase2Skipped = 0;
-  await mapWithConcurrency(phase2, 3, async ({ t, ctx, price }) => {
-    if (phase2Done >= PHASE2_MAX || Date.now() > deadline) {
-      phase2Skipped++;
+  await mapWithConcurrency(take, 3, async (x) => {
+    if (Date.now() > deadline) {
+      left.push(x);
       return;
     }
     phase2Done++;
-    await loadContextExtras(ctx, t, expensiveNeeds, live);
-    const passed: string[] = [];
-    const failing: string[] = [];
-    for (const s of picked) {
-      const d = evaluateStrategy(s.config, indicators, ctx);
-      if (d.buy) passed.push(s.name);
-      else failing.push(`${s.name}：${failingConditions(s.config, d.hits, d.score).join("、") || "條件未成立"}`);
+    await loadContextExtras(x.ctx, x.t, expensiveNeeds, live);
+    for (const s of x.pending) {
+      const d = evaluateStrategy(s.config, indicators, x.ctx);
+      if (d.buy) x.passed.push(s.name);
+      else x.failing.push(`${s.name}：${failingConditions(s.config, d.hits, d.score).join("、") || "條件未成立"}`);
     }
-    evals.push({ symbol: t.symbol, name: t.name, price, passed, failing });
+    evals.push({ symbol: x.t.symbol, name: x.t.name, price: x.price, passed: x.passed, failing: x.failing });
   });
+  // 沒輪到的：已經有策略符合的照樣加入／更新；都還不知道的當作這次沒檢查（不改狀態）
+  for (const x of left) if (x.passed.length) evals.push({ symbol: x.t.symbol, name: x.t.name, price: x.price, passed: x.passed, failing: [] });
+  const nextCursor = rest.length ? (cursor + Math.max(0, take.length - listed.length)) % rest.length : 0;
 
   const qualifiedNow = evals.filter((e) => e.passed.length > 0).length;
   const note = [
     `${live ? "盤中即時" : "收盤後"}掃描 ${evals.length} 檔（成交值前 ${top.length} 名＋清單內 ${prev.entries.length} 檔）`,
     `符合 ${qualifiedNow} 檔`,
-    phase2.length ? `需本站評等複查 ${phase2.length} 檔、已算 ${phase2Done} 檔${phase2Skipped ? `、${phase2Skipped} 檔留到下次` : ""}` : "",
+    phase2.length ? `需本站評等的有 ${phase2.length} 檔、這次算 ${phase2Done} 檔${left.length ? `、其餘 ${left.length} 檔下次輪到再算` : ""}` : "",
     unfinished ? `${unfinished} 檔時間不夠先略過` : "",
   ]
     .filter(Boolean)
     .join("，");
   const merged = mergeSmartRun(prev, evals, { now, slot: opts.slot, slotKey: opts.slotKey, note });
-  await saveSmartList(userId, merged.data);
-  return { data: merged.data, note: `${note}；新加入 ${merged.added}、移除 ${merged.removed}` };
+  const data = { ...merged.data, cursor: nextCursor };
+  await saveSmartList(userId, data);
+  return { data, note: `${note}；新加入 ${merged.added}、移除 ${merged.removed}` };
 }
 
 const doneMemo = new Set<string>();

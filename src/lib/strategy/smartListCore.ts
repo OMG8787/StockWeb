@@ -70,6 +70,8 @@ export interface SmartRunLog {
 export interface SmartListData {
   entries: SmartEntry[];
   runs: SmartRunLog[];
+  /** 需要本站評等的股票每次只算一部分，下次從這個位置接著輪 */
+  cursor?: number;
 }
 
 export const EMPTY_SMART_DATA: SmartListData = { entries: [], runs: [] };
@@ -188,7 +190,7 @@ export function mergeSmartRun(
     removed,
     note: run.note ?? "",
   };
-  return { data: { entries, runs: [log, ...prev.runs].slice(0, RUNS_KEEP) }, added, removed };
+  return { data: { entries, runs: [log, ...prev.runs].slice(0, RUNS_KEEP), cursor: prev.cursor }, added, removed };
 }
 
 /** 現在該跑哪一個排定時間（週一～五；排定時間已過、還在補跑期限內、今天這個時間還沒跑過）。沒有就 null。 */
