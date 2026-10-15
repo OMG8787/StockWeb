@@ -135,8 +135,11 @@ function Overview() {
       r.sources.add("smart");
       r.smartStrategies = e.strategies;
     }
+    // AI 建議名單（本站唯一的推薦）一律排最前面，依名單排名；其餘依出現在幾份名單、再依各自排名
     return [...map.values()].sort(
       (a, b) =>
+        Number(b.sources.has("ai")) - Number(a.sources.has("ai")) ||
+        (a.sources.has("ai") && b.sources.has("ai") ? (a.aiRank ?? 99) - (b.aiRank ?? 99) : 0) ||
         b.sources.size - a.sources.size ||
         (a.aiRank ?? 99) - (b.aiRank ?? 99) ||
         (a.momentumRank ?? 99) - (b.momentumRank ?? 99) ||
@@ -157,7 +160,7 @@ function Overview() {
         <h1 className="text-xl font-semibold">🧭 推薦總覽</h1>
         <p className="mt-1 text-sm text-(--text-secondary)">
           一次看本站所有推薦來源：每檔股票一列，標出它出現在哪些名單；「本站建議」欄是本站綜合評等的結論（跟個股頁、關注清單同一個），滑鼠移上去有說明。
-          出現在越多名單的排越前面。
+          🎯 AI 建議名單（本站的推薦）排最前面，其餘依出現在幾份名單排序。
         </p>
       </div>
 

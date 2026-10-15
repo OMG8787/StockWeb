@@ -123,7 +123,6 @@ export default function SiteHeader() {
         });
     }, SUGGEST_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
   // 點到搜尋框以外的地方就收起清單（手機上點別處也適用）
@@ -241,7 +240,7 @@ export default function SiteHeader() {
               aria-controls="symbol-suggestions"
               aria-autocomplete="list"
               autoComplete="off"
-              placeholder="搜尋 2330 或 台積電"
+              placeholder="代號或名稱，如 2330"
               className="w-full rounded-md border border-(--gridline) bg-(--surface-2) px-3 py-2 text-sm placeholder:text-(--text-muted) focus:outline-none focus:ring-2 focus:ring-(--accent)"
             />
           </form>

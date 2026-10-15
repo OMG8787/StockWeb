@@ -37,7 +37,8 @@ export default function WatchlistButton({
       aria-pressed={watched}
       aria-label={watched ? `從關注清單移除 ${name}` : `加入關注清單 ${name}`}
       title={watched ? "取消關注" : "加入關注"}
-      className={`inline-flex items-center justify-center rounded-full transition-colors ${
+      // after:-inset-1.5：看不見的外框把點擊範圍放大到約 36px（全站檢查：手機上 ☆ 只有 24px 不好點），版面不變
+      className={`relative inline-flex items-center justify-center rounded-full transition-colors after:absolute after:-inset-1.5 after:content-[''] ${
         size === "sm" ? "h-6 w-6 text-base" : "h-9 w-9 text-xl"
       } ${watched ? "text-(--accent)" : "text-(--text-muted) hover:text-(--accent)"}`}
     >
