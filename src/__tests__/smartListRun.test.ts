@@ -25,7 +25,8 @@ vi.mock("@/lib/ai/stockRating", () => ({ getStockRating: async () => null }));
 vi.mock("@/lib/marketStatus", async (orig) => ({ ...(await orig<object>()), getMarketStatus: () => "closed" }));
 
 const { saveIndicator, saveStrategy } = await import("@/lib/strategy/store");
-const { runSmartList, getSmartList } = await import("@/lib/strategy/smartList");
+const { runSmartList, getSmartList, runSmartListsDue } = await import("@/lib/strategy/smartList");
+const { saveAlertConfig } = await import("@/lib/strategy/store");
 
 const amy = { userId: "U1", account: "amy" };
 
@@ -60,5 +61,17 @@ describe("智能清單執行（假資料、真策略引擎）", () => {
     const up = r.data.entries.find((e) => e.symbol === "UP")!;
     expect(up.strategies).toEqual(["技術"]);
     expect(r.data.runs[0].note).toContain("需本站評等的有");
+  });
+  it("排程：到了設定時間自動更新一次，同一時間不重跑，週末不跑", async () => {
+    series.UP = Array.from({ length: 60 }, (_, i) => 100 + i);
+    const ind = await saveIndicator(amy, { typeId: "price_vs_ma", name: "站上5日線", params: { period: 5, op: "gt" } });
+    const st = await saveStrategy(amy, { name: "趨勢", config: { buy: { ids: [ind.id], match: 0 } } });
+    await saveAlertConfig(amy, { smartList: { enabled: true, strategyIds: [st.id], times: ["10:00", "13:40"] }, trackSmartList: true });
+    expect(await runSmartListsDue(new Date("2026-10-16T01:55:00Z"))).toContain("沒有到時間"); // 09:55
+    const r1 = await runSmartListsDue(new Date("2026-10-16T02:03:00Z")); // 10:03
+    expect(r1).toContain("amy 10:00");
+    expect((await getSmartList("U1")).runs[0].slotKey).toBe("2026-10-16|10:00");
+    expect(await runSmartListsDue(new Date("2026-10-16T02:08:00Z"))).toContain("沒有到時間"); // 同一時間不重跑
+    expect(await runSmartListsDue(new Date("2026-10-17T02:03:00Z"))).toContain("週末");
   });
 });
