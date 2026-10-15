@@ -94,7 +94,7 @@ const ANY_USER_PREFIXES = ["/account", "/api/auth/", "/api/watchlist"];
  */
 const ROUTE_RULES: Array<{ prefixes: string[]; need: PermCode[] }> = [
   { prefixes: ["/admin", "/api/admin"], need: [PERM.ADMIN] },
-  { prefixes: ["/action", "/api/action-brief", "/api/action-list-log", "/api/daily-brief", "/api/brief-archive"], need: [PERM.ACTION] },
+  { prefixes: ["/action", "/api/action-brief", "/api/action-list-log", "/review", "/api/rec-ledger", "/api/daily-brief", "/api/brief-archive"], need: [PERM.ACTION] },
   { prefixes: ["/portfolio", "/api/sim-portfolio"], need: [PERM.SIM_PORTFOLIO] },
   { prefixes: ["/scoreboard", "/api/rating-log", "/api/learning"], need: [PERM.SCOREBOARD] },
   { prefixes: ["/sim", "/strategies", "/indicators", "/api/strategy"], need: [PERM.STRATEGY_LAB] },

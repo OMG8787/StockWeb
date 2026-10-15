@@ -12,6 +12,7 @@ import { premiumFellBack } from "./gemini";
 import { callAiProviders } from "@/lib/ai/provider";
 import { buildActionGrounding } from "./actionGrounding";
 import { frozenListEpochKey, LAST_LIST_TTL_MS } from "./actionStability";
+import { recordRecommendations } from "./recLedger";
 import { recordActionListChange } from "./actionListLog";
 import {
   buildPlan,
@@ -219,6 +220,28 @@ async function computeActionList(stance: TradingStance): Promise<ActionListLayer
     await recordActionListChange({
       picks: ratedPicks.map((p, i) => ({ symbol: picks[i].symbol, name: picks[i].name, label: picks[i].label, confidence: picks[i].confidence, plan: picks[i].plan, reason: picks[i].reason, price: p.rating.price })),
       mode: stance.briefMode,
+    }).catch(() => 0);
+    // 推薦紀錄（歷史回顧，見 recLedger.ts）：完整排名名單（最多 AI_LIST_MAX 檔）新進入的記推薦價、買點區間、出場價；移出的記移出價
+    const priceNow = new Map(ratedListPicks.map((p) => [p.rating.symbol.toUpperCase(), p.rating.price]));
+    await recordRecommendations({
+      source: "ai",
+      items: ratedListPicks.map((p, i) => ({
+        symbol: p.rating.symbol,
+        name: p.rating.name,
+        price: p.rating.price,
+        rank: i + 1,
+        label: p.rating.rating.label,
+        plan: listPicks[i].plan,
+        confidence: listPicks[i].confidence,
+        reason: p.rating.rating.reason,
+        zoneLow: p.rating.rating.zone?.low ?? null,
+        zoneHigh: p.rating.rating.zone?.high ?? null,
+        stop: p.rating.rating.exit,
+        addAt: p.rating.rating.pullbackAdd ?? null,
+      })),
+      exitReason: "移出 AI 建議名單",
+      exitPriceOf: async (sym) =>
+        priceNow.get(sym.toUpperCase()) ?? (await getQuote(sym, "TW").then((q) => (q && q.price > 0 ? q.price : null)).catch(() => null)),
     }).catch(() => 0);
   }
   // 只有輸入完整的這次才存檔當「上一份名單」（不完整的名單不能當之後的基準）。

@@ -27,6 +27,8 @@ export const NAV_ITEMS: NavItem[] = [
     label: "今日建議",
     children: [
       { href: "/action", label: "今日建議", desc: "本站每天挑出的建議買進名單與操作時段" },
+      { href: "/overview", label: "🧭 推薦總覽", desc: "一次看 AI 建議、技術訊號共振、提醒訊號與 AI 持股" },
+      { href: "/review", label: "📈 推薦回顧", desc: "每次推薦的買點與價格，照建議操作賺多少" },
       { href: "/scoreboard", label: "成績看板", desc: "歷史評等的實際表現與勝率" },
     ],
   },
