@@ -53,6 +53,9 @@ interface Row {
   smartStrategies?: string[];
   alertTone?: "buy" | "sell";
   heldPnl?: number;
+  /** AI 模擬組合的持有成本與股數（「本站建議」改用持有中的角度判斷） */
+  heldCost?: number;
+  heldShares?: number;
 }
 
 export default function OverviewClient() {
@@ -128,6 +131,8 @@ function Overview() {
       const r = get(h.symbol, h.name);
       r.sources.add("held");
       r.heldPnl = h.pnlPct;
+      r.heldCost = h.avgCost;
+      r.heldShares = h.shares;
     }
     for (const e of smart.data?.data.entries ?? []) {
       if (!e.qualified) continue;
@@ -150,7 +155,7 @@ function Overview() {
   const shown = rows.filter((r) => (filter === "all" ? true : filter === "multi" ? r.sources.size >= 2 : r.sources.has(filter)));
   const symbols = rows.map((r) => r.symbol).slice(0, 100);
   const quotes = useTwQuotes(symbols);
-  const adviceList: WatchlistItem[] = useMemo(() => rows.slice(0, 60).map((r) => ({ symbol: r.symbol, market: "TW", name: r.name })), [rows]); // 操作建議 API 一次最多 60 檔（依排序取前面的）
+  const adviceList: WatchlistItem[] = useMemo(() => rows.slice(0, 60).map((r) => ({ symbol: r.symbol, market: "TW" as const, name: r.name, ...(r.heldCost ? { costBasis: r.heldCost, shares: r.heldShares } : {}) })), [rows]); // 操作建議 API 一次最多 60 檔（依排序取前面的）
   const count = (k: SourceKey) => rows.filter((r) => r.sources.has(k)).length;
   const loading = (ai.canPicks && ai.picks === null && !ai.picksFailed) || (!momentum.data && !momentum.failed);
 
@@ -303,7 +308,11 @@ function RowNotes({ r }: { r: Row }) {
         </span>
       ))}
       {r.smartStrategies?.length ? <span className="block">🧠 智能清單符合：{r.smartStrategies.join("、")}</span> : null}
-      {r.heldPnl != null && <span className="block">AI 模擬組合持有中，未實現損益 {formatPercent(r.heldPnl)}</span>}
+      {r.heldPnl != null && (
+        <span className="block">
+          AI 模擬組合持有中，未實現損益 {formatPercent(r.heldPnl)}；上面「本站建議」是以「持有中」的角度判斷（續抱／加碼／減碼／出場），跟「要不要新買」是兩件事
+        </span>
+      )}
     </>
   );
 }
