@@ -5,6 +5,7 @@ const TABS = [
   { href: "/sim", label: "📈 模擬倉" },
   { href: "/strategies", label: "🧠 策略庫" },
   { href: "/strategies/compare", label: "📊 策略疊圖" },
+  { href: "/strategies/backtest", label: "⏪ 策略回測" },
   { href: "/strategies/alerts", label: "🔔 即時提醒" },
   { href: "/indicators", label: "📐 參考指標" },
 ];

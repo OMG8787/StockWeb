@@ -42,6 +42,7 @@ export const NAV_ITEMS: NavItem[] = [
       { href: "/sim", label: "📈 模擬倉", desc: "用虛擬資金依策略自動買賣，或手動下單" },
       { href: "/strategies", label: "🧠 策略庫", desc: "建立買賣規則與股票篩選" },
       { href: "/strategies/compare", label: "📊 策略疊圖", desc: "1～10 檔股票疊多個策略看訊號" },
+      { href: "/strategies/backtest", label: "⏪ 策略回測", desc: "用策略回頭跑過去 1～3 年，看照做會不會賺" },
       { href: "/strategies/alerts", label: "🔔 即時提醒", desc: "追蹤名單、定時鬧鐘、買點通知" },
       { href: "/indicators", label: "📐 參考指標", desc: "建立可調參數的判斷條件" },
     ],
