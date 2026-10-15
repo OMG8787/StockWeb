@@ -35,6 +35,8 @@ export const REC_RETENTION_DAYS = 365;
 const TRACK_CALENDAR_DAYS = 100;
 const VIEW_TTL_SECONDS = 30 * 60;
 const TW_BENCH = "0050";
+/** 技術訊號共振股只記前幾名（跟 /api/momentum 顯示的一樣） */
+export const REC_MOMENTUM_TOP = 10;
 
 export interface RecItemInput {
   symbol: string;
@@ -259,7 +261,8 @@ export async function runRecLedgerDaily(now: Date = new Date()): Promise<string>
   if (momentum) {
     const added = await recordRecommendations({
       source: "momentum",
-      items: momentum.map((m, i) => ({ symbol: m.symbol, name: m.name, price: m.price, rank: i + 1, signals: m.signals.map((s) => s.label) })),
+      // 只記使用者看得到的前 REC_MOMENTUM_TOP 名（/api/momentum 也只顯示前 10 名）；整份內部名單上百檔會讓回顧變雜訊
+      items: momentum.slice(0, REC_MOMENTUM_TOP).map((m, i) => ({ symbol: m.symbol, name: m.name, price: m.price, rank: i + 1, signals: m.signals.map((s) => s.label) })),
       exitReason: "移出技術訊號共振股名單",
       exitPriceOf: async (s) => closeOf.get(s.toUpperCase()) ?? null,
       now,
