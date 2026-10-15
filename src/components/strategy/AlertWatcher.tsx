@@ -47,12 +47,13 @@ interface Config {
   notifySell: boolean;
   trackWatchlist: boolean;
   trackAiPicks: boolean;
+  trackSmartList?: boolean;
   notifyListChanges: boolean;
   alarms: AlarmSetting[];
 }
 
-/** 有沒有任何要追蹤的股票來源（手動輸入、關注清單、AI 建議名單） */
-const hasTargets = (c: Config) => c.symbols.length > 0 || c.trackWatchlist || c.trackAiPicks;
+/** 有沒有任何要追蹤的股票來源（手動輸入、關注清單、AI 建議名單、智能清單） */
+const hasTargets = (c: Config) => c.symbols.length > 0 || c.trackWatchlist || c.trackAiPicks || !!c.trackSmartList;
 
 function readJson<T>(key: string, fallback: T): T {
   try {

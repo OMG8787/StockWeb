@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from "next/server";
+import { runSmartListsDue } from "@/lib/strategy/smartList";
 import { runRecLedgerDaily } from "@/lib/ai/recLedger";
 import { runIntradaySimChecks } from "@/lib/strategy/simIntraday";
 import {
@@ -159,6 +160,8 @@ export async function GET(req: NextRequest) {
       // 其餘時間不打 Redis 直接略過。14:35 那次另寫一段 AI 檢討（一天一次 lite 呼叫）。
       // 推薦紀錄（歷史回顧）：交易日 14:40 後一天一次——記 0050 收盤、技術訊號共振股進出、補每筆紀錄的收盤價（recLedger.ts）
       { label: "rec ledger daily", run: () => runRecLedgerDaily() },
+      // 我的智能清單：每個帳號自己設定的兩個時間到了就依策略掃描全市場（smartList.ts；沒到時間立刻略過）
+      { label: "smart lists", run: () => runSmartListsDue() },
       // 策略庫「盤中型」模擬倉：10:00／11:30／13:00 用即時價檢查並記錄（simIntraday.ts；窗口外立刻略過）
       { label: "strategy sims intraday", run: () => runIntradaySimChecks() },
       { label: "sim portfolio", run: () => runSimPortfolio().then((r) => `${r.status}${r.reason ? `：${r.reason}` : ""}`) },

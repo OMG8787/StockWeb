@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { DEFAULT_SMART_CONFIG, normalizeSmartConfig, type SmartListConfig } from "./smartListCore";
 import { SIM_CHECK_LOG_KEEP, type SimCheck } from "./simSlots";
 import { AI_PICK_LIMIT_DEFAULT, normalizePickLimit } from "@/lib/aiPickLimits";
 import { getStore, type Row } from "@/lib/auth/store";
@@ -447,7 +448,8 @@ export async function persistSimResult(
 // 即時提醒設定（每個帳號一列，ID＝UserId）
 // ============================================================
 
-export const ALERT_LIMITS = { maxSymbols: 30, maxStrategies: 8, intervals: [5, 10, 15, 20, 30] as const };
+// maxSymbols 30→40（2026-10-15 加入「我的智能清單」來源，名單變多）；提醒每次檢查一次兩檔，40 檔仍在 30 秒間隔內跑得完
+export const ALERT_LIMITS = { maxSymbols: 40, maxStrategies: 8, intervals: [5, 10, 15, 20, 30] as const };
 
 export interface AlertConfig {
   symbols: string[];
@@ -466,9 +468,13 @@ export interface AlertConfig {
   alarms: AlarmSetting[];
   /** AI 建議名單要看／追蹤前幾檔（依本站評分排名；帳號自己設定，見 ALERT_LIMITS.pickLimits） */
   aiPickLimit: number;
+  /** 追蹤名單另外包含「我的智能清單」 */
+  trackSmartList: boolean;
+  /** 我的智能清單的設定（依策略選股、每天兩個時間更新，見 smartListCore.ts） */
+  smartList: SmartListConfig;
 }
 
-const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, trackWatchlist: false, trackAiPicks: false, notifyListChanges: true, alarms: [], aiPickLimit: AI_PICK_LIMIT_DEFAULT };
+const DEFAULT_ALERT: AlertConfig = { symbols: [], strategyIds: ["ai"], intervalSec: 30, enabled: false, notifySell: true, trackWatchlist: false, trackAiPicks: false, notifyListChanges: true, alarms: [], aiPickLimit: AI_PICK_LIMIT_DEFAULT, trackSmartList: false, smartList: DEFAULT_SMART_CONFIG };
 
 export async function getAlertConfig(userId: string): Promise<AlertConfig> {
   const [rows] = (await getStore().batch([{ op: "read", table: "Alerts" }])) as Row[][];
@@ -485,10 +491,18 @@ export async function getAlertConfig(userId: string): Promise<AlertConfig> {
     notifyListChanges: String(r.NotifyListChanges ?? "TRUE").toUpperCase() !== "FALSE",
     alarms: normalizeAlarms(parseJson<unknown[]>(r.Alarms, [])),
     aiPickLimit: normalizePickLimit(r.AiPickLimit),
+    trackSmartList: String(r.TrackSmartList).toUpperCase() === "TRUE",
+    smartList: normalizeSmartConfig(parseJson<unknown>(r.SmartList, {})),
   };
 }
 
 export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>): Promise<AlertConfig> {
+  // 沒帶智能清單欄位（例如舊畫面只存提醒設定）＝沿用目前的，不會被清掉
+  const current = input.smartList === undefined || input.trackSmartList === undefined ? await getAlertConfig(owner.userId) : null;
+  const smartStrategyIds = input.smartList ? new Set((await listStrategies(owner.userId)).map((s) => s.id)) : undefined;
+  const smartList = input.smartList ? normalizeSmartConfig(input.smartList, smartStrategyIds) : current!.smartList;
+  const trackSmartList = input.trackSmartList === undefined ? current!.trackSmartList : input.trackSmartList === true;
+  if (smartList.enabled && smartList.strategyIds.length === 0) throw new StrategyError("開啟智能清單前，請至少選一個策略");
   const symbols = [...new Set((Array.isArray(input.symbols) ? input.symbols : []).map((s) => text(s, 12).toUpperCase()).filter((s) => /^[A-Z0-9.]{1,12}$/.test(s)))].slice(0, ALERT_LIMITS.maxSymbols);
   const strategyIds = [...new Set((Array.isArray(input.strategyIds) ? input.strategyIds : []).map((s) => text(s, 40)).filter(Boolean))].slice(0, ALERT_LIMITS.maxStrategies);
   const intervalSec = (ALERT_LIMITS.intervals as readonly number[]).includes(Number(input.intervalSec)) ? Number(input.intervalSec) : 30;
@@ -496,9 +510,11 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
     trackWatchlist: input.trackWatchlist === true, trackAiPicks: input.trackAiPicks === true, notifyListChanges: input.notifyListChanges !== false,
     alarms: normalizeAlarms(input.alarms),
     aiPickLimit: normalizePickLimit(input.aiPickLimit),
+    trackSmartList,
+    smartList,
   };
-  const hasTargets = symbols.length > 0 || cfg.trackWatchlist || cfg.trackAiPicks;
-  if (cfg.enabled && !hasTargets) throw new StrategyError("開啟提醒前，請至少選一種追蹤名單（手動輸入股票、我的關注清單，或 AI 今日建議名單）");
+  const hasTargets = symbols.length > 0 || cfg.trackWatchlist || cfg.trackAiPicks || cfg.trackSmartList;
+  if (cfg.enabled && !hasTargets) throw new StrategyError("開啟提醒前，請至少選一種追蹤名單（手動輸入股票、我的關注清單、AI 今日建議名單或我的智能清單）");
   if (cfg.enabled && strategyIds.length === 0 && !cfg.notifyListChanges) throw new StrategyError("開啟提醒前，請至少選一個策略，或勾選「名單異動也通知」");
   await getStore().batch([
     {
@@ -509,7 +525,8 @@ export async function saveAlertConfig(owner: Owner, input: Partial<AlertConfig>)
           ID: owner.userId, Account: owner.account, Symbols: JSON.stringify(symbols), StrategyIds: JSON.stringify(strategyIds),
           IntervalSec: String(intervalSec), Enabled: cfg.enabled ? "TRUE" : "FALSE",
           NotifySell: cfg.notifySell ? "TRUE" : "FALSE", TrackWatchlist: cfg.trackWatchlist ? "TRUE" : "FALSE",
-          TrackAiPicks: cfg.trackAiPicks ? "TRUE" : "FALSE", NotifyListChanges: cfg.notifyListChanges ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), AiPickLimit: String(cfg.aiPickLimit), UpdatedAt: taipeiNow(),
+          TrackAiPicks: cfg.trackAiPicks ? "TRUE" : "FALSE", NotifyListChanges: cfg.notifyListChanges ? "TRUE" : "FALSE", Alarms: JSON.stringify(cfg.alarms), AiPickLimit: String(cfg.aiPickLimit),
+          TrackSmartList: cfg.trackSmartList ? "TRUE" : "FALSE", SmartList: JSON.stringify(cfg.smartList), UpdatedAt: taipeiNow(),
         },
       ],
     },

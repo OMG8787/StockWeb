@@ -15,6 +15,7 @@ import { formatPercent, formatPrice, priceDirectionClass } from "@/lib/format";
 import { clientRefreshMs } from "@/lib/autoRefresh";
 import type { MomentumItem } from "@/lib/data/momentum";
 import type { WatchlistItem } from "@/lib/watchlist";
+import type { SmartListData } from "@/lib/strategy/smartListCore";
 
 /**
  * 推薦總覽（2026-10-15 使用者：「AI 推薦、排程提醒、技術訊號共振股，我希望可以增加一個統一，一次看本次推薦，不然要一直切來切去很困擾，而且容易看不懂」）。
@@ -26,12 +27,13 @@ import type { WatchlistItem } from "@/lib/watchlist";
  * 沒有權限的名單不抓也不顯示。資料全部來自既有 API，沒有複製任何判斷邏輯。
  */
 
-type SourceKey = "ai" | "momentum" | "alert" | "held";
+type SourceKey = "ai" | "momentum" | "smart" | "alert" | "held";
 
 const SOURCE_META: Record<SourceKey, { label: string; badge: string; cls: string; tip: string }> = {
   ai: { label: "AI 建議", badge: "🎯 AI建議", cls: "bg-(--price-up)/15 text-(--price-up)", tip: "本站依綜合評等挑出的建議買進名單（依評分排名，取你設定的前 N 檔）" },
   momentum: { label: "技術訊號共振", badge: "📡 共振", cls: "bg-[#c98a1b]/15 text-[#c98a1b]", tip: "成交活躍、同時出現多個技術訊號的股票（只看技術面，還要搭配本站建議判斷）" },
   alert: { label: "提醒訊號", badge: "🔔 提醒", cls: "bg-(--accent)/15 text-(--accent)", tip: "你在「即時提醒」追蹤的股票，目前有策略出現買進或賣出訊號" },
+  smart: { label: "智能清單", badge: "🧠 智能清單", cls: "bg-[#8a63d2]/15 text-[#8a63d2]", tip: "你的智能清單裡目前符合策略的股票（依你選的策略每天掃描全市場）" },
   held: { label: "AI 持有", badge: "🤖 AI持有", cls: "bg-(--page-plane) text-(--text-secondary)", tip: "AI 模擬投資組合目前持有這檔" },
 };
 
@@ -46,6 +48,7 @@ interface Row {
   momentumRank?: number;
   signals?: string[];
   alertLines?: string[];
+  smartStrategies?: string[];
   alertTone?: "buy" | "sell";
   heldPnl?: number;
 }
@@ -62,6 +65,7 @@ function Overview() {
   const ai = useAiLists();
   const canLab = useHasPerm([PERM.STRATEGY_LAB]);
   const momentum = useFetchOnce<{ items: MomentumItem[] }>("/api/momentum?market=TW", clientRefreshMs);
+  const smart = useFetchOnce<{ data: SmartListData }>(canLab ? "/api/strategy/smart-list" : null, clientRefreshMs);
   const [alerts, setAlerts] = useState<AlertItem[] | null>(null);
   const [alertNote, setAlertNote] = useState(canLab ? "檢查提醒訊號中…" : "");
   const [filter, setFilter] = useState<SourceKey | "multi" | "all">("all");
@@ -122,6 +126,12 @@ function Overview() {
       r.sources.add("held");
       r.heldPnl = h.pnlPct;
     }
+    for (const e of smart.data?.data.entries ?? []) {
+      if (!e.qualified) continue;
+      const r = get(e.symbol, e.name);
+      r.sources.add("smart");
+      r.smartStrategies = e.strategies;
+    }
     return [...map.values()].sort(
       (a, b) =>
         b.sources.size - a.sources.size ||
@@ -129,7 +139,7 @@ function Overview() {
         (a.momentumRank ?? 99) - (b.momentumRank ?? 99) ||
         a.symbol.localeCompare(b.symbol),
     );
-  }, [ai.picks, ai.holdings, momentum.data, alerts]);
+  }, [ai.picks, ai.holdings, momentum.data, alerts, smart.data]);
 
   const shown = rows.filter((r) => (filter === "all" ? true : filter === "multi" ? r.sources.size >= 2 : r.sources.has(filter)));
   const symbols = rows.map((r) => r.symbol).slice(0, 100);
@@ -152,7 +162,7 @@ function Overview() {
         <Chip active={filter === "all"} onClick={() => setFilter("all")} label={`全部（${rows.length}）`} />
         <Chip active={filter === "multi"} onClick={() => setFilter("multi")} label={`⭐ 多個名單重疊（${rows.filter((r) => r.sources.size >= 2).length}）`} tip="同時出現在兩份以上名單的股票" />
         {(Object.keys(SOURCE_META) as SourceKey[])
-          .filter((k) => (k === "ai" ? ai.canPicks : k === "held" ? ai.canHoldings : k === "alert" ? canLab : true))
+          .filter((k) => (k === "ai" ? ai.canPicks : k === "held" ? ai.canHoldings : k === "alert" || k === "smart" ? canLab : true))
           .map((k) => (
             <Chip key={k} active={filter === k} onClick={() => setFilter(k)} label={`${SOURCE_META[k].badge}（${count(k)}）`} tip={SOURCE_META[k].tip} />
           ))}
@@ -225,6 +235,7 @@ function Overview() {
                             🔔 {l}
                           </span>
                         ))}
+                        {r.smartStrategies?.length ? <span className="block">🧠 智能清單符合：{r.smartStrategies.join("、")}</span> : null}
                         {r.heldPnl != null && <span className="block">AI 模擬組合持有中，未實現損益 {formatPercent(r.heldPnl)}</span>}
                       </td>
                     </tr>

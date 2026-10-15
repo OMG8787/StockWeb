@@ -105,6 +105,16 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleR
   const candles = (chart?.candles ?? []).filter((c) => live || !c.live);
   if (candles.length === 0) return null;
   const ctx: EvalContext = { symbol: t.symbol, market: t.market, candles };
+  await loadContextExtras(ctx, t, needs, live);
+  return ctx;
+}
+
+/**
+ * 日K以外的資料（基本面、財報、五檔、本站評等、法人逐日）依需要補進 ctx——模擬倉／提醒／疊圖（buildContext）與智能清單共用同一份，
+ * 不要各寫一份。ctx.candles 要先放好（法人逐日用它的日期）。
+ */
+export async function loadContextExtras(ctx: EvalContext, t: Target, needs: Set<IndicatorNeed>, live: boolean): Promise<void> {
+  const candles = ctx.candles;
   const jobs: Promise<unknown>[] = [];
   if (needs.has("fundamentals")) jobs.push(getFundamentals(t.symbol, t.market).then((f) => (ctx.fundamentals = f)).catch(() => null));
   if (needs.has("earnings")) jobs.push(getEarnings(t.symbol, t.market).then((e) => (ctx.earnings = e)).catch(() => null));
@@ -131,7 +141,6 @@ async function buildContext(t: Target, needs: Set<IndicatorNeed>, range: CandleR
     );
   }
   await Promise.all(jobs);
-  return ctx;
 }
 
 /** 策略用到的參數裡最長的天數（均線、區間、N 日…）超過 100 天才需要 1 年日K */

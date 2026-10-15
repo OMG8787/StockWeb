@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import LabTabs from "@/components/strategy/LabTabs";
 import OrderBookPanel from "@/components/strategy/OrderBookPanel";
@@ -21,6 +22,7 @@ interface Config {
   notifyListChanges: boolean;
   alarms: AlarmSetting[];
   aiPickLimit: number;
+  trackSmartList: boolean;
 }
 interface Check {
   at: string;
@@ -30,7 +32,7 @@ interface Check {
   items: Array<AlertItem & { error?: string }>;
 }
 
-const FROM_LABEL = { manual: "✍ 手動", watchlist: "⭐ 關注", ai: "🤖 AI 建議" } as const;
+const FROM_LABEL = { manual: "✍ 手動", watchlist: "⭐ 關注", ai: "🤖 AI 建議", smart: "🧠 智能清單" } as const;
 const TONE_DOT = { buy: "var(--price-up)", sell: "var(--price-down)", info: "var(--accent)" } as const;
 
 const AI = { id: "ai", name: "🤖 AI 建議策略（本站綜合評等）" };
@@ -155,7 +157,7 @@ export default function AlertsClient() {
     setCfg({ ...cfg, alarms: [...cfg.alarms, { id: `A${time.replace(":", "")}x${cfg.alarms.length}`, time, label, days: "weekdays", withSignals: true, enabled: true }] });
 
   const trackedSummary = cfg
-    ? [cfg.symbols.length ? `手動 ${cfg.symbols.length} 檔` : "", cfg.trackWatchlist ? "我的關注清單" : "", cfg.trackAiPicks ? "AI 今日建議名單" : ""].filter(Boolean).join("＋") || "未選追蹤名單"
+    ? [cfg.symbols.length ? `手動 ${cfg.symbols.length} 檔` : "", cfg.trackWatchlist ? "我的關注清單" : "", cfg.trackAiPicks ? "AI 今日建議名單" : "", cfg.trackSmartList ? "我的智能清單" : ""].filter(Boolean).join("＋") || "未選追蹤名單"
     : "";
   const summary = cfg
     ? `策略訊號提醒：${cfg.enabled ? `開啟（${trackedSummary}，${cfg.strategyIds.length} 個策略，每 ${cfg.intervalSec} 秒）` : "關閉"}・定時提醒：${
@@ -258,7 +260,7 @@ export default function AlertsClient() {
               <div className="space-y-3">
                 <h2 className="font-semibold">③ 📈 策略訊號提醒（有買點立即通知）</h2>
                 <div className="space-y-2">
-                  <div className="text-sm font-medium">追蹤哪些股票（可複選，合計最多 30 檔）</div>
+                  <div className="text-sm font-medium">追蹤哪些股票（可複選，合計最多 40 檔）</div>
                   <label className="flex items-start gap-2 text-sm">
                     <input type="checkbox" className="mt-1" checked={cfg.trackWatchlist} onChange={(e) => setCfg({ ...cfg, trackWatchlist: e.target.checked })} />
                     <span>
@@ -271,6 +273,16 @@ export default function AlertsClient() {
                     <span>
                       🤖 AI 今日建議名單
                       <span className="block text-xs text-(--text-muted)">本站每天挑出的建議買進名單：每天第一次通知今天有哪幾檔，之後 AI 新增或移出建議也會通知；追蹤前幾檔看你在「我的關注 → AI 建議清單」設定的檔數（目前 {cfg.aiPickLimit} 檔）</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" className="mt-1" checked={cfg.trackSmartList} onChange={(e) => setCfg({ ...cfg, trackSmartList: e.target.checked })} />
+                    <span>
+                      🧠 我的智能清單
+                      <span className="block text-xs text-(--text-muted)">
+                        依你選的策略每天兩次掃描全市場（成交值前 300 名）挑出的寬鬆名單，再由這裡的策略訊號篩出真正要通知的；在{" "}
+                        <Link href="/strategies/smart" className="text-(--accent) underline">🧠 智能清單</Link> 設定策略與更新時間
+                      </span>
                     </span>
                   </label>
                   <div className="space-y-1">
@@ -376,7 +388,7 @@ export default function AlertsClient() {
             目前訊號 <span className="text-xs font-normal text-(--text-muted)">（{new Date(check.at).toLocaleTimeString("zh-TW")} 檢查，{check.marketOpen ? "盤中" : "非交易時段，每 5 分鐘檢查"}）</span>
           </h2>
           {check.items.length === 0 && <p className="text-sm text-(--text-muted)">追蹤名單或策略是空的（沒選策略時只會通知名單異動）。</p>}
-          {check.truncated && <p className="text-xs text-(--price-up)">追蹤名單合計超過 30 檔，只檢查前 30 檔（手動輸入優先，其次關注清單、AI 建議）。</p>}
+          {check.truncated && <p className="text-xs text-(--price-up)">追蹤名單合計超過 40 檔，只檢查前 40 檔（手動輸入優先，其次關注清單、AI 建議、智能清單裡符合中的）。</p>}
           {check.lists?.ai === null && <p className="text-xs text-(--text-muted)">AI 今日建議名單暫時讀不到，這次略過（不會誤報成全部移出）。</p>}
           <div className="grid gap-2 sm:grid-cols-2">
             {check.items.map((it) => (

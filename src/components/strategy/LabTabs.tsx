@@ -6,6 +6,7 @@ const TABS = [
   { href: "/strategies", label: "🧠 策略庫" },
   { href: "/strategies/compare", label: "📊 策略疊圖" },
   { href: "/strategies/backtest", label: "⏪ 策略回測" },
+  { href: "/strategies/smart", label: "🧠 智能清單" },
   { href: "/strategies/alerts", label: "🔔 即時提醒" },
   { href: "/indicators", label: "📐 參考指標" },
 ];

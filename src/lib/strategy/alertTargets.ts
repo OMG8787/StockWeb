@@ -1,15 +1,16 @@
 import { runScreen } from "./screen";
 import { ALERT_LIMITS } from "./store";
+import { getSmartList } from "./smartList";
 
 /**
  * 即時提醒的追蹤名單來源（2026-10-08 使用者要求：不只手動輸入，也能選「我的關注清單」與「AI 推薦清單」，
  * 這樣新增關注、AI 新增建議都能知道）。
- * 手動輸入的股票優先，其次關注清單，最後 AI 今日建議名單；去重後最多 ALERT_LIMITS.maxSymbols 檔。
+ * 手動輸入的股票優先，其次關注清單、AI 今日建議名單，最後「我的智能清單」（2026-10-15 加入）；去重後最多 ALERT_LIMITS.maxSymbols 檔。
  * 關注清單與 AI 名單任何一邊讀不到時回 null（不是空陣列）：前端據此略過名單比對，
  * 才不會把「暫時讀不到」誤報成「全部被移出」。
  */
 
-export type TrackSource = "manual" | "watchlist" | "ai";
+export type TrackSource = "manual" | "watchlist" | "ai" | "smart";
 
 export interface AlertTrackConfig {
   symbols: string[];
@@ -18,6 +19,8 @@ export interface AlertTrackConfig {
   trackAiPicks?: boolean;
   /** AI 建議名單追蹤前幾檔（帳號設定；沒給＝預設） */
   aiPickLimit?: number;
+  /** 也追蹤「我的智能清單」（符合中的排前面） */
+  trackSmartList?: boolean;
 }
 
 export interface NamedSymbol {
@@ -65,6 +68,11 @@ export async function resolveTracked(userId: string, cfg: AlertTrackConfig): Pro
   cfg.symbols.forEach((s) => add(s, "manual"));
   lists.watchlist?.forEach((x) => add(x.symbol, "watchlist"));
   lists.ai?.forEach((x) => add(x.symbol, "ai"));
+  // 智能清單：清單本身已經是「符合的排前面、再依最近符合時間」排好的
+  if (cfg.trackSmartList) {
+    const smart = await getSmartList(userId).catch(() => null);
+    smart?.entries.forEach((e) => add(e.symbol, "smart"));
+  }
   const truncated = order.length > ALERT_LIMITS.maxSymbols;
   return { symbols: order.slice(0, ALERT_LIMITS.maxSymbols), sources, lists, truncated };
 }

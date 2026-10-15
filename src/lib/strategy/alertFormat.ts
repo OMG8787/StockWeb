@@ -22,7 +22,7 @@ export interface AlertItem {
   price: number | null;
   allBuy: boolean;
   /** 這檔來自哪些追蹤名單（手動／關注清單／AI 建議） */
-  from?: Array<"manual" | "watchlist" | "ai">;
+  from?: Array<"manual" | "watchlist" | "ai" | "smart">;
   lines: AlertLine[];
 }
 
