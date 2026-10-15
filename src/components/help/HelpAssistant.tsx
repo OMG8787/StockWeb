@@ -54,6 +54,8 @@ export default function HelpAssistant({
   }, [request]);
 
   useEffect(() => {
+    // 還沒問任何問題時不要捲（驗證 10/16：空白畫面被捲到底，看不到說明與第一個建議）
+    if (messages.length === 0 && !loading) return;
     bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [messages, loading]);
 

@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import MarkdownLite from "../MarkdownLite";
 import { MANUAL, MANUAL_GROUPS, type ManualSection } from "@/lib/help/manual";
 import { filterManual } from "@/lib/help/search";
+import { canSeePath } from "@/lib/auth/permissions";
+import { useProfile } from "@/lib/auth/useProfile";
 
 /**
  * 操作手冊瀏覽（教學助手的「📖 操作手冊」分頁與 /help 頁共用）：搜尋框＋依分類的章節列表，章節可展開，
@@ -21,6 +23,9 @@ export default function ManualView({
   /** 點章節裡的功能連結時通知外層（聊天視窗用來收起視窗） */
   onNavigate?: () => void;
 }) {
+  const profile = useProfile();
+  // 帳號沒有權限的頁面：連結改成灰字說明（點了會被擋，全站驗證 10/16 發現）
+  const canOpen = (href: string) => !profile || canSeePath(profile.perms, href.split("?")[0].split("#")[0]);
   const [query, setQuery] = useState("");
   const [opened, setOpened] = useState<Set<string>>(new Set());
 
@@ -66,7 +71,12 @@ export default function ManualView({
             <MarkdownLite text={s.body} />
             {s.links && s.links.length > 0 && (
               <div className="flex flex-wrap gap-2 pt-1">
-                {s.links.map((l) => (
+                {s.links.map((l) =>
+                  !canOpen(l.href) ? (
+                    <span key={l.href} className="rounded-md border border-(--gridline) px-2 py-1 text-xs text-(--text-muted)" title="你的帳號沒有這項功能的權限，需要的話請聯絡管理員">
+                      {l.label}（帳號未開通）
+                    </span>
+                  ) : (
                   <Link
                     key={l.href}
                     href={l.href}
@@ -76,7 +86,8 @@ export default function ManualView({
                   >
                     前往：{l.label} →
                   </Link>
-                ))}
+                  ),
+                )}
               </div>
             )}
           </div>

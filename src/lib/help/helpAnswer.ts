@@ -23,10 +23,29 @@ export const HELP_SYSTEM_PROMPT = [
   "你是「股情雷達」網站的教學助手，只負責回答「這個網站怎麼用」。",
   "只能根據使用者訊息裡的【操作手冊章節】回答：章節沒寫的功能、按鈕、數字、規則一律不要編；章節沒有涵蓋時，直接說「操作手冊沒有寫到這部分」，並建議到「📖 操作手冊」分頁搜尋，或用右上方「🛠 回報網站」告訴我們。",
   "回答格式：先一句話講結論，再用 1、2、3 編號列出操作步驟（每步一行，按鈕名稱用章節裡的原字，例如「按 ▶ 立即更新一次」）；全部不超過 250 字；不要重複貼整段章節。",
+  "要使用者看更多說明時，說「點回答下方的 📖 按鈕看完整說明」，不要叫使用者去搜尋整串章節標題。",
+  "功能、按鈕、頁面名稱一律照章節裡的原字寫（例如「智能清單」不可寫成「智慧清單」）。",
   "使用者問的是個股或行情（例如「2330 該買嗎」）時，告訴他切到「💬 股票問答」分頁問，這裡只教網站操作。",
   "不給投資建議，不預測股價。",
   RULE_ZH_TW_ONLY,
 ].join("\n");
+
+/**
+ * 功能名稱一律用網站上的原字（AI 偶爾會改寫，例如把「智能清單」寫成「智慧清單」，使用者就找不到按鈕）。
+ * 程式在 AI 回答後統一更正，不只靠提示詞。
+ */
+const TERM_FIXES: Array<[RegExp, string]> = [
+  [/智慧清單/g, "智能清單"],
+  [/智慧名單/g, "智能清單"],
+  [/策略資料庫/g, "策略庫"],
+  [/推薦概覽/g, "推薦總覽"],
+  [/推薦回測/g, "推薦回顧"],
+  [/教學小幫手/g, "教學助手"],
+  [/操作說明書/g, "操作手冊"],
+];
+export function fixTerms(text: string): string {
+  return TERM_FIXES.reduce((t, [re, to]) => t.replace(re, to), text);
+}
 
 export interface HelpAnswer {
   answer: string;
@@ -69,7 +88,7 @@ export async function answerHelpQuestion(question: string, history: ChatTurn[] =
       [...history.slice(-4), { role: "user", content: `使用者問題：${q}\n\n${sectionsForPrompt(sections)}` }],
       { timeoutMs: 20_000, totalBudgetMs: 30_000, maxOutputTokens: 700 },
     );
-    if (res.usedAi && res.answer.trim()) return { answer: res.answer.trim(), usedAi: true, model: modelInfo(res.model), sections: refs };
+    if (res.usedAi && res.answer.trim()) return { answer: fixTerms(res.answer.trim()), usedAi: true, model: modelInfo(res.model), sections: refs };
   } catch (err) {
     console.warn("[help-ask] AI 失敗，改用程式版：", err);
   }

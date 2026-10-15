@@ -10,7 +10,7 @@ vi.mock("@/lib/ai/provider", () => ({
   },
 }));
 
-const { answerHelpQuestion, NO_MATCH_ANSWER, sectionsForPrompt, HELP_SYSTEM_PROMPT } = await import("@/lib/help/helpAnswer");
+const { answerHelpQuestion, NO_MATCH_ANSWER, sectionsForPrompt, HELP_SYSTEM_PROMPT, fixTerms } = await import("@/lib/help/helpAnswer");
 const { MANUAL_BY_ID } = await import("@/lib/help/manual");
 
 describe("教學助手回答", () => {
@@ -56,5 +56,8 @@ describe("教學助手回答", () => {
     const text = sectionsForPrompt([s]);
     expect(text.length).toBeLessThan(2200);
     expect(text).toContain("/strategies/backtest");
+  });
+  it("功能名稱照網站原字（AI 改寫的程式更正）", () => {
+    expect(fixTerms("進入智慧清單分頁，再到策略資料庫")).toBe("進入智能清單分頁，再到策略庫");
   });
 });

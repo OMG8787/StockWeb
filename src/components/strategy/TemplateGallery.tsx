@@ -49,7 +49,7 @@ export default function TemplateGallery({ onCreated }: { onCreated: (text: strin
       {open && (
         <>
           <p className="text-sm text-(--text-muted)">
-            常見的起始設定，按「一鍵建立」就會在你的帳號建好需要的參考指標與策略；數值不是驗證過的最佳值，建議先用{" "}
+            按「一鍵建立」就會在你的帳號建好需要的參考指標與策略。每張卡片的「📊 回測」是 198 檔台股過去 3 年的實測：「第一版策略」是從約 1,500 種組合回測選出、兩段期間都贏買進持有的；其他範本多數表現不理想，只建議當參考。建議先用{" "}
             <Link href="/strategies/backtest" className="text-(--accent) underline">⏪ 策略回測</Link> 跑過去 1～3 年、或開模擬倉比較後再調整。
             想跟 AI 推薦用同一套邏輯，選「AI 推薦風格」兩個範本。
           </p>
@@ -81,6 +81,14 @@ export default function TemplateGallery({ onCreated }: { onCreated: (text: strin
                     <b>風控：</b>停損 {t.stopLossPct}%・停利 {t.takeProfitPct}%{t.maxHoldDays ? `・最多持有 ${t.maxHoldDays} 天` : ""}・每檔 {t.positionPct}%・最多 {t.maxPositions} 檔
                   </li>
                 </ul>
+                {t.evidence && (
+                  <p
+                    className={`rounded px-2 py-1 text-xs ${t.evidence.good ? "bg-(--price-down)/10 text-(--text-primary)" : "bg-(--price-up)/10 text-(--text-primary)"}`}
+                    title="198 檔台股、每檔 10%、最多 10 檔；不含股息；股票池是現在的名單（倖存者偏差），數字只是方向參考"
+                  >
+                    📊 回測{t.evidence.good ? "（兩段都贏買進持有）" : "（不理想）"}：{t.evidence.text}
+                  </p>
+                )}
                 <p className="text-xs text-(--text-muted)">⚠️ {t.risk}</p>
                 <button type="button" className="mt-auto self-start rounded-md bg-(--accent) px-3 py-1.5 text-sm font-medium text-white" onClick={() => create(t)}>
                   ＋ 一鍵建立

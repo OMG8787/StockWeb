@@ -255,7 +255,10 @@ export default function ChatWidget() {
             </div>
           )}
 
-          {mode === "help" && <HelpAssistant canFeedback={canStock} request={helpRequest} onNavigate={() => setOpen(false)} />}
+          {/* 教學助手也用 hidden 切換（不卸載）：切到股票問答再切回來，對話還在（驗證 10/16） */}
+          <div className={mode === "help" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
+            <HelpAssistant canFeedback={canStock} request={helpRequest} onNavigate={() => setOpen(false)} />
+          </div>
 
           {/* 股票問答分頁：用 hidden 切換（不卸載），捲動位置與輸入框內容保留 */}
           <div className={mode === "stock" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>

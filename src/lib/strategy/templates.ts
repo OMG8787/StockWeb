@@ -28,6 +28,11 @@ export interface StrategyTemplate {
   /** 主要風險 */
   risk: string;
   backtestable: boolean;
+  /**
+   * 歷史回測結果（2026-10 策略搜尋 scripts/strategy-search，198 檔、每檔 10%、最多 10 檔；訓練期 2023-10～2025-10、測試期 2025-10～2026-10）。
+   * good＝兩段都贏同一批股票等權重買進持有。沒有＝沒回測（用到籌碼／評等，沒有逐日歷史）。
+   */
+  evidence?: { text: string; good: boolean };
   indicators: TemplateIndicator[];
   mode: "rules";
   buy: { keys: string[]; match: number };
@@ -40,6 +45,30 @@ export interface StrategyTemplate {
 }
 
 export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
+  {
+    id: "search-v1",
+    name: "第一版策略・突破 20 日新高",
+    style: "趨勢追蹤（回測選出）",
+    desc: "收盤創 20 日新高就買；收盤跌破 60 日線才賣；停損 8%、不設停利（讓賺錢的部位一直抱）。2026-10 用 198 檔台股、約 1,500 種指標組合回測，只用 2023-10～2025-10 選出，再用沒看過的 2025-10～2026-10 驗證（報告：docs/backtest/2026-10-strategy-search.md）。",
+    risk: "勝率只有三成多，靠少數大漲的股票撐起報酬，會常常小停損；回測期間台股大多頭，空頭市場可能連續停損；股票池是現在的名單（倖存者偏差），實際可能較差。建議先用模擬倉跟一段時間。",
+    backtestable: true,
+    evidence: {
+      text: "2023-10～2025-10：+127%（同批股票買進持有 +55%、0050 +96%），最大回撤 −21%；沒看過的 2025-10～2026-10：+143%（+114%、+81%），最大回撤 −17%",
+      good: true,
+    },
+    indicators: [
+      { key: "high", typeId: "breakout", params: { days: 20, dir: "high" } },
+      { key: "below60", typeId: "price_vs_ma", params: { period: 60, op: "lt" } },
+    ],
+    mode: "rules",
+    buy: { keys: ["high"], match: 0 },
+    sell: { keys: ["below60"], match: 1 },
+    stopLossPct: 8,
+    takeProfitPct: 0,
+    maxHoldDays: 0,
+    positionPct: 10,
+    maxPositions: 10,
+  },
   {
     id: AI_FULL_TEMPLATE_ID,
     name: "AI 策略・完整版",
@@ -72,6 +101,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "模仿本站綜合評等「建議買進」的技術面條件：股價站上 20 日與 60 日線（趨勢向上、在支撐之上）、RSI 未過熱、5 日漲幅不過大（不追高），再加 MACD 或 KD 剛黃金交叉當進場點；6 個條件至少 5 個成立就買。跌破 20 日線或 MACD 死亡交叉賣出。",
     risk: "只是技術面的近似版，本站評等另外還看籌碼、基本面、財報、消息；適合用來回測 AI 推薦「技術面那一半」的效果。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：−3%（同批股票買進持有 +55%），最大回撤 −38%；2025-10～2026-10：+106%（+114%）——兩段都輸給買進持有", good: false },
     indicators: [
       { key: "ma20", typeId: "price_vs_ma", params: { period: 20, op: "gt" } },
       { key: "ma60", typeId: "price_vs_ma", params: { period: 60, op: "gt" } },
@@ -119,6 +149,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "5 日線 > 20 日線 > 60 日線而且 20 日線向上（多頭排列）就買；跌破 20 日線或 5 日線死亡交叉 20 日線就賣。",
     risk: "均線有落後性，排列成形時股價常已漲一段；盤整時容易來回停損。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：+28%（同批股票買進持有 +55%），最大回撤 −35%；2025-10～2026-10：+125%（+114%）", good: false },
     indicators: [
       { key: "align", typeId: "ma_alignment", params: { short: 5, mid: 20, long: 60, slopeDays: 3 } },
       { key: "below20", typeId: "price_vs_ma", params: { period: 20, op: "lt" } },
@@ -140,6 +171,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "MACD 黃金交叉（3 天內）而且股價在 60 日線之上（大方向偏多）就買；MACD 死亡交叉或跌破 60 日線就賣。",
     risk: "MACD 反應較慢，盤整行情會反覆交叉。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：−8%（同批股票買進持有 +55%），最大回撤 −36%；2025-10～2026-10：+97%（+114%）——兩段都輸給買進持有", good: false },
     indicators: [
       { key: "golden", typeId: "macd_cross", params: { dir: "golden", within: 3 } },
       { key: "ma60", typeId: "price_vs_ma", params: { period: 60, op: "gt" } },
@@ -162,6 +194,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "收盤創 20 日新高、而且成交量是 20 日均量的 1.5 倍以上就買；跌破 10 日線賣出，最多持有 20 天。",
     risk: "假突破常見（突破後馬上拉回）；追強勢股要嚴守停損。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：−22%（同批股票買進持有 +55%），最大回撤 −40%；2025-10～2026-10：+58%（+114%）——跌破 10 日線就賣太早，表現差", good: false },
     indicators: [
       { key: "high", typeId: "breakout", params: { days: 20, dir: "high" } },
       { key: "vol", typeId: "volume_surge", params: { period: 20, multiple: 1.5 } },
@@ -183,6 +216,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "K 值在 20 以下時 K 向上穿越 D（低檔黃金交叉）就買；K 在 80 以上死亡交叉就賣，最多持有 15 天。",
     risk: "下跌趨勢中 KD 會一直在低檔反覆交叉，容易接刀；適合震盪行情。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：−18%（同批股票買進持有 +55%），最大回撤 −41%；2025-10～2026-10：+22%（+114%）——表現差", good: false },
     indicators: [
       { key: "golden", typeId: "kd_cross", params: { dir: "golden", within: 3, kLimit: 20 } },
       { key: "dead", typeId: "kd_cross", params: { dir: "dead", within: 1, kLimit: 80 } },
@@ -203,6 +237,7 @@ export const STRATEGY_TEMPLATES: StrategyTemplate[] = [
     desc: "RSI 曾低於 30、最近 5 天內重新站上 30，而且 KD 黃金交叉（止跌確認）就買；RSI 從 70 以上跌破 70 就賣，最多持有 20 天。",
     risk: "逆勢買進風險較高，跌勢沒停時會連續停損；一定要設停損。",
     backtestable: true,
+    evidence: { text: "2023-10～2025-10：−30%（同批股票買進持有 +55%），最大回撤 −45%；2025-10～2026-10：+11%（+114%）——表現差", good: false },
     indicators: [
       { key: "rsiUp", typeId: "rsi_cross", params: { period: 14, dir: "up", level: 30, within: 5 } },
       { key: "kd", typeId: "kd_cross", params: { dir: "golden", within: 3, kLimit: 0 } },
