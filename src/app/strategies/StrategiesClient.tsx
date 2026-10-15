@@ -32,7 +32,7 @@ interface Preview {
   name: string;
   lastDay: string;
   live?: boolean;
-  decision: { buy: boolean; sell: boolean; score: number; summary: string; hits: Array<{ id: string; name: string; pass: boolean | null; detail: string }> };
+  decision: { buy: boolean; sell: boolean; score: number; summary: string; sellSummary?: string; hits: Array<{ id: string; name: string; pass: boolean | null; detail: string }> };
 }
 
 const numCls = `${inputCls} !w-24`;
@@ -273,7 +273,15 @@ export default function StrategiesClient() {
                             ? "符合賣出"
                             : "不動作（買進、賣出條件都沒成立）"}
                     </b>
-                    {(preview.decision.buy || preview.decision.sell) && <span className="ml-2 text-xs text-(--text-muted)">{preview.decision.summary}</span>}
+                    {(preview.decision.buy || preview.decision.sell) && (
+                      <span className="ml-2 text-xs text-(--text-muted)">
+                        {preview.decision.buy && preview.decision.sell && preview.decision.sellSummary
+                          ? `${preview.decision.summary}；${preview.decision.sellSummary}`
+                          : preview.decision.buy
+                            ? preview.decision.summary
+                            : (preview.decision.sellSummary ?? preview.decision.summary)}
+                      </span>
+                    )}
                   </div>
                   <ul className="space-y-0.5 text-xs">
                     {preview.decision.hits.map((h) => (
