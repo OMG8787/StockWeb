@@ -189,8 +189,18 @@ export async function deleteStrategy(owner: Owner, id: string): Promise<void> {
   const [mine, sims] = await readMineMany(owner.userId, "Strategies", "Sims");
   if (!mine.some((r) => r.ID === id)) throw new StrategyError("找不到這個策略", 404);
   const usedBy = sims.filter((s) => s.StrategyId === id).map((s) => s.Name);
-  if (usedBy.length) throw new StrategyError(`這個策略還在模擬倉「${usedBy.join("、")}」使用，請先換掉或刪除模擬倉`, 409);
+  if (usedBy.length) throw new StrategyError(`這個策略還在模擬倉「${usedBy.join("、")}」使用，請先到模擬倉把策略換掉或刪除模擬倉，才能刪除`, 409);
   await getStore().batch([{ op: "delete", table: "Strategies", key: id }]);
+  // 即時提醒追蹤的策略、智能清單選的策略裡也拿掉（不然設定裡留著已刪除的策略）；智能清單沒剩策略就關閉
+  const cfg = await getAlertConfig(owner.userId).catch(() => null);
+  if (cfg && (cfg.strategyIds.includes(id) || cfg.smartList.strategyIds.includes(id))) {
+    const smartIds = cfg.smartList.strategyIds.filter((x) => x !== id);
+    await saveAlertConfig(owner, {
+      ...cfg,
+      strategyIds: cfg.strategyIds.filter((x) => x !== id),
+      smartList: { ...cfg.smartList, strategyIds: smartIds, enabled: cfg.smartList.enabled && smartIds.length > 0 },
+    }).catch((err) => console.warn("[strategy] 刪除策略後更新提醒設定失敗：", err));
+  }
 }
 
 // ============================================================

@@ -91,6 +91,7 @@ export default function StrategiesClient() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testSymbol, setTestSymbol] = useState("2330");
+  const [rowMsg, setRowMsg] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<Preview | null>(null);
 
   const indicators = ind.items ?? [];
@@ -118,6 +119,7 @@ export default function StrategiesClient() {
 
   async function remove(s: Strategy) {
     if (!confirm(`確定刪除策略「${s.name}」？`)) return;
+    setRowMsg((m) => ({ ...m, [s.id]: "" }));
     try {
       await runBusy("刪除策略中…", async () => {
         await api(`/api/strategy/strategies?id=${encodeURIComponent(s.id)}`, { method: "DELETE" });
@@ -125,7 +127,8 @@ export default function StrategiesClient() {
         setMsg({ ok: true, text: `已刪除策略「${s.name}」` });
       });
     } catch (err) {
-      setMsg({ ok: false, text: (err as Error).message });
+      // 錯誤顯示在那一張策略卡片下面（2026-10-16 使用者回報「策略無法刪除」：訊息原本只在頁面最上方，按刪除的地方看不到）
+      setRowMsg((m) => ({ ...m, [s.id]: (err as Error).message }));
     }
   }
 
@@ -326,6 +329,16 @@ export default function StrategiesClient() {
                   </button>
                 </div>
               </div>
+              {rowMsg[s.id] && (
+                <p className="mt-2 rounded-md border border-(--price-up) px-3 py-2 text-xs text-(--price-up)" role="alert">
+                  ⚠️ 不能刪除：{rowMsg[s.id]}
+                  {rowMsg[s.id].includes("模擬倉") && (
+                    <Link href="/sim" className="ml-2 text-(--accent) underline">
+                      前往模擬倉 →
+                    </Link>
+                  )}
+                </p>
+              )}
             </div>
           ))}
         </div>
